@@ -148,6 +148,32 @@ table.keys th { color: var(--mute); font-weight: 400; }
 
 .foot { padding: 12px 18px; color: var(--mute); font-size: 11px; }
 
+/* base extras + engineer tools */
+.quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 10px; }
+.quick .btn { min-height: 44px; padding: 6px; margin: 0 -1px -1px 0; }
+.quick .btn.stopq { background: var(--ink); color: var(--surface); }
+.quick .gap { visibility: hidden; }
+h3.sub { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: 18px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+input.num { width: 72px; }
+.scroll-x { overflow-x: auto; margin-top: 8px; }
+table.svt { font-size: 12px; min-width: 100%; }
+table.svt th { width: auto; }
+table.svt tr.pick { cursor: pointer; }
+table.svt tr.pick:hover td { background: var(--accent-soft); }
+table.svt tr.sel td { background: var(--accent-soft); font-weight: 600; }
+ol.steps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+ol.steps li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 4px; border-top: 1px solid var(--line); cursor: pointer; }
+ol.steps li:hover, ol.steps li.sel { background: var(--accent-soft); }
+.chip { font-size: 11px; padding: 1px 6px; border: 1px solid var(--line); white-space: nowrap; color: var(--mute); }
+.chip.pass { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chip.fail { border-color: var(--ink); color: var(--ink); font-weight: 700; }
+.chip.confirm, .chip.running { border-color: var(--ink); color: var(--ink); }
+.wz { border: 1px solid var(--line); padding: 10px; margin-top: 8px; font-size: 13px; }
+.wz h4 { margin: 0 0 4px; font-size: 14px; }
+.wz ul, .wz ol { margin: 4px 0 8px; padding-left: 18px; }
+.wz label { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
+.wz .req { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border: 1px solid var(--ink); padding: 0 4px; margin-left: 4px; }
+
 /* ---------------------------------------------------------------- phone */
 @media (max-width: 900px) {
   body { overflow: auto; grid-template-rows: auto auto auto; height: auto; min-height: 100%; }

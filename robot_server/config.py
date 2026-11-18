@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MOCK_PIN = "0000"  # only used in mock mode when KIRO_OPERATOR_PIN is not set
+MOCK_ENGINEER_PIN = "1111"  # mock mode only; on the robot engineer tools stay off until KIRO_ENGINEER_PIN is set
 
 
 def _f(name: str, default: float) -> float:
@@ -18,6 +19,7 @@ class Config:
     port: int = 8080
     backend: str = "auto"  # auto | mock | ros
     pin: str = MOCK_PIN
+    engineer_pin: str = ""  # servo tester and check wizard. Empty = off (mock mode uses MOCK_ENGINEER_PIN)
 
     # Safety timing
     heartbeat_timeout: float = 0.5  # s without operator messages -> stop
@@ -66,6 +68,7 @@ class Config:
             port=int(os.environ.get("KIRO_PORT", d.port)),
             backend=os.environ.get("KIRO_BACKEND", d.backend).lower(),
             pin=os.environ.get("KIRO_OPERATOR_PIN", "") or MOCK_PIN,
+            engineer_pin=os.environ.get("KIRO_ENGINEER_PIN", ""),
             heartbeat_timeout=_f("KIRO_HEARTBEAT_TIMEOUT", d.heartbeat_timeout),
             operator_stale_s=_f("KIRO_OPERATOR_STALE_S", d.operator_stale_s),
             rate_hz=_f("KIRO_RATE_HZ", d.rate_hz),

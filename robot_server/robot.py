@@ -8,7 +8,9 @@ app did, with stdin closed and output captured for the page:
   teleop    lerobot-teleoperate             leader arm -> follower arm
   fold/...  arm_tuck.py --tuck|--hold|--release
   skill     run_policy.sh run <model> <s>   trained ACT model on the right arm
-  voice     ros2 run so101_base voice_cmd   push-to-talk Korean voice driving
+  voice     ros2 run so101_base voice_cmd   push-to-talk voice driving (Korean or English)
+  servo     so101_servo_tester.Bus          scan / torque / move / change ID (servo_tool.py)
+  wizard    hw_test_wizard.Wizard.t_<step>  one step of the 13-step check (wizard_runner.py)
 
 In mock mode the same buttons start harmless stand-in commands.
 """
@@ -42,6 +44,21 @@ PORT = {
 SIDES = ("right", "left", "both")
 ARM_ACTIONS = {"fold": "--tuck", "hold": "--hold", "release": "--release"}
 ROS_SETUP = "unset PYTHONPATH; source /opt/ros/jazzy/setup.bash; source \"$HOME/ros2_ws/install/setup.bash\"; "
+# Lidar guard distances (m), the two profiles of the old base panel. Passed to run_base_teleop.sh.
+GUARD_PROFILES = {"close": {"STOP_DIST": "0.12", "SLOW_DIST": "0.12", "SIDE_STOP": "0.15"},
+                  "safe": {"STOP_DIST": "0.20", "SLOW_DIST": "0.30", "SIDE_STOP": "0.32"}}
+# Devices each check-wizard step opens (so it never shares a port or camera with a running job)
+WIZARD_USES = {
+    "devices": set(), "servos": {"/dev/so101_right_follower", "/dev/so101_left_follower", "/dev/so101_right_leader",
+                                 "/dev/so101_left_leader", "/dev/so101_base"},
+    "calib": {"/dev/so101_right_follower", "/dev/so101_left_follower", "/dev/so101_right_leader", "/dev/so101_left_leader"},
+    "teleop_left": {"/dev/so101_left_follower", "/dev/so101_left_leader"},
+    "teleop_right": {"/dev/so101_right_follower", "/dev/so101_right_leader"},
+    "teleop_both": {"/dev/so101_right_follower", "/dev/so101_left_follower", "/dev/so101_right_leader", "/dev/so101_left_leader"},
+    "camera_uvc": {"cam:top"}, "gamepad": {"/dev/input/js0"}, "wheels": {"/dev/so101_base"}, "mecanum_floor": {"/dev/so101_base"},
+    "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
+}
+SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p device:=auto -p output_topic:=/cmd_vel_raw "
               "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0")
@@ -66,6 +83,10 @@ class Robot:
         self.cam_info: list[dict] = []
         self._stop = threading.Event()
         self.voice_lang = "ko"
+        self.servo_scan: dict | None = None
+        self._wizard_steps: list[dict] | None = None
+        self._wizard_running: str | None = None
+        self.wizard_results: dict[str, dict] = {}
         self.refresh_cameras()
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
@@ -131,7 +152,18 @@ class Robot:
         return ok, msg
 
     # ----------------------------------------------------------------- base
-    def base(self, on: bool, who: str) -> tuple[bool, str]:
+    def obstacle_stop_on(self) -> bool:
+        """The old config/lidar.env can switch the obstacle stop off (OBSTACLE_STOP=0)."""
+        try:
+            for line in (self.so101 / "config" / "lidar.env").read_text().splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() == "OBSTACLE_STOP":
+                    return v.split("#")[0].strip() != "0"
+        except OSError:
+            pass
+        return True
+
+    def base(self, on: bool, who: str, profile: str = "close") -> tuple[bool, str]:
         if not on:
             return self._stop_job("base", who)
         if self._missing(["base"]):
@@ -141,8 +173,9 @@ class Robot:
             cmd = self._mock_cmd("wheel node + guard")
         else:
             cmd = ["bash", "-c", ROS_SETUP + f'exec bash "{self.so101}/run_base_teleop.sh" --inner']
+        prof = profile if profile in GUARD_PROFILES else "close"
         return self._start("base", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
-                                           label="base", stop_wait=8.0), who)
+                                           env=dict(GUARD_PROFILES[prof]), label=f"base ({prof})", stop_wait=8.0), who)
 
     # --------------------------------------------------------------- teleop
     def teleop(self, side: str, on: bool, who: str) -> tuple[bool, str]:
@@ -259,12 +292,130 @@ class Robot:
         root = Path("~/models/vosk").expanduser()
         return sorted(p.name for p in root.glob("vosk-model*")) if root.exists() else []
 
+    def say(self, text: str, who: str) -> tuple[bool, str]:
+        """Quick commands and typed commands go to the old voice node (/voice/say), which drives
+        with odometry and the lidar guard exactly as for spoken commands."""
+        text = " ".join(str(text).split())[:80]
+        if not text:
+            return False, "Empty command."
+        if not self.jobs.running("voice"):
+            return False, "Start voice first: quick commands use the voice program."
+        if self.ros is not None and hasattr(self.ros, "publish_str"):
+            self.ros.publish_str("/voice/say", text)
+        self.event(who, f"command: {text}")
+        return True, ""
+
+    # ------------------------------------------------------- servo tester
+    def serial_ports(self) -> list[dict]:
+        from .servo_tool import ports
+        return ports()
+
+    def servo(self, cmd: str, port: str, who: str, sid: int = 0, value: int = 0,
+              lo: int = 1, hi: int = 12, arm_ok: bool = False) -> tuple[bool, str]:
+        if cmd not in ("scan", "torque", "move", "setid"):
+            return False, "Unknown servo command."
+        if not SERIAL_RE.match(port or ""):
+            return False, "Unknown port."
+        if self.mock:
+            return False, "Mock mode: no servo boards."
+        writes = cmd != "scan"
+        is_arm = "so101_" in port and "base" not in port or any(
+            p["arm"] and p["real"] == os.path.realpath(port) for p in self.serial_ports())
+        if writes and is_arm and not arm_ok:
+            return False, "Arm ports are read-only. Tick 'Allow control on arm ports' first."
+        busy = self.jobs.busy(frozenset({port, os.path.realpath(port)}))
+        if busy:
+            return False, f"{busy} is using {port}. Stop it first."
+        args = {"scan": [str(int(lo)), str(int(hi))], "torque": [str(int(sid)), "1" if value else "0"],
+                "move": [str(int(sid)), str(int(value))], "setid": [str(int(sid)), str(int(value))]}[cmd]
+        with self.bus_lock:
+            try:
+                r = subprocess.run([sys.executable, str(HERE / "servo_tool.py"), cmd, port, *args], capture_output=True,
+                                   text=True, timeout=25, env={**os.environ, "KIRO_SO101_DIR": str(self.so101)})
+            except subprocess.TimeoutExpired:
+                return False, "The servo board did not answer in time."
+        line = next((x for x in reversed(r.stdout.splitlines()) if x.startswith("@SERVO ")), None)
+        if line is None:
+            return False, (r.stderr.strip().splitlines() or ["servo tool failed"])[-1][:160]
+        res = json.loads(line[7:])
+        if cmd == "scan" and res.get("ok"):
+            self.servo_scan = {**res, "t": time.time()}
+        if writes:
+            self.event(who, f"servo {cmd} {port} {' '.join(args)}: {res.get('msg', '')}")
+        return bool(res.get("ok")), res.get("msg", f"{len(res.get('servos', []))} servos answered")
+
+    # ------------------------------------------------------- check wizard
+    def wizard_steps(self) -> list[dict]:
+        if self._wizard_steps is None:
+            try:
+                r = subprocess.run([str(self.venv / "bin" / "python"), str(HERE / "wizard_runner.py"), "--list"],
+                                   capture_output=True, text=True, timeout=30,
+                                   env={**os.environ, "KIRO_SO101_DIR": str(self.so101), "PYTHONPATH": ""})
+                self._wizard_steps = json.loads(r.stdout)
+            except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+                log.warning("wizard steps: %s", e)
+                return []
+        return self._wizard_steps
+
+    def wizard(self, step: str, on: bool, who: str, seconds: int = 20) -> tuple[bool, str]:
+        if not on:
+            return self._stop_job("wizard", who)
+        if step not in WIZARD_USES:
+            return False, "Unknown step."
+        if step in ("teleop_left", "teleop_both") and not self.cfg.left_arm_ok:
+            return False, "LEFT_BLOCKED"
+        seconds = max(5, min(120, int(seconds)))
+        if self.mock:
+            cmd = self._mock_cmd(f"wizard step {step}", seconds=3)
+        else:
+            cmd = [str(self.venv / "bin" / "python"), str(HERE / "wizard_runner.py"), step, str(seconds)]
+        self.wizard_results[step] = {"status": "running", "t": time.time()}
+        ok, msg = self._start("wizard", JobSpec(cmd, frozenset(WIZARD_USES[step]), cwd=str(self.so101) if not self.mock else None,
+                                                env={**self._venv_env(), "KIRO_SO101_DIR": str(self.so101)},
+                                                label=f"check {step}", stop_wait=12.0), who)
+        if ok:
+            self._wizard_running = step
+        else:
+            self.wizard_results.pop(step, None)
+        return ok, msg
+
+    def wizard_decide(self, step: str, status: str, who: str) -> tuple[bool, str]:
+        if status not in ("pass", "fail", "skip") or step not in WIZARD_USES:
+            return False, "Unknown decision."
+        if self.jobs.running("wizard") and self._wizard_running == step:
+            return False, "Wait until the step has finished."
+        r = self.wizard_results.setdefault(step, {})
+        r.update(status=status, decided_by=who, t=time.time())
+        self.event(who, f"check {step}: {status}")
+        return True, ""
+
+    def _wizard_collect(self) -> None:
+        """When a wizard step ends, read its @RESULT line (the old step's own verdict)."""
+        step = self._wizard_running
+        j = self.jobs.get("wizard")
+        if not step or j is None or j.running:
+            return
+        self._wizard_running = None
+        res = {"status": "stopped" if j.code else "fail", "auto": None}
+        for line in reversed(j.lines):
+            if line.startswith("@RESULT "):
+                try:
+                    res = json.loads(line[8:])
+                except ValueError:
+                    pass
+                break
+        if self.mock:
+            res = {"status": "confirm", "auto": None}
+        res["lines"] = [ANSI.sub("", x) for x in list(j.lines)[-60:] if not x.startswith("@RESULT ")]
+        res["t"] = time.time()
+        self.wizard_results[step] = res
+
     # --------------------------------------------------------------- E-STOP
     def on_estop(self, who: str) -> None:
         """Stop everything that can move by itself. Teleop stays: a person holds the leader arm."""
         if self.ros is not None and hasattr(self.ros, "publish_str") and self.jobs.running("voice"):
             self.ros.publish_str("/voice/say", "멈춰")
-        stopped = self.jobs.stop_all(lambda j: j.name in ("skill", "voice"))
+        stopped = self.jobs.stop_all(lambda j: j.name in ("skill", "voice", "wizard"))
         if stopped:
             self.event(who, "E-STOP stopped " + ", ".join(stopped))
 
@@ -342,6 +493,7 @@ class Robot:
 
     # ---------------------------------------------------------------- state
     def snapshot(self) -> dict:
+        self._wizard_collect()
         jobs = {}
         for name, info in self.jobs.info().items():
             info["tail"] = [ANSI.sub("", s).strip() for s in info["tail"] if ANSI.sub("", s).strip()][-8:]
@@ -356,10 +508,13 @@ class Robot:
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "events": list(self.events)[-20:],
+            "obstacle_stop": self.obstacle_stop_on(), "ports": [] if self.mock else self.serial_ports(),
+            "servo_scan": self.servo_scan, "wizard": self.wizard_results,
         }
 
     def close(self) -> None:
         self._stop.set()
-        self.jobs.stop_all()
+        stopped = self.jobs.stop_all()
+        log.info("server stopping; stopped: %s", ", ".join(stopped) or "nothing running")
         for cam in self.cams.values():
             cam.pause("shutdown")

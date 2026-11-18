@@ -76,7 +76,21 @@
         <button id="base-btn" class="btn" type="button" data-op></button>
         <span id="base-lidar" class="mute small grow"></span>
       </div>
+      <div class="row">
+        <label class="small mute" for="guard-profile" data-i18n="base.profile">Guard distance</label>
+        <select id="guard-profile">
+          <option value="close" data-i18n="base.close">Close</option>
+          <option value="safe" data-i18n="base.safe">Safe</option>
+        </select>
+      </div>
+      <p id="guard-off" class="small err" data-i18n="base.guardoff" hidden></p>
       <p id="base-guard" class="small mute"></p>
+      <div class="quick" id="quick"></div>
+      <form id="say-box" class="row" autocomplete="off">
+        <input id="say-text" class="grow" type="text" data-i18n-ph="base.typed">
+        <button class="btn" type="submit" data-i18n="base.send" data-op>Send</button>
+      </form>
+      <p id="quick-hint" class="small mute" data-i18n="base.quickhint"></p>
       <pre id="base-tail" class="tail" hidden></pre>
     </section>
 
@@ -115,6 +129,52 @@
       <h2><span class="n">07</span><span data-i18n="sec.log">Activity</span></h2>
       <ul id="log" class="log"></ul>
     </section>
+    <section class="sec" id="sec-eng">
+      <h2><span class="n">08</span><span data-i18n="sec.eng">Engineer</span><span id="eng-st" class="st"></span></h2>
+      <form id="eng-box" class="row" autocomplete="off">
+        <input id="eng-pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="eng.pin">
+        <button class="btn" type="submit" data-i18n="eng.unlock" data-op>Unlock</button>
+      </form>
+      <p id="eng-hint" class="small mute"></p>
+      <div id="eng-body" hidden>
+        <div class="row"><span class="grow small mute" data-i18n="eng.unlocked"></span><button id="eng-lock" class="btn" type="button" data-i18n="eng.lock">Lock</button></div>
+
+        <h3 class="sub" data-i18n="eng.servo">Servo tester</h3>
+        <div class="row">
+          <select id="sv-port" class="grow" aria-label="port"></select>
+          <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" aria-label="from ID">
+          <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
+          <button id="sv-scan" class="btn primary" type="button" data-i18n="eng.scan">Scan</button>
+        </div>
+        <label class="switch"><input type="checkbox" id="sv-armok"><span data-i18n="eng.armok">Allow control on arm ports</span></label>
+        <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
+        <div id="sv-one" hidden>
+          <p class="small"><b id="sv-sel"></b></p>
+          <div class="row seg">
+            <button id="sv-ton" class="btn" type="button" data-i18n="eng.torqueon">Torque on</button>
+            <button id="sv-toff" class="btn" type="button" data-i18n="eng.torqueoff">Torque off</button>
+          </div>
+          <div class="row">
+            <label class="small mute" for="sv-pos" data-i18n="eng.pos">Position</label>
+            <input id="sv-pos" class="num" type="number" min="0" max="4095" value="2048">
+            <button id="sv-move" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.move">Move (hold)</span></button>
+          </div>
+          <div class="row">
+            <label class="small mute" for="sv-newid" data-i18n="eng.newid">New ID</label>
+            <input id="sv-newid" class="num" type="number" min="1" max="253" value="1">
+            <button id="sv-setid" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.setid">Change ID (hold)</span></button>
+          </div>
+          <p class="small mute" data-i18n="eng.setidhint"></p>
+        </div>
+
+        <h3 class="sub" data-i18n="eng.wizard">Check wizard</h3>
+        <ol id="wz-steps" class="steps"></ol>
+        <div id="wz-detail"></div>
+        <pre id="wz-tail" class="tail" hidden></pre>
+        <div class="row"><button id="wz-report" class="btn" type="button" data-i18n="eng.report">Download report</button></div>
+      </div>
+    </section>
+
     <div class="foot" id="ver"></div>
   </aside>
 </main>

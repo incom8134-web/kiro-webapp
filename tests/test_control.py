@@ -179,3 +179,32 @@ def test_garbage_input_is_safe(env):
     arm(c)
     cmd = run(c, clock, "a", 1, x="abc", y=None, z=float("nan"), en=True)
     assert (cmd.vx, cmd.vy, cmd.wz) == (0, 0, 0)
+
+
+def test_engineer_tools_need_operator_and_their_own_pin():
+    cfg = Config(pin="1234", engineer_pin="98765")
+    c = Controller(cfg, clock=lambda: 0.0)
+    c.connect("a", "Laptop")
+    c.connect("b", "Phone")
+    assert c.unlock_engineer("a", "98765") == (False, "Take control first.")
+    assert c.take("a", "1234")[0]
+    assert c.unlock_engineer("a", "1234")[0] is False          # the operator PIN is not enough
+    assert c.unlock_engineer("a", "98765")[0] and c.is_engineer("a")
+    assert c.snapshot("a")["you"]["engineer"] is True
+    assert c.snapshot("b")["you"]["engineer"] is False
+    assert c.take("b", "1234", force=True)[0]                   # a new operator clears the unlock
+    assert not c.is_engineer("a") and not c.is_engineer("b")
+
+
+def test_engineer_tools_off_without_pin_and_wrong_pins_lock_out():
+    t = [0.0]
+    c = Controller(Config(pin="1234"), clock=lambda: t[0])
+    c.connect("a", "Laptop")
+    assert c.take("a", "1234")[0]
+    assert "Engineer tools are off" in c.unlock_engineer("a", "")[1]
+    c.engineer_pin = "5555"
+    for _ in range(5):
+        assert c.unlock_engineer("a", "0000")[0] is False
+    assert "Too many wrong PINs" in c.unlock_engineer("a", "5555")[1]
+    t[0] = 31.0
+    assert c.unlock_engineer("a", "5555")[0]

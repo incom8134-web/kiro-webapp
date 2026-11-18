@@ -74,6 +74,8 @@ class Controller:
         self._need_neutral = True  # dead-man must be let go once before motion
         self._was_active = False
         self._zero_left = 0
+        self.engineer_pin = cfg.engineer_pin  # the server sets the mock default in mock mode
+        self.engineers: set[str] = set()      # operators who also unlocked the engineer tools
 
     # ---- connections -------------------------------------------------
     def connect(self, cid: str, name: str) -> None:
@@ -81,6 +83,7 @@ class Controller:
 
     def disconnect(self, cid: str) -> None:
         self.clients.pop(cid, None)
+        self.engineers.discard(cid)
         if self.operator == cid:
             self._set_operator(None)
 
@@ -90,21 +93,28 @@ class Controller:
             c.last_seen = self.clock()
 
     # ---- operator lock -----------------------------------------------
-    def take(self, cid: str, pin: object, force: bool = False) -> tuple[bool, str]:
+    def _check_pin(self, c: Client, pin: object, want: str) -> str | None:
+        """None if the PIN is right. Wrong PINs count toward a short lockout (shared by both PINs)."""
         now = self.clock()
-        c = self.clients.get(cid)
-        if c is None:
-            return False, "Not connected."
         c.last_seen = now
         if now < c.locked_until:
-            return False, f"Too many wrong PINs. Wait {int(c.locked_until - now) + 1} s."
-        if not hmac.compare_digest(str(pin).encode(), self.cfg.pin.encode()):
+            return f"Too many wrong PINs. Wait {int(c.locked_until - now) + 1} s."
+        if not hmac.compare_digest(str(pin).encode(), want.encode()):
             c.bad_pins += 1
             if c.bad_pins >= MAX_BAD_PINS:
                 c.bad_pins = 0
                 c.locked_until = now + PIN_LOCKOUT_S
-            return False, "Wrong PIN."
+            return "Wrong PIN."
         c.bad_pins = 0
+        return None
+
+    def take(self, cid: str, pin: object, force: bool = False) -> tuple[bool, str]:
+        c = self.clients.get(cid)
+        if c is None:
+            return False, "Not connected."
+        err = self._check_pin(c, pin, self.cfg.pin)
+        if err:
+            return False, err
         if self.operator == cid:
             return True, "You already have control."
         if self.operator is not None and not force:
@@ -120,7 +130,29 @@ class Controller:
 
     def _set_operator(self, cid: str | None) -> None:
         self.operator = cid
+        self.engineers.clear()  # a new operator must unlock the engineer tools again
         self._halt()
+
+    # ---- engineer tools (servo tester, check wizard) -------------------
+    def unlock_engineer(self, cid: str, pin: object) -> tuple[bool, str]:
+        c = self.clients.get(cid)
+        if c is None:
+            return False, "Not connected."
+        if cid != self.operator:
+            return False, "Take control first."
+        if not self.engineer_pin:
+            return False, "Engineer tools are off. Set KIRO_ENGINEER_PIN on the robot."
+        err = self._check_pin(c, pin, self.engineer_pin)
+        if err:
+            return False, err
+        self.engineers.add(cid)
+        return True, "Engineer tools unlocked."
+
+    def lock_engineer(self, cid: str) -> None:
+        self.engineers.discard(cid)
+
+    def is_engineer(self, cid: str) -> bool:
+        return cid == self.operator and cid in self.engineers
 
     def _halt(self) -> None:
         self._target = ZERO
@@ -214,7 +246,7 @@ class Controller:
     def snapshot(self, cid: str) -> dict:
         op = self.clients.get(self.operator) if self.operator else None
         return {
-            "you": {"id": cid, "role": "operator" if cid == self.operator else "viewer"},
+            "you": {"id": cid, "role": "operator" if cid == self.operator else "viewer", "engineer": self.is_engineer(cid)},
             "operator": {"id": self.operator, "name": op.name} if op else None,
             "estop": self.estop,
             "estop_by": self.estop_by,

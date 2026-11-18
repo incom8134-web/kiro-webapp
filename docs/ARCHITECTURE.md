@@ -37,7 +37,10 @@ The server sends speeds only while the operator is active. When driving ends it 
 | Teleop on | `teleop_<side>` | `lerobot-teleoperate` | follower and leader ports |
 | Fold / Hold / Release | `arm_<side>` | `arm_tuck.py --tuck / --hold / --release --yes` | follower ports |
 | Skill Run | `skill` | `run_policy.sh run <model> 20` | right follower, `cam:top`, `cam:right_wrist` |
-| Voice start | `voice` | `ros2 run so101_base voice_cmd` (push-to-talk) | microphone |
+| Voice start | `voice` | `ros2 run so101_base voice_cmd` (push-to-talk, `lang:=ko` or `en`) | microphone |
+| Check wizard step | `wizard` | `wizard_runner.py <step>`: runs `hw_test_wizard.Wizard.t_<step>` from the old code without a screen | per step (see `WIZARD_USES`) |
+
+Not jobs (short, one command each, under the servo-probe lock): servo tester commands (`servo_tool.py`, reusing `so101_servo_tester.Bus`) and quick / typed commands (published on `/voice/say` for the old voice node).
 
 Health (`servo_probe.py`) runs every 6 s as a short separate process with a time limit, because the servo SDK can hang on a stuck USB board.
 
@@ -61,6 +64,11 @@ All messages are JSON with a field `t`.
 | `voice` | `on` | Start or stop the voice node (operator) |
 | `talk` | `on` | Hold-to-talk. Publishes `/voice/listen` (operator) |
 | `system` | `action` (`shutdown`, `reboot`) | Jetson power (operator) |
+| `say` | `text` | Quick or typed command for the voice node (operator) |
+| `engineer` | `pin` or `lock` | Unlock / lock the engineer tools (operator) |
+| `servo` | `cmd` (`scan`, `torque`, `move`, `setid`), `port`, `id`, `value`, `lo`, `hi`, `arm_ok` | Servo tester (engineer) |
+| `wizard` | `step`, `on`, `seconds` | Run or stop one check step (engineer) |
+| `wizard_decide` | `step`, `status` (`pass`, `fail`, `skip`) | Person's verdict (engineer) |
 
 **Server to page**
 
@@ -68,6 +76,7 @@ All messages are JSON with a field `t`.
 |---|---|---|
 | `state` | `you`, `operator`, `estop`, `link_ok`, `need_neutral`, `src`, `cmd`, `odom`, `backend`, `clients` | Sent 10 times per second |
 | `robot` | `jobs`, `health`, `cams`, `models`, `voice`, `events`, `left_arm_ok`, `lidar` | Once per second |
+| `wizard_steps` | `steps` | The 13 steps of the old wizard, sent after unlocking |
 | `scan` | `xy` (flat list of x, y in cm, robot frame), `src` (`lidar` or `mock`) | 5 times per second, only while a scan is fresh |
 | `note` | `ok`, `msg`, `about` | Answer to a request |
 | `pong` | `ts` | Answer to `ping` |

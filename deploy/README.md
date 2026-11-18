@@ -46,10 +46,10 @@ Open **http://localhost:8080** on the Jetson, or **http://10.42.0.1:8080** from 
 
 ## 5. Real robot
 
-Choose your own PIN:
+Choose your own PINs (the engineer PIN opens the servo tester and check wizard; leave it out to keep them off):
 
 ```bash
-cd ~/Desktop/kiro-webapp && KIRO_OPERATOR_PIN=your-pin ./run.sh robot
+cd ~/Desktop/kiro-webapp && KIRO_OPERATOR_PIN=your-pin KIRO_ENGINEER_PIN=longer-pin ./run.sh robot
 ```
 
 The page must say **ROBOT** at the top. Then, in this order:
@@ -107,7 +107,7 @@ This allows exactly two commands, `systemctl poweroff` and `systemctl reboot`, w
 Put the settings (and the PIN) in a file only root can read:
 
 ```bash
-printf 'KIRO_BACKEND=ros\nKIRO_OPERATOR_PIN=CHANGE-ME\n' | sudo tee /etc/kiro-webapp.env >/dev/null && sudo chmod 600 /etc/kiro-webapp.env
+printf 'KIRO_BACKEND=ros\nKIRO_OPERATOR_PIN=CHANGE-ME\nKIRO_ENGINEER_PIN=CHANGE-ME-TOO\n' | sudo tee /etc/kiro-webapp.env >/dev/null && sudo chmod 600 /etc/kiro-webapp.env
 ```
 
 ```bash

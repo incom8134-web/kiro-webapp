@@ -112,9 +112,13 @@ class RosBase:
         from nav_msgs.msg import Odometry
         from std_msgs.msg import Bool, String
 
+        from rclpy.executors import SingleThreadedExecutor
+        from rclpy.signals import SignalHandlerOptions
+
         self._rclpy, self._Twist, self._Bool, self._String = rclpy, Twist, Bool, String
         if not rclpy.ok():
-            rclpy.init()
+            # The server handles Ctrl+C itself, so it can stop the programs it started before ROS goes away
+            rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
         self._node = rclpy.create_node("kiro_webapp")
         self._cmd_pub = self._node.create_publisher(Twist, cfg.cmd_topic, 10)
         self._estop_pub = self._node.create_publisher(Bool, cfg.estop_topic, 10)
@@ -133,8 +137,19 @@ class RosBase:
         self._str_latest: dict[str, str] = {}
         for topic in ("/voice/text", "/voice/status", "/obstacle_guard/status"):
             self._node.create_subscription(String, topic, lambda m, t=topic: self._on_str(t, m), 10)
-        self._thread = threading.Thread(target=rclpy.spin, args=(self._node,), daemon=True)
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self._node)
+        self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
+
+    def _spin(self) -> None:
+        try:
+            self._executor.spin()
+        except Exception:  # noqa: BLE001 - ROS was shut down (server stopping)
+            pass
+
+    def _ok(self) -> bool:
+        return self._rclpy.ok()
 
     def _on_odom(self, msg) -> None:
         q = msg.pose.pose.orientation
@@ -165,6 +180,8 @@ class RosBase:
             self._str_latest[topic] = str(msg.data)[:300]
 
     def publish_str(self, topic: str, text: str) -> None:
+        if not self._ok():
+            return
         pub = self._str_pubs.get(topic)
         if pub is None:
             pub = self._str_pubs[topic] = self._node.create_publisher(self._String, topic, 10)
@@ -177,12 +194,15 @@ class RosBase:
     def apply(self, vx: float, vy: float, wz: float, publish: bool, dt: float) -> None:
         if not publish:
             return  # stay silent so the robot's own gamepad and voice can drive
+        if not self._ok():
+            return
         m = self._Twist()
         m.linear.x, m.linear.y, m.angular.z = float(vx), float(vy), float(wz)
         self._cmd_pub.publish(m)
 
     def set_estop(self, on: bool) -> None:
-        self._estop_pub.publish(self._Bool(data=bool(on)))
+        if self._ok():
+            self._estop_pub.publish(self._Bool(data=bool(on)))
 
     def odom(self) -> dict | None:
         with self._lock:
@@ -190,11 +210,13 @@ class RosBase:
 
     def close(self) -> None:
         try:
-            self._cmd_pub.publish(self._Twist())
+            if self._ok():
+                self._cmd_pub.publish(self._Twist())  # last word: stop
+            self._executor.shutdown(timeout_sec=1.0)
             self._node.destroy_node()
-            if self._rclpy.ok():
+            if self._ok():
                 self._rclpy.shutdown()
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
 

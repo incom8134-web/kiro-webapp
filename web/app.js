@@ -56,6 +56,7 @@ function connect() {
     if (m.t === "state") { state.server = m; render(); }
     else if (m.t === "robot") { state.robot = m; renderRobot(); }
     else if (m.t === "scan") { m.at = performance.now(); state.scan = m; }
+    else if (m.t === "wizard_steps") { eng.steps = m.steps; renderEngineer(); }
     else if (m.t === "pong") { state.rtt = performance.now() - m.ts; renderLink(); }
     else if (m.t === "note") showNote(m.msg, !m.ok);
   };
@@ -215,7 +216,7 @@ talk.addEventListener("pointerdown", (e) => { if (!isOperator()) return; talk.se
 for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) talk.addEventListener(n, () => setTalk(false));
 talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
-$("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base") }));
+$("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base"), profile: $("guard-profile").value }));
 $("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
 
 /* Hold a button for HOLD_MS to confirm. Used for shutdown, restart and torque release. */
@@ -344,6 +345,8 @@ function renderRobot() {
   $("base-st").textContent = t(baseOn ? "base.running" : "base.stopped");
   $("base-st").className = "st" + (baseOn ? " live" : "");
   $("base-lidar").textContent = t(r.lidar ? "base.lidar.yes" : "base.lidar.no");
+  $("guard-off").hidden = r.obstacle_stop !== false;
+  $("guard-profile").disabled = !me || baseOn;
   const bj = J.base;
   $("base-guard").textContent = baseOn && r.voice && r.voice.guard ? `${t("base.guard")}: ${r.voice.guard}` :
     bj && !bj.running && bj.code ? t("base.exited", { code: bj.code }) : "";
@@ -406,6 +409,9 @@ function renderRobot() {
   }
   stLine($("skill-st"), sk);
   tail($("skill-tail"), sk);
+
+  renderQuick();
+  renderEngineer();
 
   // Voice
   const vOn = jobRunning("voice");
@@ -566,6 +572,170 @@ function drawMap() {
   g.fillStyle = "#6b6b70"; g.font = "10px " + getComputedStyle(document.body).fontFamily; g.fillText("0.5 m", 6, h - 6);
 }
 window.addEventListener("resize", drawMap);
+
+// ------------------------------------------------- quick and typed commands
+/* Sent to the old voice node (/voice/say) in the language it was started with. */
+const QUICK = {
+  ko: { fwd: "앞으로 가", back: "뒤로 가", left: "왼쪽 으로 가", right: "오른쪽 으로 가", rotl: "좌회전", rotr: "우회전", stop: "멈춰" },
+  en: { fwd: "go forward", back: "go back", left: "go left", right: "go right", rotl: "turn left", rotr: "turn right", stop: "stop" },
+};
+const QUICK_GRID = ["rotl", "fwd", "rotr", "left", "stop", "right", "", "back", ""];
+
+function renderQuick() {
+  const r = state.robot, me = isOperator();
+  const ok = me && jobRunning("voice") && !(state.server && state.server.estop);
+  const html = QUICK_GRID.map((k) => k ? `<button type="button" class="btn${k === "stop" ? " stopq" : ""}" data-q="${k}" ${ok || (k === "stop" && me && jobRunning("voice")) ? "" : "disabled"}>${t("q." + k)}</button>`
+    : `<span class="gap"></span>`).join("");
+  const box = $("quick");
+  if (box.dataset.html !== html + LANG) {
+    box.innerHTML = html; box.dataset.html = html + LANG;
+    for (const b of box.querySelectorAll("[data-q]")) b.addEventListener("click", () => {
+      const lang = (state.robot && state.robot.voice_lang) || "ko";
+      send({ t: "say", text: QUICK[lang][b.dataset.q] });
+    });
+  }
+  $("quick-hint").hidden = jobRunning("voice");
+}
+$("say-box").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const v = $("say-text").value.trim();
+  if (v) send({ t: "say", text: v });
+  $("say-text").value = ""; $("say-text").blur();
+});
+
+// ----------------------------------------------------------- engineer tools
+const eng = { steps: null, sel: 0, servo: null, prep: {} };
+const MOTION_STEPS = new Set(["teleop_left", "teleop_right", "teleop_both", "wheels", "mecanum_floor", "ros_base"]);
+const isEngineer = () => !!(state.server && state.server.you.engineer);
+
+$("eng-box").addEventListener("submit", (e) => {
+  e.preventDefault();
+  send({ t: "engineer", pin: $("eng-pin").value });
+  $("eng-pin").value = ""; $("eng-pin").blur();
+});
+$("eng-lock").addEventListener("click", () => send({ t: "engineer", lock: true }));
+
+const svPort = () => $("sv-port").value;
+$("sv-scan").addEventListener("click", () => send({ t: "servo", cmd: "scan", port: svPort(), lo: +$("sv-lo").value, hi: +$("sv-hi").value }));
+const svSend = (cmd, value) => send({ t: "servo", cmd, port: svPort(), id: eng.servo, value, arm_ok: $("sv-armok").checked });
+$("sv-ton").addEventListener("click", () => svSend("torque", 1));
+$("sv-toff").addEventListener("click", () => svSend("torque", 0));
+holdButton($("sv-move"), () => svSend("move", +$("sv-pos").value));
+holdButton($("sv-setid"), () => svSend("setid", +$("sv-newid").value));
+
+function renderEngineer() {
+  const r = state.robot, s = state.server;
+  const me = isOperator(), en = isEngineer();
+  $("eng-box").hidden = en;
+  $("eng-body").hidden = !en;
+  $("eng-st").textContent = en ? t("eng.unlock") + " ✓" : "";
+  $("eng-st").className = "st" + (en ? " live" : "");
+  $("eng-hint").textContent = en ? "" : !me ? t("eng.needop") : s && s.mock_engineer_pin ? t("eng.mockpin") : "";
+  if (!en || !r) return;
+
+  // ports
+  const ports = r.ports || [];
+  const sel = $("sv-port"), cur = sel.value;
+  const opts = ports.map((p) => `<option value="${esc(p.dev)}">${esc(p.dev)}${p.dev !== p.real ? " (" + esc(p.real.replace("/dev/", "")) + ")" : ""}</option>`).join("");
+  if (sel.dataset.html !== opts) { sel.innerHTML = opts || `<option value="">-</option>`; sel.dataset.html = opts; if (cur) sel.value = cur; }
+
+  // scan table
+  const sc = r.servo_scan;
+  const cols = t("eng.cols").split("|");
+  let tb;
+  if (!sc || sc.port !== svPort()) tb = `<tr><td class="mute">${t("eng.noscan")}</td></tr>`;
+  else if (!sc.servos.length) tb = `<tr><td class="mute">${t("eng.none")}</td></tr>`;
+  else tb = `<tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` + sc.servos.map((v) =>
+    `<tr class="pick${v.id === eng.servo ? " sel" : ""}" data-id="${v.id}"><td>${v.id}</td><td>${v.model ?? "-"}</td><td>${v.volt ?? "-"}</td><td>${v.temp ?? "-"}</td><td>${v.pos ?? "-"}</td><td>${v.mode === 1 ? "vel" : v.mode === 0 ? "pos" : (v.mode ?? "-")}</td><td>${v.torque ? "on" : "off"}</td><td>${v.current != null ? Math.round(Math.abs(v.current) * 6.5) : "-"}</td><td>${v.error ? esc(v.error) : v.status ? "0x" + v.status.toString(16) : "ok"}</td></tr>`).join("");
+  const table = $("sv-table");
+  if (table.dataset.html !== tb) {
+    table.innerHTML = tb; table.dataset.html = tb;
+    for (const row of table.querySelectorAll("tr.pick")) row.addEventListener("click", () => {
+      eng.servo = +row.dataset.id;
+      const v = sc.servos.find((x) => x.id === eng.servo);
+      if (v && v.pos != null) $("sv-pos").value = v.pos;
+      $("sv-newid").value = eng.servo;
+      table.dataset.html = ""; renderEngineer();
+    });
+  }
+  const has = !!(sc && sc.port === svPort() && sc.servos.some((v) => v.id === eng.servo));
+  $("sv-one").hidden = !has;
+  if (has) $("sv-sel").textContent = `${svPort()} · ID ${eng.servo}`;
+
+  renderWizard();
+}
+
+function renderWizard() {
+  const steps = eng.steps || [];
+  const res = (state.robot && state.robot.wizard) || {};
+  const wj = jobs().wizard;
+  const status = (k) => (res[k] && res[k].status) || "pending";
+  const list = steps.map((st, i) => `<li data-i="${i}" class="${i === eng.sel ? "sel" : ""}"><span>${esc(st.title)}${st.optional ? ` <span class="mute small">(${t("wz.optional")})</span>` : ""}</span><span class="chip ${status(st.key)}">${t("wz." + status(st.key))}</span></li>`).join("");
+  const ol = $("wz-steps");
+  if (ol.dataset.html !== list) {
+    ol.innerHTML = list; ol.dataset.html = list;
+    for (const li of ol.querySelectorAll("li")) li.addEventListener("click", () => { eng.sel = +li.dataset.i; ol.dataset.html = ""; $("wz-detail").dataset.html = ""; renderWizard(); });
+  }
+  const st = steps[eng.sel];
+  if (!st) { $("wz-detail").innerHTML = ""; return; }
+  const running = !!(wj && wj.running);
+  const prep = eng.prep[st.key] || (eng.prep[st.key] = st.prep.map(() => false));
+  const li = (a) => a.map((x) => `<li>${esc(x)}</li>`).join("");
+  const motion = MOTION_STEPS.has(st.key);
+  const html = `<div class="wz">
+    <h4>${esc(st.title)}</h4><p>${esc(st.desc)}</p>${LANG === "en" ? `<p class="small mute">${t("eng.kotext")}</p>` : ""}
+    ${st.prep.length ? `<b class="small">${t("eng.prep")}</b>${st.prep.map(([txt, req], i) => `<label><input type="checkbox" data-prep="${i}" ${prep[i] ? "checked" : ""}><span>${esc(txt)}${req ? `<span class="req">${t("eng.required")}</span>` : ""}</span></label>`).join("")}` : ""}
+    ${st.do.length ? `<b class="small">${t("eng.do")}</b><ol>${li(st.do)}</ol>` : ""}
+    ${st.expect.length ? `<b class="small">${t("eng.expect")}</b><ul>${li(st.expect)}</ul>` : ""}
+    ${st.fail.length ? `<details><summary>${t("eng.iffail")}</summary><ul>${li(st.fail)}</ul></details>` : ""}
+    ${st.key.startsWith("teleop") ? `<div class="row"><label class="small mute" for="wz-sec">${t("eng.seconds")}</label><input id="wz-sec" class="num" type="number" min="5" max="120" value="${eng.secs || 20}"></div>` : ""}
+    <div class="row" style="margin-top:10px">
+      ${running ? `<button class="btn" id="wz-stop" type="button">${t("eng.stop")}</button>`
+        : `<button class="btn primary${motion ? " hold" : ""}" id="wz-run" type="button">${motion ? `<span class="fill"></span>${t("eng.runhold")}` : t("eng.run")}</button>`}
+      <span class="grow"></span>
+      <button class="btn" id="wz-pass" type="button" ${running ? "disabled" : ""}>${t("eng.pass")}</button>
+      <button class="btn" id="wz-fail" type="button" ${running ? "disabled" : ""}>${t("eng.fail")}</button>
+      ${st.optional ? `<button class="btn" id="wz-skip" type="button" ${running ? "disabled" : ""}>${t("eng.skip")}</button>` : ""}
+    </div></div>`;
+  const det = $("wz-detail");
+  if (det.dataset.html !== html) {
+    det.innerHTML = html; det.dataset.html = html;
+    for (const cb of det.querySelectorAll("[data-prep]")) cb.addEventListener("change", () => { prep[+cb.dataset.prep] = cb.checked; det.dataset.html = ""; });
+    const sec = $("wz-sec");
+    if (sec) sec.addEventListener("change", () => { eng.secs = +sec.value; });
+    const run = () => {
+      const missing = st.prep.some(([, req], i) => req && !prep[i]);
+      if (missing) { showNote(t("eng.prepmissing"), true); return; }
+      send({ t: "wizard", step: st.key, on: true, seconds: eng.secs || 20 });
+    };
+    const rb = $("wz-run");
+    if (rb) motion ? holdButton(rb, run) : rb.addEventListener("click", run);
+    const sb = $("wz-stop");
+    if (sb) sb.addEventListener("click", () => send({ t: "wizard", step: st.key, on: false }));
+    for (const [id, v] of [["wz-pass", "pass"], ["wz-fail", "fail"], ["wz-skip", "skip"]]) {
+      const b = $(id);
+      if (b) b.addEventListener("click", () => send({ t: "wizard_decide", step: st.key, status: v }));
+    }
+  }
+  // log of the selected step: live while running, else the saved result
+  const lines = running && wj ? wj.tail : (res[st.key] && res[st.key].lines) || [];
+  const tl = $("wz-tail");
+  tl.hidden = !lines.length;
+  if (lines.length) { tl.textContent = lines.join("\n"); tl.scrollTop = tl.scrollHeight; }
+}
+
+$("wz-report").addEventListener("click", () => {
+  const steps = eng.steps || [], res = (state.robot && state.robot.wizard) || {};
+  const now = new Date();
+  const md = [`# KIRO hardware check`, ``, `Date: ${now.toLocaleString()}`, `Robot: ${state.server ? state.server.backend : "?"}`, ``,
+    `| Step | Result | Auto |`, `|---|---|---|`,
+    ...steps.map((s) => `| ${s.title} | ${(res[s.key] && res[s.key].status) || "not run"} | ${res[s.key] && res[s.key].auto != null ? res[s.key].auto : "-"} |`), ``,
+    ...steps.filter((s) => res[s.key] && res[s.key].lines).flatMap((s) => [`## ${s.title}`, ``, "```", ...res[s.key].lines, "```", ``])].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+  a.download = `kiro_check_${now.toISOString().slice(0, 10)}.md`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
 
 applyStrings();
 render();

@@ -41,6 +41,8 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
 | `robot_server/camera.py` | MJPEG preview, device lookup through the old `cams_config.py` |
 | `robot_server/servo_probe.py` | Read-only servo voltage / temperature / current, run as a short subprocess |
+| `robot_server/servo_tool.py` | Servo tester commands, reusing the old `so101_servo_tester.Bus` |
+| `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |
 | `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/` |
 | `web/` | Plain HTML, CSS, JavaScript. `i18n.js` holds every string in English and Korean. No build step, no CDN |
 | `deploy/` | Hotspot script, systemd unit, shutdown sudoers rule, robot setup steps |

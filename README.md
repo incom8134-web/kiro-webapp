@@ -8,7 +8,7 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 
 ## Status
 
-**Version 0.3 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
+**Version 0.4 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
 
 | Part | State |
 |---|---|
@@ -22,7 +22,9 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 | Lidar points on the map (`/scan`, same mounting angle as the obstacle guard) | Works with the simulated room in mock mode. Lidar not plugged in yet |
 | Dashboard page `/dashboard.html`: camera, lidar, speed, distance, nearest object, Jetson, servos, programs, activity | Works. Read-only, for a big screen |
 | Health: Jetson, servo voltage / temperature / current, cameras. Shutdown / restart | Works (shutdown needs `deploy/kiro-shutdown.sudoers`) |
-| Laptop remote arm control, recording, servo tester, calibration | Not in the page yet. Use the old app |
+| Base extras: quick-command pad, typed commands, guard distance (close / safe) | Works (commands go through the old voice node) |
+| Engineer tools (own PIN): servo tester (scan, torque, move, change ID) and the 13-step check wizard | Works. Scan and wizard step 1 checked on the robot. Arm ports read-only unless ticked |
+| Data recording, calibration, laptop remote arm control, camera tuning, save fold pose | Not in the page yet. Use the old app |
 
 Plan and checklist: [to-do until 20 Nov](docs/KIRO_Todo_until_20_Nov.docx) · [full project plan](docs/KIRO_Command_Center_Project_Plan.docx)
 
@@ -82,6 +84,8 @@ If two inputs are used at once, the gamepad wins, then the on-screen sticks, the
 | Devices | Two programs never open the same arm port or camera. The servo check skips busy ports |
 | Dangerous buttons | Release torque, shut down and restart must be held for 2 s |
 | Left arm | Blocked until recalibrated (`KIRO_LEFT_ARM_OK=1`) |
+| Engineer tools | Need operator control **and** a second PIN (`KIRO_ENGINEER_PIN`). Off on the robot until that is set |
+| Server stop | Ctrl+C or service stop first stops every program the server started |
 
 Software is not enough for public demos. The robot also needs a **physical switch that cuts servo power**.
 
