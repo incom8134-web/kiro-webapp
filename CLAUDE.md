@@ -1,0 +1,50 @@
+# KIRO Command Center
+
+Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a mecanum base with a Jetson Orin Nano. One operator controls the whole robot from a browser over the Jetson's own Wi-Fi hotspot. Offline, no router, nothing installed on the laptop, zero cost.
+
+**Read `docs/HANDOVER.md` before doing anything.** It holds the decisions, the current state and the next jobs.
+
+## Working with the user
+
+- The user took this project over from another developer and is a beginner in networking and Linux. Use plain words. Give one step at a time. Put commands in their own code blocks. Use tables.
+- The user wants to **talk and decide before anything is built**. Propose, wait for a yes, then build.
+- Deadline: a working demo on **20 November 2026**.
+- Steps that need `sudo` (apt, systemd, NetworkManager, udev) are run by the user. Give the command and explain it.
+
+## Safety
+
+- This is a real robot. Never start anything that moves wheels or arms without telling the user first and getting a yes.
+- First wheel tests are done with the robot lifted on blocks. Arms can fall when torque is switched off.
+- Never weaken the safety rules in `robot_server/control.py` (dead-man, heartbeat stop, E-STOP latch, one operator) without the user agreeing.
+
+## Secrets and big files
+
+- The GitHub repo was **public** on 18 Nov 2026. Never commit PINs, passwords, API keys, Wi-Fi passwords, usernames or device serial numbers.
+- Before pushing any old code, search it for keys (`AIza`, `API_KEY`, `password`).
+- Models, datasets, videos and virtual environments never go into git (GitHub rejects files over 100 MB).
+
+## Run and test
+
+```bash
+./run.sh            # mock robot, http://localhost:8080, PIN 0000
+./run.sh robot      # real robot, needs ROS 2 and KIRO_OPERATOR_PIN
+.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
+```
+
+## Layout
+
+| Path | Content |
+|---|---|
+| `robot_server/control.py` | Operator lock, PIN, E-STOP, watchdog, speed limits. Pure logic with tests |
+| `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_web`, `/e_stop`, reads `/odom`) |
+| `robot_server/main.py` | FastAPI app, WebSocket `/ws`, serves `web/` |
+| `web/` | Plain HTML, CSS, JavaScript. No build step, no CDN (must work offline) |
+| `deploy/` | Hotspot script, `twist_mux` config, launch file, systemd units. **Not yet run on the robot** |
+| `docs/` | Handover, architecture, plan, to-do list |
+
+## Conventions
+
+- Keep the page free of build tools and external downloads.
+- Every string shown in the page must exist in English and Korean once the language switch is added.
+- Add a test for every change to the control logic.
+- The old robot notes on the Jetson (`CLAUDE.md` in the old code folder, probably `~/so101`) are the source of truth for hardware facts: device names, servo IDs, voltages, known problems.
