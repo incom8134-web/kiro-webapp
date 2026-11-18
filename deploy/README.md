@@ -1,91 +1,85 @@
 # Run the command center on the robot
 
-These steps are for the Jetson. **They have not been run on the robot yet.** Do them in order and stop at the first step that fails.
+These steps are for the Jetson. Do them in order and stop at the first step that fails. Steps marked **sudo** ask for your password.
 
-During setup the Jetson needs internet: plug in an Ethernet cable.
+State on 18 Nov 2026: steps 1 and 4 were checked on the robot (mock page with live camera, robot mode connected to ROS). The hotspot profile `kiro-ap` already exists. Steps 5 to 7 are not done yet.
 
-## 1. Get the code
+## 1. Get the code and the Python environment
+
+The repo lives in `~/Desktop/kiro-webapp`. Everything it starts comes from the old code in `~/so101`.
 
 ```bash
-cd ~ && git clone https://github.com/incom8134-web/kiro-webapp.git
+cd ~/Desktop/kiro-webapp && python3 -m venv --system-site-packages .venv && .venv/bin/pip install -r requirements.txt
 ```
 
+## 2. The robot's own Wi-Fi
+
+The Wi-Fi card supports hotspot mode (`AP`), and the profile `kiro-ap` (network **GeminiBOT**) already exists. **Turning it on ends the internet connection**, so push to GitHub first.
+
+Turn the hotspot on:
+
 ```bash
-cd ~/kiro-webapp && python3 -m venv --system-site-packages .venv && .venv/bin/pip install -r requirements.txt
+nmcli con up kiro-ap
 ```
 
-## 2. Create the robot's own Wi-Fi
-
-Check that the Wi-Fi card can be a hotspot. The output must contain `AP`:
+Back to your normal Wi-Fi (internet). `nmcli con show` lists the names:
 
 ```bash
-iw list | grep -A 10 "Supported interface modes"
+nmcli con up "YOUR-WIFI-NAME"
 ```
 
-Create the hotspot. It asks you to choose a Wi-Fi password:
+To create the hotspot again with a new password: `bash deploy/setup_hotspot.sh` (**sudo**). If 5 GHz fails: `BAND=bg CHANNEL=6 bash deploy/setup_hotspot.sh`.
+
+`kiro-ap` has autoconnect priority 100, so after a restart the Jetson may come up as the hotspot instead of on your normal Wi-Fi.
+
+## 3. SSH
+
+Already on. From a laptop on GeminiBOT: `ssh YOUR-USER@10.42.0.1`.
+
+## 4. Try it: pretend robot
 
 ```bash
-bash ~/kiro-webapp/deploy/setup_hotspot.sh
+cd ~/Desktop/kiro-webapp && ./run.sh
 ```
 
-If it fails on 5 GHz, use 2.4 GHz:
+Open **http://localhost:8080** on the Jetson, or **http://10.42.0.1:8080** from a laptop or phone on GeminiBOT. PIN **0000**. Buttons start harmless stand-in programs. The camera is real. Stop with Ctrl+C.
+
+## 5. Real robot
+
+Choose your own PIN:
 
 ```bash
-BAND=bg CHANNEL=6 bash ~/kiro-webapp/deploy/setup_hotspot.sh
+cd ~/Desktop/kiro-webapp && KIRO_OPERATOR_PIN=your-pin ./run.sh robot
 ```
 
-On the laptop, join the Wi-Fi **GeminiBOT**.
+The page must say **ROBOT** at the top. Then, in this order:
 
-## 3. Turn on SSH (so the monitor can go)
+| Step | What | Check |
+|---|---|---|
+| 1 | Turn on the 12 V wheel power. **Robot on blocks**, wheels in the air | |
+| 2 | Take control, press **Start base** | The log under Base says `휠 서보 응답 4/4`. If `0/4`, the 12 V power is off |
+| 3 | Touch the move stick gently | Wheels turn. Let go: they stop within half a second |
+| 4 | Press E-STOP | Wheels stop. Only the operator can release it |
+| 5 | Close the browser tab while driving | Wheels stop (heartbeat) |
+| 6 | Floor test at low speed, turbo off | |
 
-```bash
-sudo systemctl enable --now ssh
-```
+Arms (5 V arm power on, leader arms plugged in):
 
-From the laptop:
+| Button | Runs (old code) |
+|---|---|
+| Fold / Hold / Release | `arm_tuck.py --tuck / --hold / --release --arm <side> --yes` |
+| Teleop On | `lerobot-teleoperate` with the same ports and ids as the old panel |
+| Skill Run | `run_policy.sh run <model> 20` (right arm, cameras `top` + `right_wrist`) |
+| Voice start | `ros2 run so101_base voice_cmd` push-to-talk, Korean phrases, 0.2 m / 45° steps |
 
-```bash
-ssh your-jetson-username@10.42.0.1
-```
+Release torque makes the arm fall. Hold the arm first. Teleop off also turns torque off (LeRobot does this).
 
-When this works, unplug the monitor, keyboard and mouse and restart the Jetson. The hotspot and SSH should come back by themselves.
+The **left arm** stays blocked: its calibration was broken on 16 Nov. After a new calibration, start the server with `KIRO_LEFT_ARM_OK=1`.
 
-## 4. First test with the pretend robot
-
-```bash
-cd ~/kiro-webapp && ./run.sh
-```
-
-On the laptop open **http://10.42.0.1:8080**, PIN **0000**. If the page works here, the network part is done. Stop the server with Ctrl+C.
-
-## 5. Connect it to the wheels
-
-Install `twist_mux` once:
+Useful checks in another terminal (`source /opt/ros/jazzy/setup.bash` first):
 
 ```bash
-sudo apt install ros-jazzy-twist-mux
-```
-
-**Terminal 1** starts the wheel node and `twist_mux`:
-
-```bash
-source /opt/ros/jazzy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch ~/kiro-webapp/deploy/kiro_base.launch.py
-```
-
-**Terminal 2** starts the server in robot mode. Choose your own PIN:
-
-```bash
-cd ~/kiro-webapp && KIRO_OPERATOR_PIN=your-pin ./run.sh robot
-```
-
-The badge on the page must now say **ROBOT**.
-
-**Put the robot on blocks first**, so the wheels are in the air. Take control and move a stick. The wheels should turn. Then do the floor test from the to-do list.
-
-Useful checks in a third terminal (after `source /opt/ros/jazzy/setup.bash`):
-
-```bash
-ros2 topic echo /cmd_vel_web
+ros2 topic echo /cmd_vel_raw
 ```
 
 ```bash
@@ -94,46 +88,54 @@ ros2 topic echo /cmd_vel
 
 | Problem | Try |
 |---|---|
-| `/cmd_vel_web` has values, `/cmd_vel` has none | `twist_mux` is not passing them on. Check `ros2 topic echo /e_stop` is `false` |
-| `twist_mux` will not work at all | Skip it: start the server with `KIRO_CMD_TOPIC=cmd_vel` and run `mecanum_base_node` alone |
-| Server says "Refusing to drive a real robot with the default PIN" | Set `KIRO_OPERATOR_PIN` |
-| Page shows MOCK instead of ROBOT | ROS was not loaded. Use `./run.sh robot` |
+| Base log says `응답 없는 서보 ID [8, 7, 10, 9]` | 12 V wheel power is off. Turn it on, press Start base again |
+| `/cmd_vel_raw` has values, `/cmd_vel` has none | The base (with its guard) is not running. Press Start base |
+| Page shows MOCK instead of ROBOT | Use `./run.sh robot` |
+| Camera says "in use" | A skill or recording holds it. It comes back when that ends |
+| "Refusing to drive a real robot with the default PIN" | Set `KIRO_OPERATOR_PIN` |
 
-## 6. Start everything at power-on
+## 6. Shut down and restart buttons (optional, sudo)
+
+```bash
+sed "s/YOUR_USER/$USER/" ~/Desktop/kiro-webapp/deploy/kiro-shutdown.sudoers | sudo tee /etc/sudoers.d/kiro-shutdown >/dev/null && sudo chmod 440 /etc/sudoers.d/kiro-shutdown && sudo visudo -c
+```
+
+This allows exactly two commands, `systemctl poweroff` and `systemctl reboot`, without a password.
+
+## 7. Start at power-on (sudo)
 
 Put the settings (and the PIN) in a file only root can read:
 
 ```bash
-printf 'KIRO_BACKEND=ros\nKIRO_OPERATOR_PIN=CHANGE-ME\n' | sudo tee /etc/kiro-webapp.env && sudo chmod 600 /etc/kiro-webapp.env
+printf 'KIRO_BACKEND=ros\nKIRO_OPERATOR_PIN=CHANGE-ME\n' | sudo tee /etc/kiro-webapp.env >/dev/null && sudo chmod 600 /etc/kiro-webapp.env
 ```
 
 ```bash
 sudo nano /etc/kiro-webapp.env
 ```
 
-Install the two services:
+Install the service:
 
 ```bash
-cd ~/kiro-webapp && for s in kiro-base kiro-webapp; do sed "s/YOUR_USER/$USER/g" deploy/$s.service | sudo tee /etc/systemd/system/$s.service >/dev/null; done
+cd ~/Desktop/kiro-webapp && sed "s#REPO_DIR#$PWD#g; s/YOUR_USER/$USER/g" deploy/kiro-webapp.service | sudo tee /etc/systemd/system/kiro-webapp.service >/dev/null
 ```
 
 ```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now kiro-base kiro-webapp
+sudo systemctl daemon-reload && sudo systemctl enable --now kiro-webapp
 ```
 
-See what they are doing:
+See what it is doing:
 
 ```bash
-journalctl -u kiro-webapp -u kiro-base -f
+journalctl -u kiro-webapp -f
 ```
 
-Restart the Jetson. One minute later the page should be reachable with nobody logged in.
+The base is not started at power-on. The operator presses **Start base** on the page after the 12 V power is on.
 
 ## Files in this folder
 
 | File | What it is |
 |---|---|
-| `setup_hotspot.sh` | Creates the Wi-Fi hotspot with NetworkManager |
-| `twist_mux.yaml` | Priorities: robot gamepad over web, E-STOP over everything |
-| `kiro_base.launch.py` | Starts `mecanum_base_node` and `twist_mux` (add `joy:=true` for a gamepad plugged into the robot) |
-| `kiro-webapp.service`, `kiro-base.service` | Start at power-on |
+| `setup_hotspot.sh` | Creates the GeminiBOT hotspot with NetworkManager |
+| `kiro-webapp.service` | Starts the server at power-on |
+| `kiro-shutdown.sudoers` | Lets the page shut down or restart the Jetson |

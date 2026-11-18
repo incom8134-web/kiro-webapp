@@ -8,17 +8,19 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 
 ## Status
 
-**Version 0.1.** Driving works in **mock mode** (a pretend robot). It has **not been run on the real robot yet**: the ROS 2 part and the files in `deploy/` are written but untested.
+**Version 0.2 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
 
 | Part | State |
 |---|---|
-| Web page: on-screen sticks, gamepad, keyboard | Works (tested in a browser) |
-| One operator at a time, with PIN | Works |
-| E-STOP and stop-on-lost-connection | Works |
-| Mock robot for testing on any computer | Works |
-| Real robot (ROS 2, `twist_mux`, hotspot, start at power-on) | Written, **not tested on the robot** |
-| Camera, arm buttons, teleop on/off | Next (see the to-do list) |
-| Leader arms on the laptop, voice, lidar map | Later |
+| Driving: on-screen sticks, gamepad, keyboard, one operator with PIN, E-STOP, heartbeat stop | Works. 24 automatic tests |
+| Swiss-style page, English / Korean switch, phone layout | Works |
+| Live camera (Gemini 335 `top`, wrist webcams when plugged in) | Works on the robot |
+| Base start / stop (old launcher with lidar guard) | Wired, needs 12 V wheel power to test |
+| Arms: fold, hold, release, teleop right / left / both | Wired to the old scripts. Left arm blocked until recalibrated |
+| Run a skill (`right_arm_task2_act`) | Wired to `run_policy.sh`. Needs the `right_wrist` webcam |
+| Voice: hold-to-talk (button, V key, gamepad Y), Korean | Wired to the old `voice_cmd`. English needs an English model |
+| Health: Jetson, servo voltage / temperature / current, cameras. Shutdown / restart | Works (shutdown needs `deploy/kiro-shutdown.sudoers`) |
+| Laptop remote arm control, recording, servo tester, calibration | Not in the page yet. Use the old app |
 
 Plan and checklist: [to-do until 20 Nov](docs/KIRO_Todo_until_20_Nov.docx) · [full project plan](docs/KIRO_Command_Center_Project_Plan.docx)
 
@@ -58,6 +60,7 @@ python -m venv .venv
 | Move | left stick | W A S D | left stick |
 | Turn | right stick | Q / E | right stick |
 | Turbo | RB | Shift | Turbo switch |
+| Talk (voice on) | hold Y | hold V | Hold to talk button |
 | **E-STOP** | Back / Select | Esc | red button |
 
 If two inputs are used at once, the gamepad wins, then the on-screen sticks, then the keyboard.
@@ -72,6 +75,11 @@ If two inputs are used at once, the gamepad wins, then the on-screen sticks, the
 | After E-STOP or taking control | The controls must be let go once before the robot moves again |
 | One operator | Other devices can only watch. Taking over needs the PIN |
 | Speed | 0.15 m/s normal, 0.30 m/s turbo. Speed rises smoothly and drops at once |
+| Lidar guard | Web commands go to `/cmd_vel_raw`, through the old obstacle guard, like the robot gamepad and voice |
+| E-STOP also stops | Running skill and voice. Teleop keeps running: a person holds the leader arm |
+| Devices | Two programs never open the same arm port or camera. The servo check skips busy ports |
+| Dangerous buttons | Release torque, shut down and restart must be held for 2 s |
+| Left arm | Blocked until recalibrated (`KIRO_LEFT_ARM_OK=1`) |
 
 Software is not enough for public demos. The robot also needs a **physical switch that cuts servo power**.
 

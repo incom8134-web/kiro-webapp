@@ -1,7 +1,7 @@
 """The robot base. Two versions with the same methods:
 
 MockBase - a pretend robot, for trying the page on any computer.
-RosBase  - the real robot. Publishes speed commands for twist_mux and reads /odom.
+RosBase  - the real robot. Publishes speed commands to /cmd_vel_raw (through the lidar guard) and reads /odom.
 """
 from __future__ import annotations
 
@@ -29,6 +29,12 @@ class MockBase:
     def set_estop(self, on: bool) -> None:
         pass
 
+    def publish_str(self, topic: str, text: str) -> None:
+        pass
+
+    def latest_str(self, topic: str) -> str | None:
+        return None
+
     def odom(self) -> dict:
         return {"x": round(self.x, 3), "y": round(self.y, 3), "th": round(self.th, 3),
                 "vx": round(self.v[0], 3), "vy": round(self.v[1], 3), "wz": round(self.v[2], 3)}
@@ -46,9 +52,9 @@ class RosBase:
         import rclpy
         from geometry_msgs.msg import Twist
         from nav_msgs.msg import Odometry
-        from std_msgs.msg import Bool
+        from std_msgs.msg import Bool, String
 
-        self._rclpy, self._Twist, self._Bool = rclpy, Twist, Bool
+        self._rclpy, self._Twist, self._Bool, self._String = rclpy, Twist, Bool, String
         if not rclpy.ok():
             rclpy.init()
         self._node = rclpy.create_node("kiro_webapp")
@@ -57,6 +63,11 @@ class RosBase:
         self._lock = threading.Lock()
         self._odom: dict | None = None
         self._node.create_subscription(Odometry, cfg.odom_topic, self._on_odom, 10)
+        # Text topics of the old voice node and lidar guard, shown on the page
+        self._str_pubs = {t: self._node.create_publisher(String, t, 10) for t in ("/voice/listen", "/voice/say")}
+        self._str_latest: dict[str, str] = {}
+        for topic in ("/voice/text", "/voice/status", "/obstacle_guard/status"):
+            self._node.create_subscription(String, topic, lambda m, t=topic: self._on_str(t, m), 10)
         self._thread = threading.Thread(target=rclpy.spin, args=(self._node,), daemon=True)
         self._thread.start()
 
@@ -69,9 +80,23 @@ class RosBase:
                           "th": round(th, 3), "vx": round(t.linear.x, 3), "vy": round(t.linear.y, 3),
                           "wz": round(t.angular.z, 3)}
 
+    def _on_str(self, topic: str, msg) -> None:
+        with self._lock:
+            self._str_latest[topic] = str(msg.data)[:300]
+
+    def publish_str(self, topic: str, text: str) -> None:
+        pub = self._str_pubs.get(topic)
+        if pub is None:
+            pub = self._str_pubs[topic] = self._node.create_publisher(self._String, topic, 10)
+        pub.publish(self._String(data=text))
+
+    def latest_str(self, topic: str) -> str | None:
+        with self._lock:
+            return self._str_latest.get(topic)
+
     def apply(self, vx: float, vy: float, wz: float, publish: bool, dt: float) -> None:
         if not publish:
-            return  # stay silent: twist_mux then lets the robot's own gamepad through
+            return  # stay silent so the robot's own gamepad and voice can drive
         m = self._Twist()
         m.linear.x, m.linear.y, m.angular.z = float(vx), float(vy), float(wz)
         self._cmd_pub.publish(m)

@@ -1,0 +1,3 @@
+# Lets the command center shut down or restart the Jetson from the page, nothing else.
+# Install: see deploy/README.md step 6. YOUR_USER is filled in by the install command.
+YOUR_USER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot

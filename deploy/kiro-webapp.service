@@ -1,4 +1,5 @@
 # Starts the command center at power-on. See deploy/README.md for how to install.
+# REPO_DIR and YOUR_USER are filled in by the install command.
 [Unit]
 Description=KIRO Command Center (robot server)
 After=network-online.target
@@ -6,10 +7,13 @@ Wants=network-online.target
 
 [Service]
 User=YOUR_USER
-WorkingDirectory=/home/YOUR_USER/kiro-webapp
+WorkingDirectory=REPO_DIR
 # The PIN lives in this file, never in git:
 EnvironmentFile=/etc/kiro-webapp.env
-ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash && exec /home/YOUR_USER/kiro-webapp/.venv/bin/python -m robot_server'
+ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash && exec REPO_DIR/.venv/bin/python -m robot_server'
+# Ctrl+C-style stop so the programs it started (base, teleop, skill) shut down cleanly
+KillSignal=SIGINT
+TimeoutStopSec=30
 Restart=on-failure
 RestartSec=2
 

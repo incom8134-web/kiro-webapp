@@ -35,10 +35,21 @@ class Config:
     accel_lin: float = 0.6  # m/s^2
     accel_ang: float = 3.0  # rad/s^2
 
-    # ROS 2 topic names (used only by the ros backend)
-    cmd_topic: str = "cmd_vel_web"
+    # ROS 2 topic names (used only by the ros backend). cmd_vel_raw goes through the
+    # old lidar obstacle_guard to /cmd_vel, the same path as the robot gamepad and voice.
+    cmd_topic: str = "cmd_vel_raw"
     estop_topic: str = "e_stop"
     odom_topic: str = "odom"
+
+    # The old robot code (scripts this server starts) and the trained models
+    so101_dir: str = "~/so101"
+    lerobot_venv: str = "~/lerobot-venv"
+    policies_dir: str = "~/policies"
+    skill_seconds: float = 20.0
+    health_period: float = 3.0
+    # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
+    # Motion of the left arm stays blocked until it is recalibrated and this is set to 1.
+    left_arm_ok: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -62,6 +73,12 @@ class Config:
             cmd_topic=os.environ.get("KIRO_CMD_TOPIC", d.cmd_topic),
             estop_topic=os.environ.get("KIRO_ESTOP_TOPIC", d.estop_topic),
             odom_topic=os.environ.get("KIRO_ODOM_TOPIC", d.odom_topic),
+            so101_dir=os.environ.get("KIRO_SO101_DIR", d.so101_dir),
+            lerobot_venv=os.environ.get("KIRO_LEROBOT_VENV", d.lerobot_venv),
+            policies_dir=os.environ.get("KIRO_POLICIES_DIR", d.policies_dir),
+            skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
+            health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
+            left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",
         )
 
     @property

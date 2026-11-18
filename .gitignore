@@ -14,3 +14,6 @@ datasets/
 *.safetensors
 *.zip
 logs/
+
+# Local Claude Code settings
+.claude/settings.local.json

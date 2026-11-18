@@ -3,77 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0f141b">
+<meta name="theme-color" content="#ffffff">
 <title>KIRO Command Center</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand"><span class="logo"></span><span class="name">KIRO Command Center</span><span id="backend" class="badge">...</span></div>
-  <div class="status">
-    <span id="link" class="pill bad">Offline</span>
-    <span id="opstat" class="pill">No operator</span>
+<header class="bar">
+  <div class="brand">KIRO</div>
+  <div class="cells">
+    <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
   </div>
-  <button id="estop" class="estop" title="Stop the robot now (Esc)">E-STOP</button>
+  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한국어</button></div>
+  <button id="estop" class="estop" type="button" data-i18n="estop">E-STOP</button>
 </header>
 
 <div id="banner" class="banner" hidden></div>
 
 <main>
-  <section class="card map">
-    <div class="card-head"><h2>Robot</h2><span id="pose" class="muted"></span></div>
-    <canvas id="map"></canvas>
-    <div class="readout">
-      <div><span>Forward</span><b id="vx">0.00</b><i>m/s</i></div>
-      <div><span>Sideways</span><b id="vy">0.00</b><i>m/s</i></div>
-      <div><span>Turn</span><b id="wz">0.00</b><i>rad/s</i></div>
-      <div><span>Input</span><b id="src">none</b><i>&nbsp;</i></div>
+  <section class="stage" id="stage">
+    <img id="cam" class="cam" alt="" hidden>
+    <div id="cam-empty" class="empty"><span id="cam-msg"></span><small id="cam-why"></small></div>
+    <div id="camtabs" class="camtabs"></div>
+
+    <div class="inset">
+      <div class="head"><span data-i18n="map">Map</span><span id="pose"></span></div>
+      <canvas id="map"></canvas>
     </div>
+
+    <div id="hint" class="hint"></div>
+    <div class="speeds">
+      <div><span data-i18n="speed.fwd">Forward m/s</span><b id="vx">0.00</b></div>
+      <div><span data-i18n="speed.side">Sideways m/s</span><b id="vy">0.00</b></div>
+      <div><span data-i18n="speed.turn">Turn rad/s</span><b id="wz">0.00</b></div>
+    </div>
+    <div class="stick-wrap l"><div id="stick-move" class="stick"><div class="knob"></div></div><span data-i18n="stick.move">Move</span></div>
+    <div class="stick-wrap r"><div id="stick-turn" class="stick h"><div class="knob"></div></div><span data-i18n="stick.turn">Turn</span></div>
   </section>
 
-  <section class="card ctl">
-    <div class="card-head"><h2>Operator</h2></div>
-    <form id="take-box" autocomplete="off">
-      <input id="pin" type="password" inputmode="numeric" placeholder="Operator PIN" aria-label="Operator PIN">
-      <button id="take" class="btn primary" type="submit">Take control</button>
-    </form>
-    <div id="held-box" hidden>
-      <p class="ok-line">You are in control.</p>
-      <button id="release" class="btn" type="button">Release control</button>
-    </div>
-    <p id="note" class="note" role="status"></p>
-    <label class="switch"><input type="checkbox" id="turbo"><span>Turbo speed</span></label>
-    <p id="pad" class="muted">Gamepad: not connected</p>
-    <details>
-      <summary>How to drive</summary>
-      <table class="keys">
-        <tr><th></th><th>Gamepad</th><th>Keyboard</th><th>Screen</th></tr>
-        <tr><td>Enable</td><td>hold LB</td><td>hold Space</td><td>touch a stick</td></tr>
-        <tr><td>Move</td><td>left stick</td><td>W A S D</td><td>left stick</td></tr>
-        <tr><td>Turn</td><td>right stick</td><td>Q / E</td><td>right stick</td></tr>
-        <tr><td>Turbo</td><td>RB</td><td>Shift</td><td>switch</td></tr>
-        <tr><td>E-STOP</td><td>Back</td><td>Esc</td><td>red button</td></tr>
-      </table>
-    </details>
-  </section>
+  <aside class="rail">
+    <section class="sec">
+      <h2><span class="n">01</span><span data-i18n="sec.control">Control</span><span id="src" class="st"></span></h2>
+      <form id="take-box" autocomplete="off" class="row">
+        <input id="pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="pin" aria-label="PIN">
+        <button id="take" class="btn primary" type="submit" data-i18n="take">Take control</button>
+      </form>
+      <div id="held-box" class="row" hidden>
+        <span class="grow" data-i18n="held">You are in control.</span>
+        <button id="release" class="btn" type="button" data-i18n="release">Release control</button>
+      </div>
+      <p id="note" class="small" role="status"></p>
+      <label class="switch"><input type="checkbox" id="turbo"><span data-i18n="turbo">Turbo speed</span></label>
+      <p id="pad" class="mute small"></p>
+      <details>
+        <summary data-i18n="help">How to drive</summary>
+        <table class="keys">
+          <tr><th></th><th data-i18n="help.gamepad"></th><th data-i18n="help.keys"></th><th data-i18n="help.screen"></th></tr>
+          <tr><td data-i18n="help.enable"></td><td data-i18n="help.holdLB"></td><td data-i18n="help.holdSpace"></td><td data-i18n="help.touch"></td></tr>
+          <tr><td data-i18n="help.move"></td><td data-i18n="help.ls"></td><td>W A S D</td><td data-i18n="help.ls"></td></tr>
+          <tr><td data-i18n="help.turn"></td><td data-i18n="help.rs"></td><td>Q / E</td><td data-i18n="help.rs"></td></tr>
+          <tr><td data-i18n="help.turbo"></td><td>RB</td><td>Shift</td><td data-i18n="help.switch"></td></tr>
+          <tr><td data-i18n="help.talk"></td><td data-i18n="help.holdY"></td><td data-i18n="help.holdV"></td><td data-i18n="help.button"></td></tr>
+          <tr><td>E-STOP</td><td>Back</td><td>Esc</td><td data-i18n="help.red"></td></tr>
+        </table>
+      </details>
+    </section>
 
-  <section class="card sticks">
-    <div class="stick-wrap"><div id="stick-move" class="stick"><div class="knob"></div></div><span>Move</span></div>
-    <div class="stick-hint" id="hint">Take control to drive</div>
-    <div class="stick-wrap"><div id="stick-turn" class="stick"><div class="knob"></div></div><span>Turn</span></div>
-  </section>
+    <section class="sec">
+      <h2><span class="n">02</span><span data-i18n="sec.base">Base</span><span id="base-st" class="st"></span></h2>
+      <div class="row">
+        <button id="base-btn" class="btn" type="button" data-op></button>
+        <span id="base-lidar" class="mute small grow"></span>
+      </div>
+      <p id="base-guard" class="small mute"></p>
+      <pre id="base-tail" class="tail" hidden></pre>
+    </section>
 
-  <section class="card next">
-    <div class="card-head"><h2>Coming next</h2></div>
-    <div class="tiles">
-      <div class="tile"><b>Cameras</b><span>M2</span></div>
-      <div class="tile"><b>Lidar map</b><span>M2</span></div>
-      <div class="tile"><b>Teach arms</b><span>M3</span></div>
-      <div class="tile"><b>Skills and voice</b><span>M4</span></div>
-    </div>
-  </section>
+    <section class="sec">
+      <h2><span class="n">03</span><span data-i18n="sec.arms">Arms</span><span id="arms-st" class="st"></span></h2>
+      <p id="left-blocked" class="err small" data-i18n="arm.leftblocked" hidden></p>
+      <div id="arms"></div>
+      <pre id="arms-tail" class="tail" hidden></pre>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">04</span><span data-i18n="sec.skills">Skills</span><span id="skill-st" class="st"></span></h2>
+      <div id="skills"></div>
+      <pre id="skill-tail" class="tail" hidden></pre>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">05</span><span data-i18n="sec.voice">Voice</span><span id="voice-st" class="st"></span></h2>
+      <div class="row"><button id="voice-btn" class="btn" type="button" data-op></button></div>
+      <div class="row"><button id="talk" class="btn talk" type="button" data-i18n="voice.talk" data-op>Hold to talk</button></div>
+      <table class="kv"><tr><th data-i18n="voice.heard">Heard</th><td id="voice-text">-</td></tr></table>
+      <p id="voice-note" class="small mute" data-i18n="voice.koonly"></p>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">06</span><span data-i18n="sec.health">Health</span></h2>
+      <table class="kv" id="health"></table>
+      <div class="row" style="margin-top:12px">
+        <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.reboot">Restart</span></button>
+        <button id="shutdown" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.shutdown">Shut down</span></button>
+        <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">07</span><span data-i18n="sec.log">Activity</span></h2>
+      <ul id="log" class="log"></ul>
+    </section>
+    <div class="foot" id="ver"></div>
+  </aside>
 </main>
-<footer><span id="ver"></span></footer>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

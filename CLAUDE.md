@@ -36,10 +36,14 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | Path | Content |
 |---|---|
 | `robot_server/control.py` | Operator lock, PIN, E-STOP, watchdog, speed limits. Pure logic with tests |
-| `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_web`, `/e_stop`, reads `/odom`) |
-| `robot_server/main.py` | FastAPI app, WebSocket `/ws`, serves `web/` |
-| `web/` | Plain HTML, CSS, JavaScript. No build step, no CDN (must work offline) |
-| `deploy/` | Hotspot script, `twist_mux` config, launch file, systemd units. **Not yet run on the robot** |
+| `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_raw` into the old lidar guard, `/e_stop`, voice topics; reads `/odom`) |
+| `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
+| `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
+| `robot_server/camera.py` | MJPEG preview, device lookup through the old `cams_config.py` |
+| `robot_server/servo_probe.py` | Read-only servo voltage / temperature / current, run as a short subprocess |
+| `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/` |
+| `web/` | Plain HTML, CSS, JavaScript. `i18n.js` holds every string in English and Korean. No build step, no CDN |
+| `deploy/` | Hotspot script, systemd unit, shutdown sudoers rule, robot setup steps |
 | `docs/` | Handover, architecture, plan, to-do list |
 
 ## Conventions
@@ -47,4 +51,6 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 - Keep the page free of build tools and external downloads.
 - Every string shown in the page must exist in English and Korean once the language switch is added.
 - Add a test for every change to the control logic.
+- The repo on the Jetson is `~/Desktop/kiro-webapp`. The old code is `~/so101` (its own git repo, branch `master`).
+- Never re-implement what the old code does. Start its scripts as jobs (`robot_server/robot.py`).
 - The old robot notes on the Jetson (`CLAUDE.md` in the old code folder, probably `~/so101`) are the source of truth for hardware facts: device names, servo IDs, voltages, known problems.
