@@ -8,7 +8,7 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 
 ## Status
 
-**Version 0.2 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
+**Version 0.3 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
 
 | Part | State |
 |---|---|
@@ -18,7 +18,9 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 | Base start / stop (old launcher with lidar guard) | Wired, needs 12 V wheel power to test |
 | Arms: fold, hold, release, teleop right / left / both | Wired to the old scripts. Left arm blocked until recalibrated |
 | Run a skill (`right_arm_task2_act`) | Wired to `run_policy.sh`. Needs the `right_wrist` webcam |
-| Voice: hold-to-talk (button, V key, gamepad Y), Korean | Wired to the old `voice_cmd`. English needs an English model |
+| Voice: hold-to-talk (button, V key, gamepad Y), Korean and English (follows the page language) | Wired to the old `voice_cmd`. English needs the Vosk model `vosk-model-small-en-us-0.15` in `~/models/vosk` |
+| Lidar points on the map (`/scan`, same mounting angle as the obstacle guard) | Works with the simulated room in mock mode. Lidar not plugged in yet |
+| Dashboard page `/dashboard.html`: camera, lidar, speed, distance, nearest object, Jetson, servos, programs, activity | Works. Read-only, for a big screen |
 | Health: Jetson, servo voltage / temperature / current, cameras. Shutdown / restart | Works (shutdown needs `deploy/kiro-shutdown.sudoers`) |
 | Laptop remote arm control, recording, servo tester, calibration | Not in the page yet. Use the old app |
 

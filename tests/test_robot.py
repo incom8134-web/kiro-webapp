@@ -116,3 +116,28 @@ def test_job_gives_camera_back_when_it_ends():
         time.sleep(0.05)
     assert calls == ["pause", "resume"]
     assert jobs.get("skill").lines[-1] == "hi"
+
+
+def test_scan_points_geometry():
+    import math
+
+    from robot_server.base import scan_points
+    # one beam straight ahead of the lidar at 1 m; lidar sits 0.2 m in front of the robot centre
+    pts = scan_points([1.0], 0.0, 0.0, 0.05, 12.0, 0.0, 0.2, 360)
+    assert pts == [120, 0]
+    # same beam with the lidar turned 90 degrees left: the point is on the robot's left
+    pts = scan_points([1.0], 0.0, 0.0, 0.05, 12.0, math.pi / 2, 0.0, 360)
+    assert pts == [0, 100]
+    # invalid ranges are dropped; the nearest point of each bin is kept
+    assert scan_points([float("inf"), 0.01, 2.0, 1.0], 0.0, 0.0, 0.05, 12.0, 0.0, 0.0, 1) == [100, 0]
+
+
+def test_mock_sends_scan_and_odometer(cfg):
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        for _ in range(200):
+            m = op.receive_json()
+            if m["t"] == "scan":
+                break
+        assert m["src"] == "mock" and len(m["xy"]) == 2 * cfg.scan_points
+        s = next(m for m in iter(op.receive_json, None) if m["t"] == "state")
+        assert "odo_m" in s and "up_s" in s

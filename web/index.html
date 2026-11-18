@@ -9,7 +9,7 @@
 </head>
 <body>
 <header class="bar">
-  <div class="brand">KIRO</div>
+  <div class="brand">KIRO<a class="dash-link" href="dashboard.html" data-i18n="dash.open">Dashboard</a></div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
@@ -28,7 +28,7 @@
     <div id="camtabs" class="camtabs"></div>
 
     <div class="inset">
-      <div class="head"><span data-i18n="map">Map</span><span id="pose"></span></div>
+      <div class="head"><span><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose"></span></div>
       <canvas id="map"></canvas>
     </div>
 

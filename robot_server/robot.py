@@ -42,6 +42,7 @@ PORT = {
 SIDES = ("right", "left", "both")
 ARM_ACTIONS = {"fold": "--tuck", "hold": "--hold", "release": "--release"}
 ROS_SETUP = "unset PYTHONPATH; source /opt/ros/jazzy/setup.bash; source \"$HOME/ros2_ws/install/setup.bash\"; "
+VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p device:=auto -p output_topic:=/cmd_vel_raw "
               "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0")
 
@@ -64,6 +65,7 @@ class Robot:
         self.cams: dict[str, Camera] = {}
         self.cam_info: list[dict] = []
         self._stop = threading.Event()
+        self.voice_lang = "ko"
         self.refresh_cameras()
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
@@ -225,14 +227,20 @@ class Robot:
                                             env=self._venv_env(), label=f"skill {name}", stop_wait=8.0), who)
 
     # ---------------------------------------------------------------- voice
-    def voice(self, on: bool, who: str) -> tuple[bool, str]:
+    def voice(self, on: bool, who: str, lang: str = "ko") -> tuple[bool, str]:
         if not on:
             return self._stop_job("voice", who)
+        lang = "en" if lang == "en" else "ko"
+        model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
+        if not self.mock and not model.is_dir():
+            return False, f"Speech model not installed: {model}"
         if self.mock:
-            cmd = self._mock_cmd("voice (Korean, push-to-talk)")
+            cmd = self._mock_cmd(f"voice ({lang}, push-to-talk)")
         else:
-            cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS}"]
-        return self._start("voice", JobSpec(cmd, frozenset({"mic"}), label="voice"), who)
+            cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} "
+                                             f"-p lang:={lang} -p model_path:={model}"]
+        self.voice_lang = lang
+        return self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}"), who)
 
     def talk(self, on: bool) -> tuple[bool, str]:
         if not self.jobs.running("voice"):
@@ -345,7 +353,7 @@ class Robot:
                          **({"live": cam.info()["live"], "paused_by": cam.paused_by, "error": cam.error} if cam else {})})
         return {
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
-            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(),
+            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "events": list(self.events)[-20:],
         }

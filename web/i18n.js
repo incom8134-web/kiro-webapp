@@ -30,6 +30,16 @@ const STRINGS = {
 
     "cam.none": "No camera found", "cam.paused": "Camera in use by {job}", "cam.off": "Camera off",
     "cam.reason": "{key}: {reason}",
+    "dash.control": "Control", "d.uptime": "Uptime", "d.devices": "Devices", "d.camera": "Camera", "d.lidarview": "Lidar",
+    "d.speed": "Speed", "d.dist": "Distance driven", "d.nearest": "Nearest object", "d.temp": "Jetson temperature",
+    "d.cpu": "CPU load", "d.mem": "Memory used", "d.current": "Servo current", "d.since": "since the server started",
+    "d.nolidar": "no lidar", "d.allservos": "all answering servos", "d.noservos": "no servo answering", "d.cores": "cores",
+    "d.last2min": "last 2 min", "d.ago": "{s} s ago", "d.servos": "Servo boards", "d.programs": "Programs",
+    "d.board": "Board", "d.volt": "Voltage", "d.temp2": "Temp", "d.ma": "Current", "d.mockservos": "Mock mode: servo boards are not read.",
+    "d.running": "running", "d.stopped": "stopped", "d.never": "not started",
+    "d.tele_r": "Teleop right", "d.tele_l": "Teleop left", "d.tele_b": "Teleop both", "d.pose_r": "Right arm pose", "d.pose_l": "Left arm pose",
+    "dir.front": "in front", "dir.left": "on the left", "dir.right": "on the right", "dir.back": "behind",
+    "dash.open": "Dashboard", "scan.live": "· lidar", "scan.mock": "· simulated lidar",
     "map": "Map", "pose": "x {x} m  y {y} m  {th}°", "pose.none": "No position yet",
     "speed.fwd": "Forward m/s", "speed.side": "Sideways m/s", "speed.turn": "Turn rad/s",
 
@@ -50,7 +60,7 @@ const STRINGS = {
 
     "voice.start": "Start voice", "voice.stop": "Stop voice", "voice.talk": "Hold to talk",
     "voice.off": "Voice is off", "voice.ready": "Listening when the button is held",
-    "voice.heard": "Heard", "voice.lang": "Speech language", "voice.koonly": "Only a Korean speech model is installed. English needs an English Vosk model.",
+    "voice.heard": "Heard", "voice.lang": "Speech language", "voice.koonly": "The English speech model is not installed yet (vosk-model-small-en-us-0.15).",
 
     "h.jetson": "Jetson", "h.cpu": "CPU", "h.temp": "Temp", "h.mem": "Memory", "h.disk": "Disk",
     "h.servo": "Servos", "h.volt": "V", "h.inuse": "in use by {job}", "h.noread": "no answer",
@@ -90,6 +100,16 @@ const STRINGS = {
 
     "cam.none": "카메라 없음", "cam.paused": "{job}이(가) 카메라 사용 중", "cam.off": "카메라 꺼짐",
     "cam.reason": "{key}: {reason}",
+    "dash.control": "조종", "d.uptime": "가동 시간", "d.devices": "접속 기기", "d.camera": "카메라", "d.lidarview": "라이다",
+    "d.speed": "속도", "d.dist": "주행 거리", "d.nearest": "가장 가까운 물체", "d.temp": "젯슨 온도",
+    "d.cpu": "CPU 부하", "d.mem": "메모리 사용", "d.current": "서보 전류", "d.since": "서버 시작 이후",
+    "d.nolidar": "라이다 없음", "d.allservos": "응답하는 서보 전체", "d.noservos": "응답하는 서보 없음", "d.cores": "코어",
+    "d.last2min": "최근 2분", "d.ago": "{s}초 전", "d.servos": "서보 보드", "d.programs": "프로그램",
+    "d.board": "보드", "d.volt": "전압", "d.temp2": "온도", "d.ma": "전류", "d.mockservos": "모의 모드: 서보 보드를 읽지 않습니다.",
+    "d.running": "실행 중", "d.stopped": "멈춤", "d.never": "시작 안 함",
+    "d.tele_r": "오른팔 원격조종", "d.tele_l": "왼팔 원격조종", "d.tele_b": "양팔 원격조종", "d.pose_r": "오른팔 자세", "d.pose_l": "왼팔 자세",
+    "dir.front": "앞", "dir.left": "왼쪽", "dir.right": "오른쪽", "dir.back": "뒤",
+    "dash.open": "대시보드", "scan.live": "· 라이다", "scan.mock": "· 모의 라이다",
     "map": "지도", "pose": "x {x} m  y {y} m  {th}°", "pose.none": "위치 정보 없음",
     "speed.fwd": "전진 m/s", "speed.side": "횡이동 m/s", "speed.turn": "회전 rad/s",
 
@@ -110,7 +130,7 @@ const STRINGS = {
 
     "voice.start": "음성 켜기", "voice.stop": "음성 끄기", "voice.talk": "누르고 말하기",
     "voice.off": "음성 꺼짐", "voice.ready": "버튼을 누르는 동안 듣습니다",
-    "voice.heard": "인식", "voice.lang": "음성 언어", "voice.koonly": "한국어 음성 모델만 설치되어 있습니다. 영어는 영어 Vosk 모델이 필요합니다.",
+    "voice.heard": "인식", "voice.lang": "음성 언어", "voice.koonly": "영어 음성 모델이 아직 설치되지 않았습니다 (vosk-model-small-en-us-0.15).",
 
     "h.jetson": "젯슨", "h.cpu": "CPU", "h.temp": "온도", "h.mem": "메모리", "h.disk": "디스크",
     "h.servo": "서보", "h.volt": "V", "h.inuse": "{job} 사용 중", "h.noread": "응답 없음",

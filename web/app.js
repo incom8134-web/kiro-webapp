@@ -12,10 +12,11 @@
 const $ = (id) => document.getElementById(id);
 const SEND_MS = 50;      // 20 messages per second
 const DEADZONE = 0.12;   // ignore tiny gamepad stick noise
-const PX_PER_M = 60;     // map scale (small inset)
+const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
 
-const state = { ws: null, open: false, server: null, robot: null, rtt: null, cam: null, camKey: null };
+const state = { ws: null, open: false, server: null, robot: null, rtt: null, cam: null, camKey: null, scan: null };
+const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#00843d";
 const input = {
   keys: new Set(),
   move: { x: 0, y: 0, active: false },   // left on-screen stick
@@ -54,6 +55,7 @@ function connect() {
     const m = JSON.parse(ev.data);
     if (m.t === "state") { state.server = m; render(); }
     else if (m.t === "robot") { state.robot = m; renderRobot(); }
+    else if (m.t === "scan") { m.at = performance.now(); state.scan = m; }
     else if (m.t === "pong") { state.rtt = performance.now() - m.ts; renderLink(); }
     else if (m.t === "note") showNote(m.msg, !m.ok);
   };
@@ -214,7 +216,7 @@ for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) talk.addEv
 talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base") }));
-$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice") }));
+$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
 
 /* Hold a button for HOLD_MS to confirm. Used for shutdown, restart and torque release. */
 function holdButton(el, action) {
@@ -413,7 +415,9 @@ function renderRobot() {
   $("voice-st").className = "st" + (vOn ? " live" : "");
   $("talk").disabled = !me || !vOn;
   $("voice-text").textContent = (r.voice && (r.voice.text || r.voice.status)) || "-";
-  $("voice-note").hidden = (r.voice_models || []).some((m) => m.includes("-en"));
+  // The speech language follows the page language when voice is started
+  $("voice-note").hidden = LANG !== "en" || (r.voice_models || []).some((m) => m.includes("-en"));
+  if (vOn) $("voice-st").textContent += ` · ${(r.voice_lang || "ko").toUpperCase()}`;
 
   // Health
   const h = r.health || {}, jt = h.jetson || {};
@@ -527,13 +531,21 @@ function drawMap() {
   if (last && Math.hypot(o.x - last.x, o.y - last.y) > 1.5) trail.length = 0;   // position was reset
   if (!last || Math.hypot(o.x - last.x, o.y - last.y) > 0.02) { trail.push({ x: o.x, y: o.y }); if (trail.length > 600) trail.shift(); }
   if (trail.length > 1) {
-    g.strokeStyle = "#002fa7"; g.lineWidth = 1.5; g.beginPath();
+    g.strokeStyle = ACCENT; g.lineWidth = 1.5; g.beginPath();
     trail.forEach((p, i) => (i ? g.lineTo(sx(p.y), sy(p.x)) : g.moveTo(sx(p.y), sy(p.x))));
     g.lineTo(w / 2, h / 2); g.stroke();
   }
 
   // robot body (0.45 m long, 0.35 m wide)
   g.save(); g.translate(w / 2, h / 2); g.rotate(-o.th);
+  // lidar points, robot frame (x forward = up, y left = left). Hidden when older than 1 s.
+  const sc = state.scan && performance.now() - state.scan.at < 1000 ? state.scan : null;
+  $("scan-src").textContent = sc ? (sc.src === "mock" ? t("scan.mock") : t("scan.live")) : "";
+  if (sc) {
+    g.fillStyle = "#111111";
+    const xy = sc.xy;
+    for (let i = 0; i < xy.length; i += 2) g.fillRect(-xy[i + 1] / 100 * S - 1, -xy[i] / 100 * S - 1, 2, 2);
+  }
   const L = 0.45 * S, W = 0.35 * S;
   const stop = s && s.estop;
   g.fillStyle = "#ffffff"; g.strokeStyle = stop ? "#e10600" : "#111111"; g.lineWidth = 1.5;
@@ -544,7 +556,7 @@ function drawMap() {
   const cmd = s ? s.cmd : { vx: 0, vy: 0 };
   const ax = -cmd.vy * S * 3, ay = -cmd.vx * S * 3, al = Math.hypot(ax, ay);
   if (al > 3) {
-    g.strokeStyle = "#002fa7"; g.fillStyle = "#002fa7"; g.lineWidth = 2;
+    g.strokeStyle = ACCENT; g.fillStyle = ACCENT; g.lineWidth = 2;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(ax, ay); g.stroke();
     const a = Math.atan2(ay, ax);
     g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax - 7 * Math.cos(a - 0.5), ay - 7 * Math.sin(a - 0.5));

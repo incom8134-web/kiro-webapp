@@ -30,7 +30,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     cfg = cfg or Config.from_env()
     ctrl = Controller(cfg)
     sockets: dict[str, tuple[WebSocket, asyncio.Lock]] = {}
-    state: dict = {"base": base, "robot": robot}
+    state: dict = {"base": base, "robot": robot, "odo_m": 0.0, "last_xy": None, "started": time.time()}
 
     async def send(cid: str, msg: dict) -> None:
         entry = sockets.get(cid)
@@ -47,7 +47,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         b = state["base"]
         s = ctrl.snapshot(cid)
         s.update(t="state", backend=b.name, odom=b.odom(), version=__version__,
-                 default_pin=cfg.pin_is_default and b.name == "mock")
+                 default_pin=cfg.pin_is_default and b.name == "mock",
+                 odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]))
         return s
 
     def who(cid: str) -> str:
@@ -70,8 +71,19 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             if ctrl.estop and not estop_seen:  # E-STOP just went on: stop skills and voice too
                 asyncio.get_running_loop().run_in_executor(None, state["robot"].on_estop, ctrl.estop_by or "?")
             estop_seen = ctrl.estop
+            o = b.odom()
+            if o:  # odometer: distance driven since the server started (jumps = odometry reset)
+                prev = state["last_xy"]  # not "last": that name holds the loop time
+                d = 0.0 if prev is None else ((o["x"] - prev[0]) ** 2 + (o["y"] - prev[1]) ** 2) ** 0.5
+                if d < 0.5:
+                    state["odo_m"] += d
+                state["last_xy"] = (o["x"], o["y"])
             if n % 4 == 0:  # 5 Hz
                 b.set_estop(ctrl.estop)
+                sc = b.scan(cfg.scan_points) if hasattr(b, "scan") else None
+                if sc and sockets:
+                    msg = {"t": "scan", **sc}
+                    await asyncio.gather(*(send(cid, msg) for cid in list(sockets)))
             if n % 2 == 0:  # 10 Hz
                 await asyncio.gather(*(send(cid, snapshot(cid)) for cid in list(sockets)))
             if n % 20 == 0:  # 1 Hz
@@ -100,7 +112,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         elif t == "skill":
             call = lambda: r.skill(str(msg.get("name", "")), on, name)  # noqa: E731
         elif t == "voice":
-            call = lambda: r.voice(on, name)  # noqa: E731
+            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")))  # noqa: E731
         elif t == "system":
             call = lambda: r.system(str(msg.get("action")), name)  # noqa: E731
         else:

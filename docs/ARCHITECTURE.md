@@ -68,6 +68,7 @@ All messages are JSON with a field `t`.
 |---|---|---|
 | `state` | `you`, `operator`, `estop`, `link_ok`, `need_neutral`, `src`, `cmd`, `odom`, `backend`, `clients` | Sent 10 times per second |
 | `robot` | `jobs`, `health`, `cams`, `models`, `voice`, `events`, `left_arm_ok`, `lidar` | Once per second |
+| `scan` | `xy` (flat list of x, y in cm, robot frame), `src` (`lidar` or `mock`) | 5 times per second, only while a scan is fresh |
 | `note` | `ok`, `msg`, `about` | Answer to a request |
 | `pong` | `ts` | Answer to `ping` |
 
@@ -83,6 +84,13 @@ Axes: `x` forward, `y` left, `z` turning left. The same directions ROS uses.
 | `/e_stop` | `std_msgs/Bool` | Robot server, 5 times per second (nobody reads it yet) |
 | `/voice/listen`, `/voice/say` | `std_msgs/String` | Robot server (hold-to-talk, stop word on E-STOP) |
 | `/voice/text`, `/voice/status`, `/obstacle_guard/status` | `std_msgs/String` | Old nodes, shown on the page |
+
+## Pages
+
+| Page | Job |
+|---|---|
+| `/` | Control: drive, arms, skills, voice, health |
+| `/dashboard.html` | Read-only stats for a big screen. Charts keep the last 2 minutes in the browser |
 
 ## Camera
 

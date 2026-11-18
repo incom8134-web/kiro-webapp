@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 MOCK_PIN = "0000"  # only used in mock mode when KIRO_OPERATOR_PIN is not set
 
@@ -51,6 +52,12 @@ class Config:
     # Motion of the left arm stays blocked until it is recalibrated and this is set to 1.
     left_arm_ok: bool = False
 
+    # Lidar mounting on the robot (same values the old obstacle guard uses).
+    # laser_yaw None = read LASER_YAW from <so101_dir>/config/lidar.env, else the launch default 1.26 rad.
+    laser_yaw: float | None = None
+    laser_x: float = 0.20
+    scan_points: int = 360  # points sent to the page per scan
+
     @classmethod
     def from_env(cls) -> "Config":
         d = cls()
@@ -79,7 +86,23 @@ class Config:
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
             left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",
+            laser_yaw=float(os.environ["KIRO_LASER_YAW"]) if os.environ.get("KIRO_LASER_YAW") else None,
+            laser_x=_f("KIRO_LASER_X", d.laser_x),
         )
+
+    def lidar_yaw(self) -> float:
+        """Mounting angle of the lidar, as used by the old launch file and guard."""
+        if self.laser_yaw is not None:
+            return self.laser_yaw
+        env = Path(self.so101_dir).expanduser() / "config" / "lidar.env"
+        try:
+            for line in env.read_text().splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() == "LASER_YAW":
+                    return float(v.split("#")[0].strip())
+        except (OSError, ValueError):
+            pass
+        return 1.26
 
     @property
     def pin_is_default(self) -> bool:
