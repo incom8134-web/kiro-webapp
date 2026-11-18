@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets: never commit PINs, passwords or API keys
+.env
+*.env
+
+# Large files stay on the Jetson or in Drive, not in git
+models/
+datasets/
+*.safetensors
+*.zip
+logs/

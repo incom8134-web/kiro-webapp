@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f141b">
+<title>KIRO Command Center</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo"></span><span class="name">KIRO Command Center</span><span id="backend" class="badge">...</span></div>
+  <div class="status">
+    <span id="link" class="pill bad">Offline</span>
+    <span id="opstat" class="pill">No operator</span>
+  </div>
+  <button id="estop" class="estop" title="Stop the robot now (Esc)">E-STOP</button>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <section class="card map">
+    <div class="card-head"><h2>Robot</h2><span id="pose" class="muted"></span></div>
+    <canvas id="map"></canvas>
+    <div class="readout">
+      <div><span>Forward</span><b id="vx">0.00</b><i>m/s</i></div>
+      <div><span>Sideways</span><b id="vy">0.00</b><i>m/s</i></div>
+      <div><span>Turn</span><b id="wz">0.00</b><i>rad/s</i></div>
+      <div><span>Input</span><b id="src">none</b><i>&nbsp;</i></div>
+    </div>
+  </section>
+
+  <section class="card ctl">
+    <div class="card-head"><h2>Operator</h2></div>
+    <form id="take-box" autocomplete="off">
+      <input id="pin" type="password" inputmode="numeric" placeholder="Operator PIN" aria-label="Operator PIN">
+      <button id="take" class="btn primary" type="submit">Take control</button>
+    </form>
+    <div id="held-box" hidden>
+      <p class="ok-line">You are in control.</p>
+      <button id="release" class="btn" type="button">Release control</button>
+    </div>
+    <p id="note" class="note" role="status"></p>
+    <label class="switch"><input type="checkbox" id="turbo"><span>Turbo speed</span></label>
+    <p id="pad" class="muted">Gamepad: not connected</p>
+    <details>
+      <summary>How to drive</summary>
+      <table class="keys">
+        <tr><th></th><th>Gamepad</th><th>Keyboard</th><th>Screen</th></tr>
+        <tr><td>Enable</td><td>hold LB</td><td>hold Space</td><td>touch a stick</td></tr>
+        <tr><td>Move</td><td>left stick</td><td>W A S D</td><td>left stick</td></tr>
+        <tr><td>Turn</td><td>right stick</td><td>Q / E</td><td>right stick</td></tr>
+        <tr><td>Turbo</td><td>RB</td><td>Shift</td><td>switch</td></tr>
+        <tr><td>E-STOP</td><td>Back</td><td>Esc</td><td>red button</td></tr>
+      </table>
+    </details>
+  </section>
+
+  <section class="card sticks">
+    <div class="stick-wrap"><div id="stick-move" class="stick"><div class="knob"></div></div><span>Move</span></div>
+    <div class="stick-hint" id="hint">Take control to drive</div>
+    <div class="stick-wrap"><div id="stick-turn" class="stick"><div class="knob"></div></div><span>Turn</span></div>
+  </section>
+
+  <section class="card next">
+    <div class="card-head"><h2>Coming next</h2></div>
+    <div class="tiles">
+      <div class="tile"><b>Cameras</b><span>M2</span></div>
+      <div class="tile"><b>Lidar map</b><span>M2</span></div>
+      <div class="tile"><b>Teach arms</b><span>M3</span></div>
+      <div class="tile"><b>Skills and voice</b><span>M4</span></div>
+    </div>
+  </section>
+</main>
+<footer><span id="ver"></span></footer>
+<script src="app.js"></script>
+</body>
+</html>
