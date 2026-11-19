@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -76,6 +77,9 @@ def main() -> None:
     print(f"\n  KIRO Command Center  ->  http://localhost:{cfg.port}   (on the robot hotspot: http://10.42.0.1:{cfg.port})")
     if cfg.pin_is_default:
         print("  Operator PIN is the mock default 0000. Set KIRO_OPERATOR_PIN before using the real robot.")
+    # Closing the terminal sends SIGHUP, which would end Python at once and leave the base or an
+    # arm program running without the server. Treat it like a normal stop (uvicorn handles SIGTERM).
+    signal.signal(signal.SIGHUP, lambda *_: os.kill(os.getpid(), signal.SIGTERM))
     with contextlib.suppress(KeyboardInterrupt):  # uvicorn re-raises Ctrl+C after its clean shutdown
         asyncio.run(serve(cfg))
 

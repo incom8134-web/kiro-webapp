@@ -22,7 +22,7 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 | Base start / stop (old launcher with lidar guard) | Wired, needs 12 V wheel power to test |
 | Arms: fold, hold, release, teleop right / left / both | Wired to the old scripts. Left arm blocked until recalibrated |
 | Run a skill (`right_arm_task2_act`) | Wired to `run_policy.sh`. Needs the `right_wrist` webcam |
-| Voice: hold-to-talk (button, V key, gamepad Y), Korean and English (follows the page language) | Wired to the old `voice_cmd`. English needs the Vosk model `vosk-model-small-en-us-0.15` in `~/models/vosk` |
+| Voice: hold-to-talk (button, V key, gamepad Y), Korean and English (follows the page language) | Wired to the old `voice_cmd`. Korean and English Vosk models installed in `~/models/vosk`; English checked on the robot 19 Nov |
 | Lidar points on the map (`/scan`, same mounting angle as the obstacle guard) | Works with the simulated room in mock mode. Lidar not plugged in yet |
 | Dashboard page `/dashboard.html`: camera, lidar, speed, distance, nearest object, Jetson, servos, programs, activity | Works. Read-only, for a big screen |
 | Health: Jetson, servo voltage / temperature / current, cameras. Shutdown / restart | Works (shutdown needs `deploy/kiro-shutdown.sudoers`) |
@@ -91,7 +91,7 @@ If two inputs are used at once, the gamepad wins, then the on-screen sticks, the
 | Dangerous buttons | Release torque, shut down and restart must be held for 2 s |
 | Left arm | Blocked until recalibrated (`KIRO_LEFT_ARM_OK=1`) |
 | Engineer tools | Need operator control **and** a second PIN (`KIRO_ENGINEER_PIN`). Off on the robot until that is set |
-| Server stop | Ctrl+C or service stop first stops every program the server started |
+| Server stop | Ctrl+C, service stop or closing its terminal first stops every program the server started |
 
 Software is not enough for public demos. The robot also needs a **physical switch that cuts servo power**.
 
