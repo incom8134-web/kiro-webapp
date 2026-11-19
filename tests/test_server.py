@@ -18,7 +18,7 @@ def read_until(ws, pred, tries=60):
 def test_page_and_health():
     with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
         assert client.get("/api/health").json()["backend"] == "mock"
-        assert "KIRO" in client.get("/").text
+        assert "HAEBOT" in client.get("/").text
 
 
 def test_take_drive_and_viewer_is_ignored():
