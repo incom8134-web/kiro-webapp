@@ -1,6 +1,6 @@
 "use strict";
 /*
- * KIRO live dashboard. Read-only view for a big screen: it never drives (E-STOP still works).
+ * HAEBOT Robot live dashboard. Read-only view for a big screen: it never drives (E-STOP still works).
  * Every number comes from the robot server. Line charts keep the last 5 minutes, recorded in
  * this browser since the page was opened. A chart with no data says so; nothing is invented.
  */
@@ -322,7 +322,7 @@ function render() {
     banner.hidden = false; banner.className = "banner stop";
     banner.textContent = t("banner.estop", { by: s.estop_by ? t("banner.estop.by", { name: s.estop_by }) : "" }) + t("banner.estop.viewer");
   } else banner.hidden = true;
-  $("ver").textContent = s ? `KIRO Command Center v${s.version}` : "";
+  $("ver").textContent = s ? `HAEBOT Robot v${s.version}` : "";
   renderTiles();
   drawLidar();
 }

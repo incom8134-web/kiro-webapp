@@ -1,6 +1,6 @@
 "use strict";
 /*
- * KIRO Command Center - browser side.
+ * HAEBOT Robot command center - browser side.
  *
  * 1. Keeps one WebSocket open to the robot server.
  * 2. Reads three inputs (gamepad, on-screen sticks, keyboard) and picks one.
@@ -377,7 +377,7 @@ function render() {
 
   const o = s && s.odom;
   $("pose").textContent = o ? t("pose", { x: o.x.toFixed(2), y: o.y.toFixed(2), th: Math.round(o.th * 180 / Math.PI) }) : "";
-  $("ver").textContent = s ? `KIRO v${s.version} · ${s.clients} device${s.clients === 1 ? "" : "s"}` : "";
+  $("ver").textContent = s ? `HAEBOT Robot v${s.version} · ${s.clients} device${s.clients === 1 ? "" : "s"}` : "";
   drawMap();
   renderRobot();
 }
@@ -823,7 +823,7 @@ function renderWizard() {
 $("wz-report").addEventListener("click", () => {
   const steps = eng.steps || [], res = (state.robot && state.robot.wizard) || {};
   const now = new Date();
-  const md = [`# KIRO hardware check`, ``, `Date: ${now.toLocaleString()}`, `Robot: ${state.server ? state.server.backend : "?"}`, ``,
+  const md = [`# HAEBOT Robot hardware check`, ``, `Date: ${now.toLocaleString()}`, `Robot: ${state.server ? state.server.backend : "?"}`, ``,
     `| Step | Result | Auto |`, `|---|---|---|`,
     ...steps.map((s) => `| ${s.title} | ${(res[s.key] && res[s.key].status) || "not run"} | ${res[s.key] && res[s.key].auto != null ? res[s.key].auto : "-"} |`), ``,
     ...steps.filter((s) => res[s.key] && res[s.key].lines).flatMap((s) => [`## ${s.title}`, ``, "```", ...res[s.key].lines, "```", ``])].join("\n");
