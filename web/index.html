@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0a1020">
 <title>HAEBOT Robot</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A6%BE%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="console">
 <header class="bar">
-  <div class="brand"><span class="logo" aria-hidden="true">🦾</span><span class="name">HAEBOT<small>ROBOT</small></span></div>
+  <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
@@ -78,7 +78,7 @@
 
     <nav class="tabs" role="tablist">
       <button type="button" data-tab="drive"><i class="ri-steering-2-line"></i><span data-i18n="tab.drive">Drive</span><b class="dot"></b></button>
-      <button type="button" data-tab="arms"><i class="ri-robot-3-line"></i><span data-i18n="sec.arms">Arms</span><b class="dot"></b></button>
+      <button type="button" data-tab="arms"><i class="emo">🦾</i><span data-i18n="sec.arms">Arms</span><b class="dot"></b></button>
       <button type="button" data-tab="voice"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span><b class="dot"></b></button>
       <button type="button" data-tab="system"><i class="ri-settings-3-line"></i><span data-i18n="sec.health">System</span><b class="dot"></b></button>
     </nav>
@@ -105,7 +105,7 @@
       <!-- ARMS -->
       <section class="panel" data-panel="arms">
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-robot-3-line"></i></span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
+          <div class="row head"><h3><span class="badge emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
           <p id="arms-err" class="err small" hidden></p>
         </div>

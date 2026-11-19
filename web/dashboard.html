@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0a1020">
 <title>HAEBOT Robot · Dashboard</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A6%BE%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="dash">
 <header class="bar">
-  <div class="brand"><span class="logo" aria-hidden="true">🦾</span><span class="name">HAEBOT<small>ROBOT</small></span></div>
+  <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
@@ -31,21 +31,22 @@
 <div class="dwrap">
   <details class="liveview" id="d-live">
   <summary><span><i class="ri-live-line"></i><span data-i18n="d.live">Live view: cameras and lidar</span></span><span class="mute small" id="live-hint"></span></summary>
-  <div class="dgrid">
-    <section class="dview">
-      <div class="dhead"><span><i class="ri-camera-3-line"></i><span data-i18n="d.camera">Camera</span></span><span id="cam-name" class="mute"></span></div>
-      <div class="dbody">
-        <img id="cam" alt="" hidden>
-        <div id="cam-empty" class="empty"><span id="cam-msg"></span></div>
-      </div>
-      <div class="dwrists">
-        <div class="view wrist" data-cam="left_wrist"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div><span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.left_wrist">Left hand</span></span></div>
-        <div class="view wrist" data-cam="right_wrist"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div><span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.right_wrist">Right hand</span></span></div>
-      </div>
+  <div class="quad">
+    <section class="qbox" data-cam="top">
+      <div class="qhead"><span><i class="ri-camera-3-line"></i><span data-i18n="cam.top">Main camera</span></span><span class="mute qauto"></span></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
     </section>
-    <section class="dview">
-      <div class="dhead"><span><i class="ri-radar-line"></i><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
-      <div class="dbody light"><canvas id="lidar"></canvas></div>
+    <section class="qbox" data-cam="left_wrist">
+      <div class="qhead"><span><i class="ri-webcam-line"></i><span data-i18n="cam.left_wrist">Left hand</span></span><span class="mute qauto"></span></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
+    </section>
+    <section class="qbox" data-cam="right_wrist">
+      <div class="qhead"><span><i class="ri-webcam-line"></i><span data-i18n="cam.right_wrist">Right hand</span></span><span class="mute qauto"></span></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
+    </section>
+    <section class="qbox">
+      <div class="qhead"><span><i class="ri-radar-line"></i><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
+      <div class="qbody light"><canvas id="lidar"></canvas></div>
     </section>
   </div>
   </details>

@@ -8,7 +8,6 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const WINDOW_S = 300;
-const PX_PER_M = 70;
 
 const st = { ws: null, open: false, server: null, robot: null, scan: null, rtt: null, cam: null };
 const hist = {};      // key -> [{x: epoch seconds, y}]
@@ -368,51 +367,34 @@ function renderLists() {
 
 // ---------------------------------------------------------------- cameras
 const liveOpen = () => $("d-live").open;
+/* The three camera boxes of the live view (main camera, left hand, right hand). */
 function renderCams() {
   const cams = (st.robot && st.robot.cams) || [];
+  const boxes = document.querySelectorAll(".quad .qbox[data-cam]");
   if (!liveOpen()) {   // closed: stop every stream, so the cameras use no Wi-Fi
-    if (st.cam) { $("cam").removeAttribute("src"); st.cam = null; }
-    for (const v of document.querySelectorAll(".dwrists .view[data-cam]")) {
-      if (v.dataset.on) { v.querySelector("img").removeAttribute("src"); delete v.dataset.on; }
-    }
-    const n = cams.filter((c) => c.present).length;
-    $("live-hint").textContent = t("d.livehint", { n });
+    for (const box of boxes) if (box.dataset.on) { box.querySelector("img").removeAttribute("src"); delete box.dataset.on; }
+    $("live-hint").textContent = t("d.livehint", { n: cams.filter((c) => c.present).length });
     return;
   }
   $("live-hint").textContent = "";
-  // main camera
-  const cam = cams.find((c) => c.present && c.key === "top");
-  const img = $("cam");
-  $("cam-name").textContent = cam ? t("cam.top") : "";
-  if (!cam || cam.paused_by || cam.error) {
-    if (st.cam) { img.removeAttribute("src"); st.cam = null; }
-    img.hidden = true; $("cam-empty").hidden = false;
-    $("cam-msg").textContent = !cam ? t("cam.notconnected") : cam.paused_by ? t("cam.inuse") : t("cam.busy");
-  } else {
-    if (st.cam !== cam.key) { st.cam = cam.key; img.src = `/camera/${encodeURIComponent(cam.key)}.mjpg?t=${Date.now()}`; }
-    img.hidden = false; $("cam-empty").hidden = true;
-  }
-  // the two arm cameras
-  for (const view of document.querySelectorAll(".dwrists .view[data-cam]")) {
-    const key = view.dataset.cam, c = cams.find((x) => x.key === key);
-    const im = view.querySelector("img"), em = view.querySelector(".empty"), msg = view.querySelector(".msg");
+  for (const box of boxes) {
+    const key = box.dataset.cam, c = cams.find((x) => x.key === key);
+    const im = box.querySelector("img"), em = box.querySelector(".empty"), msg = box.querySelector(".msg");
+    box.querySelector(".qauto").textContent = c && c.auto ? `${t("cam.auto")} ${c.auto}` : "";
     const why = !c || !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : c.error ? t("cam.busy") : "";
     if (why) {
-      if (view.dataset.on) { im.removeAttribute("src"); delete view.dataset.on; }
+      if (box.dataset.on) { im.removeAttribute("src"); delete box.dataset.on; }
       im.hidden = true; em.hidden = false; msg.textContent = why;
       continue;
     }
-    if (!view.dataset.on) {
-      view.dataset.on = "1";
-      im.onerror = () => { delete view.dataset.on; im.hidden = true; em.hidden = false; setTimeout(renderCams, 2000); };
+    if (!box.dataset.on) {
+      box.dataset.on = "1";
+      im.onerror = () => { delete box.dataset.on; im.hidden = true; em.hidden = false; setTimeout(renderCams, 2000); };
       im.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
     }
     im.hidden = false; em.hidden = true;
-    const tag = view.querySelector(".tagtext");
-    if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
   }
 }
-$("cam").addEventListener("error", () => { st.cam = null; $("cam").hidden = true; setTimeout(renderCams, 2000); });
 
 // ----------------------------------------------------------------- lidar
 function drawLidar() {
@@ -425,7 +407,7 @@ function drawLidar() {
   const g = c.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
-  const s = st.server, o = (s && s.odom) || { x: 0, y: 0, th: 0 }, S = PX_PER_M, T = theme;
+  const s = st.server, o = (s && s.odom) || { x: 0, y: 0, th: 0 }, S = Math.min(w, h) / 6, T = theme;
   const sx = (wy) => w / 2 - (wy - o.y) * S, sy = (wx) => h / 2 - (wx - o.x) * S;
 
   g.strokeStyle = T.line2; g.lineWidth = 1;
@@ -462,8 +444,8 @@ function drawLidar() {
 }
 window.addEventListener("resize", drawLidar);
 
-// The live view (cameras and lidar) opens and closes; the choice is remembered. Closed by default.
-try { $("d-live").open = localStorage.getItem("kiro-live") === "1"; } catch (e) { /* ignore */ }
+// The live view (cameras and lidar) opens and closes; the choice is remembered. Open by default.
+try { $("d-live").open = localStorage.getItem("kiro-live") !== "0"; } catch (e) { $("d-live").open = true; }
 $("d-live").addEventListener("toggle", () => {
   try { localStorage.setItem("kiro-live", $("d-live").open ? "1" : "0"); } catch (e) { /* ignore */ }
   renderCams(); drawLidar();

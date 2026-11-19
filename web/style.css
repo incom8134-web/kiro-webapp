@@ -92,9 +92,11 @@ button, input, select { font: inherit; color: inherit; }
 .banner { grid-row: 2; }
 main { grid-row: 3; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 18px; font-weight: 800; font-size: 18px; letter-spacing: .12em; }
-.brand .logo { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; font-size: 23px; line-height: 1;
-  font-family: "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
-  background: linear-gradient(145deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .04)); border: 1px solid rgba(255, 255, 255, .16); }
+.brand .logo { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--grad); color: #fff; font-size: 20px; box-shadow: 0 4px 14px rgba(37, 99, 235, .35); }
+.emo { font-family: "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", sans-serif; font-style: normal; line-height: 1; }
+.tabs button .emo { font-size: 20px; filter: grayscale(.35); opacity: .85; }
+.tabs button.on .emo, .tabs button:hover .emo { filter: none; opacity: 1; }
+.card h3 .badge.emo { background: var(--accent-soft); font-size: 17px; border: 1px solid var(--line-2); }
 .brand .name { display: flex; flex-direction: column; line-height: 1.05; letter-spacing: .14em; }
 .brand .name small { font-size: 9px; font-weight: 700; letter-spacing: .32em; opacity: .65; margin-top: 2px; }
 
@@ -350,6 +352,21 @@ body.dash .bar { grid-template-columns: auto 1fr auto auto auto auto; height: va
 .liveview > summary::after { content: "\ea4e"; font-family: remixicon; font-size: 20px; color: var(--mute); transition: transform .15s; }
 .liveview[open] > summary::after { transform: rotate(180deg); }
 .liveview > .dgrid { padding: 0 14px 14px; }
+/* live view: four equal 4:3 boxes - main camera, left hand, right hand, lidar */
+.quad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0 14px 14px; }
+.qbox { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--raise-2); }
+.qhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px; font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+.qhead i { color: var(--accent); margin-right: 6px; font-size: 14px; vertical-align: -2px; }
+.qhead .mute { font-weight: 500; text-transform: none; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qbody { position: relative; aspect-ratio: 4 / 3; background: var(--view); }
+.qbody.light { background: var(--raise); }
+.qbody img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.qbody .empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; color: #8b97ad; font-size: 12px;
+  background: radial-gradient(circle at 50% 40%, #131d33, #070b15 75%); }
+.qbody .empty i { font-size: 24px; opacity: .55; }
+.qbody canvas { display: block; width: 100%; height: 100%; }
+@media (max-width: 1100px) { .quad { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .quad { grid-template-columns: 1fr; } }
 .liveview .dview { box-shadow: none; }
 .dgrid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; }
 .dview, .dsec, .chart-card, .tile { background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
