@@ -17,6 +17,7 @@ from . import __version__
 from .base import make_base
 from .config import MOCK_ENGINEER_PIN, Config
 from .control import Controller
+from .logbuf import install as install_log
 from .robot import Robot
 
 log = logging.getLogger("kiro")
@@ -52,6 +53,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     cfg = cfg or Config.from_env()
     ctrl = Controller(cfg)
     sockets: dict[str, tuple[WebSocket, asyncio.Lock]] = {}
+    logs = install_log()
+    log_subs: set[str] = set()  # pages showing the server log (the dashboard terminal)
     state: dict = {"base": base, "robot": robot, "odo_m": 0.0, "last_xy": None, "started": time.time()}
 
     async def send(cid: str, msg: dict) -> None:
@@ -88,7 +91,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
 
     async def loop() -> None:
         period = 1.0 / cfg.rate_hz
-        st = {"last": time.monotonic(), "n": 0}
+        st = {"last": time.monotonic(), "n": 0, "log_n": logs.n}
         last_err = 0.0
         while True:
             await asyncio.sleep(period)
@@ -122,6 +125,11 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             if sc and sockets:
                 msg = {"t": "scan", **sc}
                 await asyncio.gather(*(send(cid, msg) for cid in list(sockets)))
+            new = logs.since(st["log_n"]) if log_subs else []
+            st["log_n"] = new[-1]["n"] if new else (st["log_n"] if log_subs else logs.n)
+            if new:
+                msg = {"t": "log", "lines": new}
+                await asyncio.gather(*(send(cid, msg) for cid in list(log_subs)))
         if n % 2 == 0:  # 10 Hz
             await asyncio.gather(*(send(cid, snapshot(cid)) for cid in list(sockets)))
         if n % 20 == 0:  # 1 Hz
@@ -293,6 +301,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                             state["robot"].event(who(cid), "unlocked engineer tools")
                             steps = await asyncio.to_thread(state["robot"].wizard_steps)
                             await send(cid, {"t": "wizard_steps", "steps": steps})
+                elif t == "logs":  # the dashboard terminal: the recent server log once, then every new line
+                    if not msg.get("on", True):
+                        log_subs.discard(cid)
+                    elif cid not in log_subs:
+                        log_subs.add(cid)
+                        await send(cid, {"t": "log", "lines": logs.since(0), "reset": True})
                 elif t == "leader_pos":  # leader arm on the laptop, about 30 per second: fast path
                     if cid == ctrl.operator and not ctrl.estop:
                         state["robot"].leader_pos(str(msg.get("side", "right")), msg.get("raw"))
@@ -309,6 +323,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             pass
         finally:
             sockets.pop(cid, None)
+            log_subs.discard(cid)
             if ctrl.operator == cid:
                 state["robot"].event(who(cid), "disconnected while in control")
             ctrl.disconnect(cid)

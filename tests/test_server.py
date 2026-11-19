@@ -60,3 +60,26 @@ def test_pages_are_never_served_stale():
     with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
         for path in ("/", "/app.js", "/style.css", "/dashboard.html"):
             assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_dashboard_terminal_gets_the_server_log_without_pins():
+    import logging
+    kiro = logging.getLogger("kiro")
+    old = kiro.level
+    kiro.setLevel(logging.INFO)
+    try:
+        with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
+            logging.getLogger("kiro.test").warning("before the page   opened")
+            with client.websocket_connect("/ws?name=Dashboard") as dash, client.websocket_connect("/ws?name=Laptop") as op:
+                dash.send_json({"t": "logs"})
+                first = read_until(dash, lambda m: m["t"] == "log")
+                assert first["reset"]
+                assert any(x["msg"] == "before the page opened" and x["lvl"] == "WARN" for x in first["lines"])
+                op.send_json({"t": "take", "pin": "9876"})
+                op.send_json({"t": "take", "pin": "4321"})
+                m = read_until(dash, lambda m: m["t"] == "log" and any("took control" in x["msg"] for x in m["lines"]))
+                assert m["lines"][-1]["n"] > first["lines"][-1]["n"]
+                seen = " ".join(x["msg"] for x in first["lines"] + m["lines"])
+                assert "4321" not in seen and "9876" not in seen
+    finally:
+        kiro.setLevel(old)

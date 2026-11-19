@@ -30,11 +30,16 @@
 
 <div class="dwrap">
   <details class="liveview" id="d-live">
-  <summary><span><span data-i18n="d.live">Live view: cameras and lidar</span></span><span class="mute small" id="live-hint"></span></summary>
+  <summary><span><span data-i18n="d.live">Live view: cameras, lidar and server log</span></span><span class="mute small" id="live-hint"></span></summary>
+  <div class="livegrid">
   <div class="quad">
     <section class="qbox" data-cam="top">
       <div class="qhead"><span><span data-i18n="cam.top">Main camera</span></span><span class="mute qauto"></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
+    </section>
+    <section class="qbox">
+      <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
+      <div class="qbody light"><canvas id="lidar"></canvas></div>
     </section>
     <section class="qbox" data-cam="left_wrist">
       <div class="qhead"><span><span data-i18n="cam.left_wrist">Left hand</span></span><span class="mute qauto"></span></div>
@@ -44,10 +49,12 @@
       <div class="qhead"><span><span data-i18n="cam.right_wrist">Right hand</span></span><span class="mute qauto"></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
-    <section class="qbox">
-      <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
-      <div class="qbody light"><canvas id="lidar"></canvas></div>
-    </section>
+  </div>
+  <!-- the server log, live, in a terminal window -->
+  <section class="term">
+    <div class="term-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">haebot — <span data-i18n="d.term">server log</span></span><span id="term-live" class="term-live"></span></div>
+    <div class="term-wrap"><div id="term" class="term-body" role="log"><div class="tl prompt" id="term-prompt"><span class="ps">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
+  </section>
   </div>
   </details>
 

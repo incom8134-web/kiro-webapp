@@ -30,15 +30,16 @@ function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws?name=Dashboard`);
   st.ws = ws;
-  ws.onopen = () => { st.open = true; };
+  ws.onopen = () => { st.open = true; send({ t: "logs" }); termLive(); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.t === "state") { st.server = m; onState(); }
     else if (m.t === "robot") { st.robot = m; onRobot(); }
     else if (m.t === "scan") { m.at = performance.now(); st.scan = m; }
     else if (m.t === "pong") st.rtt = performance.now() - m.ts;
+    else if (m.t === "log") onLog(m);
   };
-  ws.onclose = () => { st.open = false; st.server = null; st.rtt = null; render(); setTimeout(connect, 1000); };
+  ws.onclose = () => { st.open = false; st.server = null; st.rtt = null; render(); termLive(); setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
 }
 const send = (o) => { if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(o)); };
@@ -48,7 +49,7 @@ $("estop").addEventListener("click", () => {   // anyone may stop the robot; onl
   if (!(st.server && st.server.estop)) send({ t: "estop", on: true });
 });
 window.addEventListener("keydown", (e) => { if (e.code === "Escape") send({ t: "estop", on: true }); });
-for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); buildTiles(); buildCharts(); render(); onRobot(); });
+for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); buildTiles(); buildCharts(); render(); onRobot(); termLive(); });
 $("theme-btn").addEventListener("click", () => toggleTheme());
 window.addEventListener("kiro-theme", () => { readTheme(); themeIcon($("theme-btn")); buildCharts(); drawLidar(); });
 themeIcon($("theme-btn"));
@@ -396,6 +397,45 @@ function renderCams() {
   }
 }
 
+// --------------------------------------------------------------- terminal
+/* The server log, live: the same lines the server prints in its own terminal. A line that
+   repeats right away is counted (x12) instead of filling the window. */
+const term = { n: 0, last: null };
+const termTime = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const termSrc = (name) => (name === "kiro" ? "server" : name.replace(/^kiro\./, ""));
+
+function termLive() {
+  const el = $("term-live");
+  el.textContent = st.open ? t("d.termlive") : t("d.termoff");
+  el.classList.toggle("on", st.open);
+}
+
+function onLog(m) {
+  const box = $("term"), prompt = $("term-prompt");
+  const follow = m.reset || box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  if (m.reset) { for (const el of box.querySelectorAll(".tl:not(.prompt)")) el.remove(); term.n = 0; term.last = null; }
+  for (const x of m.lines) {
+    if (x.n <= term.n) continue;
+    term.n = x.n;
+    const key = `${x.lvl}|${x.src}|${x.msg}`;
+    if (term.last && term.last.key === key) {
+      term.last.count += 1;
+      term.last.el.querySelector("time").textContent = termTime(x.ts);
+      term.last.el.querySelector(".rep").textContent = `\u00d7${term.last.count}`;
+      continue;
+    }
+    const el = document.createElement("div");
+    el.className = "tl";
+    el.dataset.lvl = x.lvl;
+    el.innerHTML = `<time>${termTime(x.ts)}</time><b>${esc(x.lvl)}</b><span class="src">${esc(termSrc(x.src))}</span><span class="msg">${esc(x.msg)}</span><em class="rep"></em>`;
+    box.insertBefore(el, prompt);
+    term.last = { key, el, count: 1 };
+  }
+  const lines = box.querySelectorAll(".tl:not(.prompt)");
+  for (let i = 0; i < lines.length - 400; i++) lines[i].remove();
+  if (follow) box.scrollTop = box.scrollHeight;
+}
+
 // ----------------------------------------------------------------- lidar
 function drawLidar() {
   if (!liveOpen()) return;
@@ -454,4 +494,5 @@ $("d-live").addEventListener("toggle", () => {
 buildTiles();
 buildCharts();
 render();
+termLive();
 connect();
