@@ -78,10 +78,13 @@ main { grid-row: 3; }
 /* ----------------------------------------------------------------- layout */
 main { display: grid; grid-template-columns: 1fr var(--dock-w); min-height: 0; }
 
-.stage { display: flex; flex-direction: column; gap: 2px; background: var(--bg); min-height: 0; overflow: hidden; padding: 0; }
+/* Main camera on top takes what is left; the two arm cameras below are sized to their exact 4:3
+   shape (two tiles side by side = 8:3), up to 44% of the height, so they fill their tiles. */
+.stage { display: flex; flex-direction: column; gap: 2px; background: var(--bg); min-height: 0; overflow: hidden; padding: 0; container-type: size; }
 .view { position: relative; overflow: hidden; background: var(--view); min-height: 0; }
 .view.main { flex: 1 1 auto; }
-.wrists { flex: 0 0 28%; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; min-height: 140px; }
+.wrists { flex: none; height: min(37.5cqw, 44cqh); display: grid; gap: 2px; justify-content: center;
+  grid-template-columns: repeat(2, minmax(0, calc(min(37.5cqw, 44cqh) * 4 / 3))); }
 .view img.cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .view .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: 13px; text-align: center; padding: 12px;
   background: repeating-linear-gradient(135deg, #07080a 0 14px, #0b0c0f 14px 28px); }
@@ -246,9 +249,9 @@ details summary { cursor: pointer; color: var(--mute); }
   .toplink span { display: none; }
   .estop { min-width: 112px; height: 40px; }
   main { grid-template-columns: 1fr; }
-  .stage { height: auto; }
-  .view.main { height: 62vw; min-height: 300px; flex: none; }
-  .wrists { flex: none; height: 38vw; min-height: 120px; }
+  .stage { height: auto; container-type: inline-size; }
+  .view.main { height: 56vw; min-height: 260px; flex: none; }
+  .wrists { height: 37.5cqw; grid-template-columns: 1fr 1fr; }
   .inset { width: 118px; top: 8px; left: 8px; }
   .inset canvas { height: 92px; }
   .inset .head { padding: 4px 8px; }
@@ -272,7 +275,7 @@ body.dash .bar { grid-template-columns: auto 1fr auto auto; }
 .dhead { display: flex; justify-content: space-between; gap: 8px; padding: 9px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; border-bottom: 1px solid var(--line); color: var(--ink-2); }
 .dhead .mute { font-weight: 500; text-transform: none; letter-spacing: 0; }
 .dbody { position: relative; height: min(52vh, 520px); }
-.dwrists { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; height: min(18vh, 200px); border-top: 2px solid var(--bg); }
+.dwrists { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; aspect-ratio: 8 / 3; border-top: 2px solid var(--bg); }
 .dbody.dark { background: var(--view); }
 .dbody img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .dbody .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); }
