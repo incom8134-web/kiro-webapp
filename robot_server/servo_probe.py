@@ -7,8 +7,7 @@ short process (the server kills it after a few seconds) because the Feetech
 SDK can hang forever on a stuck USB board. Ports that another program has
 open are skipped, never shared.
 
-  python3 servo_probe.py            all boards
-  python3 servo_probe.py --mock     no hardware, prints nothing useful
+  python3 servo_probe.py [--skip key,key]    all boards except the skipped ones
 """
 import glob
 import json
@@ -105,9 +104,6 @@ def probe(skip):
 
 
 if __name__ == "__main__":
-    if "--mock" in sys.argv:
-        print(json.dumps({}))
-        sys.exit(0)
     skip = set()
     if "--skip" in sys.argv:
         skip = set(sys.argv[sys.argv.index("--skip") + 1].split(","))

@@ -62,6 +62,7 @@ WIZARD_USES = {
     "camera_uvc": {"cam:top"}, "gamepad": {"/dev/input/js0"}, "wheels": {"/dev/so101_base"}, "mecanum_floor": {"/dev/so101_base"},
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
+ARM_JOBS = ("skill", "bridge", "arm_right", "arm_left")  # programs that move a follower arm by themselves
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]  # servo IDs 1..6
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
@@ -119,6 +120,7 @@ class Robot:
         self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._wave_stop = threading.Event()
         self._wave_thread: threading.Thread | None = None
+        self._estop_lock = threading.Lock()
         self.refresh_cameras()
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
@@ -171,6 +173,8 @@ class Robot:
         if serial and not self.bus_lock.acquire(timeout=10):
             return False, "Servo check is busy. Try again."
         try:
+            if self._stop.is_set():  # the server is shutting down: nothing new may start
+                return False, "Server is stopping."
             ok, msg = self.jobs.start(name, spec)
         finally:
             if serial:
@@ -186,6 +190,20 @@ class Robot:
         return ok, msg
 
     # ----------------------------------------------------------------- base
+    def base_wheels(self) -> str | None:
+        """From the base log: 'ok' when the wheel node is ready, 'off' when the wheels did not answer
+        (12 V off: the wheel node dies but the rest of the launch keeps running), None if unknown."""
+        j = self.jobs.get("base")
+        if not j or not j.running:
+            return None
+        state = None
+        for line in j.output():
+            if "휠 서보 응답 0/4" in line or "응답 없는 서보" in line or ("mecanum_base_node" in line and "process has died" in line):
+                state = "off"
+            elif "베이스 준비" in line:
+                state = "ok"
+        return state
+
     def obstacle_stop_on(self) -> bool:
         """The old config/lidar.env can switch the obstacle stop off (OBSTACLE_STOP=0)."""
         try:
@@ -427,11 +445,12 @@ class Robot:
         """When a wizard step ends, read its @RESULT line (the old step's own verdict)."""
         step = self._wizard_running
         j = self.jobs.get("wizard")
-        if not step or j is None or j.running:
+        if not step or j is None or j.code is None:  # code is set only after all output was read
             return
         self._wizard_running = None
-        res = {"status": "stopped" if j.code else "fail", "auto": None}
-        for line in reversed(j.lines):
+        res = {"status": "stopped" if (j.code < 0 or j.code == 130) else "fail", "auto": None}
+        lines = j.output()
+        for line in reversed(lines):
             if line.startswith("@RESULT "):
                 try:
                     res = json.loads(line[8:])
@@ -440,7 +459,7 @@ class Robot:
                 break
         if self.mock:
             res = {"status": "confirm", "auto": None}
-        res["lines"] = [ANSI.sub("", x) for x in list(j.lines)[-60:] if not x.startswith("@RESULT ")]
+        res["lines"] = [ANSI.sub("", x) for x in lines[-60:] if not x.startswith("@RESULT ")]
         res["t"] = time.time()
         self.wizard_results[step] = res
 
@@ -484,7 +503,7 @@ class Robot:
         j = self.jobs.get("bridge")
         if not j:
             return None
-        for line in reversed(j.lines):
+        for line in reversed(j.output()):
             if line.startswith("@STATUS "):
                 try:
                     return json.loads(line[8:])
@@ -500,10 +519,13 @@ class Robot:
         f = HF_CALIB / "teleoperators" / "so_leader" / f"{side}_leader.json"
         try:
             self.leader_cal = json.loads(f.read_text())
-        except (OSError, ValueError):
+            bad = [j for j in JOINTS if self.leader_cal[j]["range_max"] <= self.leader_cal[j]["range_min"]]
+        except (OSError, ValueError, KeyError, TypeError):
             if not self.mock:
-                return False, f"Leader calibration not found: {f}"
-            self.leader_cal = None
+                return False, f"Leader calibration not found or unreadable: {f}"
+            self.leader_cal, bad = None, []
+        if bad:
+            return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
         return self._bridge_start(side, "leader", who)
 
     def leader_pos(self, side: str, raw: object) -> None:
@@ -516,7 +538,10 @@ class Robot:
         self.leader_last = time.monotonic()
         if self.leader_cal is None:  # mock mode without calibration
             return
-        self.leader_deg = leader_to_target(self.leader_cal, raw)
+        try:
+            self.leader_deg = leader_to_target(self.leader_cal, raw)
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return
         self._bridge_send(side, self.leader_deg)
 
     def wave(self, side: str, who: str) -> tuple[bool, str]:
@@ -566,13 +591,45 @@ class Robot:
 
     # --------------------------------------------------------------- E-STOP
     def on_estop(self, who: str) -> None:
-        """Stop everything that can move by itself. Teleop stays: a person holds the leader arm."""
-        if self.ros is not None and hasattr(self.ros, "publish_str") and self.jobs.running("voice"):
-            self.ros.publish_str("/voice/say", "멈춰")
-        self._wave_stop.set()
-        stopped = self.jobs.stop_all(lambda j: j.name in ("skill", "voice", "wizard", "bridge"))
-        if stopped:
-            self.event(who, "E-STOP stopped " + ", ".join(stopped))
+        """Stop everything that can move by itself. Runs on every E-STOP press; safe to repeat.
+
+        Arm programs are KILLED at once: their own clean-up would move the arm (the skill swings
+        back to its start pose and then lets go, the bridge removes its speed limit). Then each of
+        those arms is held where it is (arm_tuck --hold: goal = present position, torque on).
+        Voice, wizard and base get Ctrl+C at the same time, so the wheels stop (speed 0, torque off)
+        and the robot's own gamepad cannot keep driving. Teleop stays: a person holds the leader."""
+        with self._estop_lock:
+            self._wave_stop.set()
+            if self.ros is not None and hasattr(self.ros, "publish_str") and self.jobs.running("voice"):
+                self.ros.publish_str("/voice/say", "stop" if self.voice_lang == "en" else "멈춰")
+            sides = set()
+            for name in ARM_JOBS:
+                j = self.jobs.get(name)
+                if j and j.running:
+                    sides |= {s for s in ("right", "left") if PORT[f"{s}_follower"] in j.spec.uses}
+            killed = self.jobs.kill(list(ARM_JOBS))
+            stopped: list[str] = []
+            t = threading.Thread(target=lambda: stopped.extend(
+                self.jobs.stop_all(lambda j: j.name in ("voice", "wizard", "base"))), daemon=True)
+            t.start()                       # wheels stop while the arms are being held
+            held = self._hold_arms(sorted(sides)) if sides and not self.mock else ""
+            t.join()
+            if killed or stopped:
+                self.event(who, "E-STOP: " + ", ".join([f"killed {k}" for k in killed] + [f"stopped {x}" for x in stopped])
+                           + (f"; {held}" if held else ""))
+
+    def _hold_arms(self, sides: list[str]) -> str:
+        """Freeze follower arms where they are, with the old arm_tuck.py --hold."""
+        arm = "both" if len(sides) == 2 else sides[0]
+        cmd = [str(self.venv / "bin" / "python"), str(self.so101 / "arm_tuck.py"), "--hold", "--arm", arm, "--yes"]
+        with self.bus_lock:
+            try:
+                env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+                env["PATH"] = f"{self.venv / 'bin'}:{env.get('PATH', '')}"
+                r = subprocess.run(cmd, cwd=str(self.so101), capture_output=True, text=True, timeout=20, env=env)
+                return f"held {arm} arm" if r.returncode == 0 else f"hold {arm} arm failed (exit {r.returncode})"
+            except subprocess.TimeoutExpired:
+                return f"hold {arm} arm timed out"
 
     # --------------------------------------------------------------- system
     def system(self, action: str, who: str) -> tuple[bool, str]:
@@ -623,8 +680,8 @@ class Robot:
     def _boards(self) -> dict:
         if self.mock:
             return {}
-        skip = [k for k, dev in PORT.items() if self.jobs.busy(frozenset({dev}))]
-        with self.bus_lock:
+        with self.bus_lock:  # no job can start while the probe reads
+            skip = [k for k, dev in PORT.items() if self.jobs.busy(frozenset({dev}))]
             try:
                 r = subprocess.run([sys.executable, str(HERE / "servo_probe.py"), "--skip", ",".join(skip) or "-"],
                                    capture_output=True, text=True, timeout=8)
@@ -639,7 +696,7 @@ class Robot:
                 h = {"jetson": self._jetson(), "t": time.time()}
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})
                 self.health = h
-                if n % 10 == 0:
+                if n % 2 == 0:  # a camera plugged in shows up within a few seconds
                     self.refresh_cameras()
             except Exception as e:  # noqa: BLE001 - health must never kill the server
                 log.warning("health: %s", e)
@@ -656,14 +713,14 @@ class Robot:
         cams = []
         for c in self.cam_info:
             cam = self.cams.get(c["key"])
-            cams.append({"key": c["key"], "present": bool(c.get("present")), "reason": c.get("reason"),
+            cams.append({"key": c["key"], "present": bool(c.get("present")), "reason": c.get("reason"), "auto": c.get("auto"),
                          **({"live": cam.info()["live"], "paused_by": cam.paused_by, "error": cam.error} if cam else {})})
         return {
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "events": list(self.events)[-20:],
-            "obstacle_stop": self.obstacle_stop_on(), "ports": [] if self.mock else self.serial_ports(),
+            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(), "ports": [] if self.mock else self.serial_ports(),
             "servo_scan": self.servo_scan, "wizard": self.wizard_results,
             "bridge": {"running": self.jobs.running("bridge"), "side": self.bridge_side, "mode": self.bridge_mode,
                        "state": (self._bridge_status() or {}).get("state"), "rx": self.leader_rx,

@@ -7,6 +7,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
@@ -28,6 +29,25 @@ OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", 
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide"}  # also need the engineer PIN
 
 
+class NoStalePages:
+    """Browsers must re-check the page files on every load (a cheap 304 when unchanged). Without
+    this, an update can leave a phone running new JavaScript against an old page, or the reverse."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"].startswith("/camera/"):
+            return await self.app(scope, receive, send)
+
+        async def send_no_cache(msg):
+            if msg["type"] == "http.response.start":
+                headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
+                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache")]}
+            await send(msg)
+        await self.app(scope, receive, send_no_cache)
+
+
 def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None) -> FastAPI:
     cfg = cfg or Config.from_env()
     ctrl = Controller(cfg)
@@ -35,15 +55,23 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     state: dict = {"base": base, "robot": robot, "odo_m": 0.0, "last_xy": None, "started": time.time()}
 
     async def send(cid: str, msg: dict) -> None:
+        """Never lets one device stall the server: a page that stops reading (left the Wi-Fi,
+        frozen tab) is dropped after 0.3 s instead of holding up the 20 Hz control loop."""
         entry = sockets.get(cid)
         if not entry:
             return
         ws, lock = entry
         try:
             async with lock:
-                await ws.send_json(msg)
+                await asyncio.wait_for(ws.send_json(msg), 0.3)
         except Exception:
-            pass  # the receive loop notices the closed socket and cleans up
+            if sockets.get(cid) is entry:
+                sockets.pop(cid, None)
+                asyncio.get_running_loop().create_task(_close(ws))  # its receive loop then cleans up
+
+    async def _close(ws: WebSocket) -> None:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(ws.close(), 1.0)
 
     def snapshot(cid: str) -> dict:
         b = state["base"]
@@ -60,7 +88,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
 
     async def loop() -> None:
         period = 1.0 / cfg.rate_hz
-        st = {"last": time.monotonic(), "n": 0, "estop_seen": False}
+        st = {"last": time.monotonic(), "n": 0}
         last_err = 0.0
         while True:
             await asyncio.sleep(period)
@@ -81,9 +109,6 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         b.apply(cmd.vx, cmd.vy, cmd.wz, cmd.publish, dt)
         st["n"] += 1
         n = st["n"]
-        if ctrl.estop and not st["estop_seen"]:  # E-STOP just went on: stop skills, voice and wizard too
-            asyncio.get_running_loop().run_in_executor(None, state["robot"].on_estop, ctrl.estop_by or "?")
-        st["estop_seen"] = ctrl.estop
         o = b.odom()
         if o:  # odometer: distance driven since the server started (jumps = odometry reset)
             prev = state["last_xy"]
@@ -156,6 +181,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         except Exception as e:  # noqa: BLE001
             log.exception("action %s failed", t)
             ok, text = False, f"Error: {e}"
+        if starting and ctrl.estop:  # E-STOP was pressed while this was starting: stop it now
+            await asyncio.to_thread(r.on_estop, ctrl.estop_by or name)
         await send(cid, {"t": "note", "ok": ok, "msg": text, "about": t})
         await send(cid, r.snapshot())
 
@@ -184,6 +211,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 b.close()
 
     app = FastAPI(title="KIRO Command Center", version=__version__, lifespan=lifespan)
+    app.add_middleware(NoStalePages)
     app.state.ctrl = ctrl
     app.state.data = state
 
@@ -212,14 +240,20 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        # A web page from another site (opened on a laptop that also has internet) must not be
+        # able to talk to the robot: browsers always send Origin, and it must be this server.
+        origin = ws.headers.get("origin")
+        if origin and urlsplit(origin).netloc != ws.headers.get("host"):
+            await ws.close(code=1008)
+            return
         await ws.accept()
         cid = uuid.uuid4().hex[:8]
         sockets[cid] = (ws, asyncio.Lock())
-        ctrl.connect(cid, ws.query_params.get("name", "device"))
-        await send(cid, snapshot(cid))
-        await send(cid, state["robot"].snapshot())
+        ctrl.connect(cid, ws.query_params.get("name", "device"), ip=ws.client.host if ws.client else None)
         tasks: set[asyncio.Task] = set()
         try:
+            await send(cid, snapshot(cid))
+            await send(cid, state["robot"].snapshot())
             while True:
                 msg = await ws.receive_json()
                 if not isinstance(msg, dict):
@@ -246,6 +280,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                     state["base"].set_estop(ctrl.estop)
                     if ok:
                         state["robot"].event(who(cid), "E-STOP on" if on else "E-STOP released")
+                    if ok and on:  # every press, also a second one: stop skill, arms, voice, wizard, base
+                        asyncio.get_running_loop().run_in_executor(None, state["robot"].on_estop, who(cid))
                     await send(cid, {"t": "note", "ok": ok, "msg": text, "about": "estop"})
                 elif t == "engineer":
                     if msg.get("lock"):

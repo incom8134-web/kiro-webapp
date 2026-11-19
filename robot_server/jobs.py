@@ -64,21 +64,36 @@ class Job:
         except (ProcessLookupError, PermissionError):
             pass
 
-    def stop(self) -> None:
-        """Ask nicely, then harder. Blocks up to about 2 x stop_wait seconds."""
-        for sig, wait in ((self.spec.stop_signal, self.spec.stop_wait), (signal.SIGTERM, 3.0), (signal.SIGKILL, 2.0)):
+    def stop(self, first_sent: bool = False) -> None:
+        """Ask nicely, then harder. Blocks up to about stop_wait + 5 seconds."""
+        for i, (sig, wait) in enumerate(((self.spec.stop_signal, self.spec.stop_wait), (signal.SIGTERM, 3.0), (signal.SIGKILL, 2.0))):
             if not self.running:
                 return
-            self._signal(sig)
+            if not (i == 0 and first_sent):
+                self._signal(sig)
             try:
                 self.proc.wait(timeout=wait)
             except subprocess.TimeoutExpired:
                 continue
 
+    def kill(self) -> None:
+        """Stop at once, with no clean-up code in the program (E-STOP for arm programs:
+        their clean-up moves the arm). The servos keep their torque and last goal."""
+        if self.running:
+            self._signal(signal.SIGKILL)
+            try:
+                self.proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                pass
+
     def info(self) -> dict:
         return {"name": self.name, "label": self.spec.label or self.name, "running": self.running,
                 "code": self.code, "started": self.started, "ended": self.ended,
                 "uses": sorted(self.spec.uses), "tail": list(self.lines)[-12:]}
+
+    def output(self) -> list[str]:
+        """A copy of the captured lines (safe while the reader thread is still appending)."""
+        return list(self.lines)
 
 
 class Jobs:
@@ -90,10 +105,10 @@ class Jobs:
         # device -> (let go, take back) callbacks. The camera preview lets go while a job uses the camera.
         self.holders: dict[str, tuple[Callable[[], None], Callable[[], None]]] = {}
 
-    def busy(self, uses: frozenset[str], except_name: str | None = None) -> str | None:
+    def busy(self, uses: frozenset[str]) -> str | None:
         """Name of a running job that holds one of these devices, or None."""
-        for j in self._jobs.values():
-            if j.name != except_name and j.running and j.spec.uses & uses:
+        for j in list(self._jobs.values()):
+            if j.running and j.spec.uses & uses:
                 return j.name
         return None
 
@@ -131,12 +146,25 @@ class Jobs:
         return True, f"{j.spec.label or name} stopped."
 
     def stop_all(self, only: Callable[[Job], bool] = lambda j: True) -> list[str]:
-        stopped = []
-        for j in list(self._jobs.values()):
-            if j.running and only(j):
-                j.stop()
-                stopped.append(j.name)
-        return stopped
+        """Signal every matching job at once, then wait for each (one slow job does not delay the rest)."""
+        todo = [j for j in list(self._jobs.values()) if j.running and only(j)]
+        for j in todo:
+            j._signal(j.spec.stop_signal)
+        threads = [threading.Thread(target=j.stop, kwargs={"first_sent": True}) for j in todo]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        return [j.name for j in todo]
+
+    def kill(self, names: list[str]) -> list[str]:
+        killed = []
+        for n in names:
+            j = self._jobs.get(n)
+            if j and j.running:
+                j.kill()
+                killed.append(n)
+        return killed
 
     def running(self, name: str) -> bool:
         j = self._jobs.get(name)
@@ -146,4 +174,4 @@ class Jobs:
         return self._jobs.get(name)
 
     def info(self) -> dict[str, dict]:
-        return {n: j.info() for n, j in self._jobs.items()}
+        return {n: j.info() for n, j in list(self._jobs.items())}

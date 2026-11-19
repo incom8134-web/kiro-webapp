@@ -6,7 +6,9 @@
  */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#00843d";
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const ACCENT = css("--accent", "#34d07f");
+const C = { ink: css("--ink", "#eef0f2"), line: css("--line-2", "#343840"), mute: css("--mute", "#858a93"), panel: css("--panel", "#111316"), stop: css("--stop", "#ff3b30") };
 const HISTORY_S = 120;
 const PX_PER_M = 70;
 
@@ -264,6 +266,7 @@ function renderRobot() {
     : `<li class="mute">${t("log.empty")}</li>`;
 
   renderCam();
+  renderWrists();
 }
 
 // ---------------------------------------------------------------- camera
@@ -283,6 +286,28 @@ function renderCam() {
 }
 $("cam").addEventListener("error", () => { st.cam = null; $("cam").hidden = true; setTimeout(renderCam, 2000); });
 
+/* The two arm (hand) cameras under the main camera. */
+const wristOn = {};
+function renderWrists() {
+  const cams = (st.robot && st.robot.cams) || [];
+  for (const view of document.querySelectorAll(".dwrists .view[data-cam]")) {
+    const key = view.dataset.cam, c = cams.find((x) => x.key === key);
+    const img = view.querySelector("img"), empty = view.querySelector(".empty"), msg = view.querySelector(".msg");
+    const why = !c || !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : c.error ? t("cam.busy") : "";
+    if (why) {
+      if (wristOn[key]) { img.removeAttribute("src"); wristOn[key] = false; }
+      img.hidden = true; empty.hidden = false; msg.textContent = why;
+      continue;
+    }
+    if (!wristOn[key]) {
+      wristOn[key] = true;
+      img.onerror = () => { wristOn[key] = false; img.hidden = true; empty.hidden = false; setTimeout(renderWrists, 2000); };
+      img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
+    }
+    img.hidden = false; empty.hidden = true;
+  }
+}
+
 // ----------------------------------------------------------------- lidar
 function drawLidar() {
   const c = $("lidar");
@@ -297,9 +322,9 @@ function drawLidar() {
   const sx = (wy) => w / 2 - (wy - o.y) * S, sy = (wx) => h / 2 - (wx - o.x) * S;
 
   // range rings every 1 m around the robot
-  g.strokeStyle = "#e4e4e8"; g.lineWidth = 1;
+  g.strokeStyle = C.line; g.lineWidth = 1;
   for (let r = 1; r * S < Math.max(w, h); r++) { g.beginPath(); g.arc(w / 2, h / 2, r * S, 0, 2 * Math.PI); g.stroke(); }
-  g.fillStyle = "#9a9aa0"; g.font = "11px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = C.mute; g.font = "11px " + getComputedStyle(document.body).fontFamily;
   for (let r = 1; r <= 3; r++) g.fillText(`${r} m`, w / 2 + 4, h / 2 - r * S - 4);
 
   // path driven
@@ -317,7 +342,7 @@ function drawLidar() {
   $("scan-src").textContent = sc ? (sc.src === "mock" ? t("scan.mock") : t("scan.live")) : t("d.nolidar");
   if (sc) {
     const xy = sc.xy;
-    g.fillStyle = "#111111";
+    g.fillStyle = C.ink;
     for (let i = 0; i < xy.length; i += 2) g.fillRect(-xy[i + 1] / 100 * S - 1.5, -xy[i] / 100 * S - 1.5, 3, 3);
     const n = nearest();
     if (n) {
@@ -327,7 +352,7 @@ function drawLidar() {
     }
   }
   const L = 0.45 * S, W = 0.35 * S;
-  g.fillStyle = "#ffffff"; g.strokeStyle = s && s.estop ? "#e10600" : "#111111"; g.lineWidth = 2;
+  g.fillStyle = C.panel; g.strokeStyle = s && s.estop ? C.stop : ACCENT; g.lineWidth = 2;
   g.fillRect(-W / 2, -L / 2, W, L); g.strokeRect(-W / 2, -L / 2, W, L);
   g.fillStyle = g.strokeStyle; g.beginPath(); g.moveTo(0, -L / 2 + 4); g.lineTo(-7, -L / 2 + 15); g.lineTo(7, -L / 2 + 15); g.closePath(); g.fill();
   g.restore();

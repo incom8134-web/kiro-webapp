@@ -87,18 +87,28 @@ def main(argv):
     h.step = s
     s.status, s.lines, s.data = "running", [], {}
 
+    running = {"step": False}
+
     def stop(*_):
         h.stop_flag = True
         h.proc.stop()
+        if running["step"]:  # the wheel steps never read stop_flag: break out of their sleep now,
+            running["step"] = False  # so their own finally sets speed 0 and torque off (only once)
+            raise KeyboardInterrupt
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
 
     print(f"===== {s.title} =====", flush=True)
     try:
+        running["step"] = True
         result = getattr(h, "t_" + key)(s)
+    except KeyboardInterrupt:
+        result = False
     except Exception as e:  # noqa: BLE001 - same rule as the old wizard: an error is a failed step
         h.put(f"오류: {type(e).__name__}: {e}")
         result = False
+    finally:
+        running["step"] = False
     for _ in range(30):  # let the log drain
         if h.log_q.empty():
             break

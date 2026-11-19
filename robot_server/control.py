@@ -26,6 +26,12 @@ ZERO: Vec = (0.0, 0.0, 0.0)
 class Client:
     name: str
     last_seen: float
+    ip: str = ""
+
+
+@dataclass
+class PinGuard:
+    """Wrong-PIN counter for one device ADDRESS (not one connection): reconnecting does not reset it."""
     bad_pins: int = 0
     locked_until: float = 0.0
 
@@ -76,10 +82,11 @@ class Controller:
         self._zero_left = 0
         self.engineer_pin = cfg.engineer_pin  # the server sets the mock default in mock mode
         self.engineers: set[str] = set()      # operators who also unlocked the engineer tools
+        self.pin_guard: dict[str, PinGuard] = {}
 
     # ---- connections -------------------------------------------------
-    def connect(self, cid: str, name: str) -> None:
-        self.clients[cid] = Client(name=(name or "device")[:24], last_seen=self.clock())
+    def connect(self, cid: str, name: str, ip: str | None = None) -> None:
+        self.clients[cid] = Client(name=(name or "device")[:24], last_seen=self.clock(), ip=ip or cid)
 
     def disconnect(self, cid: str) -> None:
         self.clients.pop(cid, None)
@@ -97,15 +104,16 @@ class Controller:
         """None if the PIN is right. Wrong PINs count toward a short lockout (shared by both PINs)."""
         now = self.clock()
         c.last_seen = now
-        if now < c.locked_until:
-            return f"Too many wrong PINs. Wait {int(c.locked_until - now) + 1} s."
+        g = self.pin_guard.setdefault(c.ip, PinGuard())
+        if now < g.locked_until:
+            return f"Too many wrong PINs. Wait {int(g.locked_until - now) + 1} s."
         if not hmac.compare_digest(str(pin).encode(), want.encode()):
-            c.bad_pins += 1
-            if c.bad_pins >= MAX_BAD_PINS:
-                c.bad_pins = 0
-                c.locked_until = now + PIN_LOCKOUT_S
+            g.bad_pins += 1
+            if g.bad_pins >= MAX_BAD_PINS:
+                g.bad_pins = 0
+                g.locked_until = now + PIN_LOCKOUT_S
             return "Wrong PIN."
-        c.bad_pins = 0
+        g.bad_pins = 0
         return None
 
     def take(self, cid: str, pin: object, force: bool = False) -> tuple[bool, str]:

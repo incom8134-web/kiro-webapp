@@ -54,3 +54,9 @@ def test_operator_disconnect_frees_lock():
                 assert read_until(op, lambda m: m["t"] == "note")["ok"]
             other.send_json({"t": "take", "pin": "4321"})
             assert read_until(other, lambda m: m["t"] == "note")["ok"]
+
+
+def test_pages_are_never_served_stale():
+    with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
+        for path in ("/", "/app.js", "/style.css", "/dashboard.html"):
+            assert client.get(path).headers["cache-control"] == "no-cache"

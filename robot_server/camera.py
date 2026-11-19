@@ -23,16 +23,33 @@ PREVIEW_FPS = 10.0
 IDLE_CLOSE_S = 3.0
 
 
+def assign_wrists(cams: list[dict], webcams: list[tuple[str, str]]) -> list[dict]:
+    """Plug and play for the hand cameras (preview only): a hand camera whose configured USB port
+    is empty gets the next webcam found on any other port, right hand first. `webcams` is
+    [(usb port, /dev/videoN)] of plugged-in webcams. The skill still uses the configured ports."""
+    used = {c["device"] for c in cams if c.get("present")}
+    free = [(port, dev) for port, dev in webcams if dev not in used]
+    for key in ("right_wrist", "left_wrist"):
+        c = next((c for c in cams if c["key"] == key), None)
+        if c is None or c.get("present") or not free:
+            continue
+        port, dev = free.pop(0)
+        c.update(device=dev, present=True, auto=port)
+    return cams
+
+
 def find_cameras(so101_dir: Path) -> list[dict]:
-    """[{key, label, device, present, reason}] from the old camera config. [] if it cannot be read."""
+    """[{key, label, device, present, reason, auto}] from the old camera config, plus webcams found on
+    other ports for empty hand-camera slots. [] if the config cannot be read."""
     if not (so101_dir / "cams_config.py").exists():
         return []
     if str(so101_dir) not in sys.path:
         sys.path.insert(0, str(so101_dir))
     try:
         import cams_config  # from the old code
-        return [{k: c.get(k) for k in ("key", "label", "device", "present", "reason", "width", "height", "fps", "fourcc")}
+        cams = [{k: c.get(k) for k in ("key", "label", "device", "present", "reason", "width", "height", "fps", "fourcc")}
                 for c in cams_config.load(enabled_only=True)]
+        return assign_wrists(cams, cams_config._webcam_bypaths())
     except Exception as e:  # never let a camera problem stop the server
         log.warning("camera lookup failed: %s", e)
         return []

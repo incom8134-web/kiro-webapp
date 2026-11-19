@@ -49,14 +49,16 @@ class _SecondServer(uvicorn.Server):
 
 async def serve(cfg: Config) -> None:
     app = create_app(cfg)
+    small = 64 * 1024  # the page never sends more; a 16 MB message would stall the control loop
     main = uvicorn.Server(uvicorn.Config(app, host=cfg.host, port=cfg.port, log_level="warning",
-                                         timeout_graceful_shutdown=3))  # camera streams never end by themselves
+                                         timeout_graceful_shutdown=3, ws_max_size=small))  # camera streams never end by themselves
     https_port = int(os.environ.get("KIRO_HTTPS_PORT", "8443"))
     cert = ensure_cert() if https_port else None
     second = None
     if cert:
         second = _SecondServer(uvicorn.Config(app, host=cfg.host, port=https_port, ssl_keyfile=cert[0], ssl_certfile=cert[1],
-                                              lifespan="off", log_level="warning", timeout_graceful_shutdown=3))
+                                              lifespan="off", log_level="warning", timeout_graceful_shutdown=3,
+                                              ws_max_size=small))
         print(f"  Leader arm / microphone (https)  ->  https://localhost:{https_port}   (hotspot: https://10.42.0.1:{https_port})\n")
     task = asyncio.create_task(second.serve()) if second else None
     try:

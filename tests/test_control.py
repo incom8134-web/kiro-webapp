@@ -208,3 +208,17 @@ def test_engineer_tools_off_without_pin_and_wrong_pins_lock_out():
     assert "Too many wrong PINs" in c.unlock_engineer("a", "5555")[1]
     t[0] = 31.0
     assert c.unlock_engineer("a", "5555")[0]
+
+
+def test_wrong_pins_count_per_device_address_not_per_connection():
+    t = [0.0]
+    c = Controller(Config(pin="1234"), clock=lambda: t[0])
+    for i in range(MAX_BAD_PINS):          # a new connection for every guess, same laptop
+        c.connect(f"s{i}", "Laptop", ip="10.42.0.50")
+        assert c.take(f"s{i}", "0000")[0] is False
+        c.disconnect(f"s{i}")
+    c.connect("fresh", "Laptop", ip="10.42.0.50")
+    ok, msg = c.take("fresh", "1234")
+    assert not ok and "Too many wrong PINs" in msg   # even the right PIN waits out the lockout
+    c.connect("other", "Phone", ip="10.42.0.51")     # another device is not punished
+    assert c.take("other", "1234")[0]

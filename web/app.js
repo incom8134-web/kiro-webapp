@@ -14,7 +14,9 @@ const SEND_MS = 50;      // 20 messages per second
 const DEADZONE = 0.12;   // ignore tiny gamepad stick noise
 const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
-const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#00843d";
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const ACCENT = css("--accent", "#34d07f");
+const C = { ink: css("--ink", "#eef0f2"), line: css("--line", "#24272d"), panel: css("--panel", "#111316"), stop: css("--stop", "#ff3b30") };
 
 const state = { ws: null, open: false, server: null, robot: null, rtt: null, scan: null, cams: {} };
 const input = {
@@ -243,6 +245,25 @@ $("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunnin
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
 
+// Tabs in the dock: Drive, Arms, Voice, System. The last one used is remembered.
+function showTab(name) {
+  for (const b of document.querySelectorAll(".tabs [data-tab]")) b.classList.toggle("on", b.dataset.tab === name);
+  for (const p of document.querySelectorAll(".panel[data-panel]")) p.classList.toggle("on", p.dataset.panel === name);
+  try { localStorage.setItem("kiro-tab", name); } catch (e) { /* ignore */ }
+}
+for (const b of document.querySelectorAll(".tabs [data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
+let startTab = "drive";
+try { startTab = localStorage.getItem("kiro-tab") || "drive"; } catch (e) { /* ignore */ }
+showTab(document.querySelector(`.panel[data-panel="${startTab}"]`) ? startTab : "drive");
+
+/* A dot on a tab: green when something there runs, amber when something there failed. */
+function tabDot(name, busy, alert) {
+  const b = document.querySelector(`.tabs [data-tab="${name}"]`);
+  if (!b) return;
+  b.classList.toggle("busy", !!busy && !alert);
+  b.classList.toggle("alert", !!alert);
+}
+
 // Folded sections remember whether they were open
 for (const d of document.querySelectorAll("details.fold")) {
   try { d.open = localStorage.getItem("kiro-open-" + d.id) === "1"; } catch (e) { /* ignore */ }
@@ -330,7 +351,8 @@ function render() {
   $("wz").textContent = cmd.wz.toFixed(2);
 
   const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
-    : !jobRunning("base") && s.backend === "ros" ? t("hint.nobase") : "";
+    : !jobRunning("base") && s.backend === "ros" ? t("hint.nobase")
+    : state.robot && state.robot.wheels === "off" ? t("st.nowheels") : "";
   $("hint").textContent = hint;
   $("hint").hidden = !hint;
   $("stick-move").classList.toggle("off", !me);
@@ -364,10 +386,11 @@ function renderRobot() {
   const baseOn = jobRunning("base");
   $("base-btn").textContent = t(baseOn ? "btn.stop" : "btn.start");
   $("base-btn").classList.toggle("on", baseOn);
-  $("base-st").textContent = baseOn ? t("st.on") : "";
-  $("base-st").className = "st" + (baseOn ? " live" : "");
   const be = $("base-err");
   if (failTail(be, J.base)) be.textContent = t("base.exited", { code: J.base.code }) + "\n" + be.textContent;
+  else if (baseOn && r.wheels === "off") { be.hidden = false; be.textContent = t("base.nowheels"); }
+  $("base-st").textContent = baseOn ? (r.wheels === "off" ? t("st.nowheels") : r.wheels === "ok" ? t("st.on") : t("st.starting")) : "";
+  $("base-st").className = "st" + (baseOn && r.wheels === "ok" ? " live" : "");
 
   // Arms: right and left, each with teleop and the three poses
   const b = (r.health && r.health.boards) || {};
@@ -408,7 +431,7 @@ function renderRobot() {
   const br = r.bridge || {};
   if (leader.on && br.running && br.mode === "leader") leader.sawRunning = true;
   if (leader.on && (estop || !me || (leader.sawRunning && !br.running))) leaderStop(estop ? t("hint.estop") : "");
-  $("leader-btn").textContent = t(leader.on ? "leader.stop" : "leader.use");
+  $("leader-btn").querySelector("span").textContent = t(leader.on ? "leader.stop" : "leader.use");
   $("leader-btn").classList.toggle("on", leader.on);
   $("leader-st").textContent = leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
@@ -467,6 +490,11 @@ function renderRobot() {
   renderCams();
   renderEngineer();
   for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn"].includes(el.id)) el.disabled = !me;
+
+  tabDot("drive", baseOn, !$("base-err").hidden);
+  tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
+  tabDot("voice", vOn, false);
+  tabDot("system", jobRunning("wizard"), Object.values(b).some((x) => x && x.alarm));
 }
 
 // ------------------------------------------------------------------ cameras
@@ -503,6 +531,8 @@ function renderCams() {
       img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
     }
     img.hidden = false; empty.hidden = true;
+    const tag = view.querySelector(".tag");
+    if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
   }
 }
 
@@ -526,7 +556,7 @@ function drawMap() {
   const sy = (wx) => h / 2 - (wx - o.x) * S;
 
   const step = 0.5 * S;
-  g.strokeStyle = "#e4e4e8"; g.lineWidth = 1; g.beginPath();
+  g.strokeStyle = C.line; g.lineWidth = 1; g.beginPath();
   for (let x = ((w / 2 + o.y * S) % step + step) % step; x < w; x += step) { g.moveTo(x, 0); g.lineTo(x, h); }
   for (let y = ((h / 2 + o.x * S) % step + step) % step; y < h; y += step) { g.moveTo(0, y); g.lineTo(w, y); }
   g.stroke();
@@ -545,13 +575,13 @@ function drawMap() {
   const sc = state.scan && performance.now() - state.scan.at < 1000 ? state.scan : null;
   $("scan-src").textContent = sc ? (sc.src === "mock" ? t("scan.mock") : t("scan.live")) : "";
   if (sc) {
-    g.fillStyle = "#111111";
+    g.fillStyle = C.ink;
     const xy = sc.xy;
     for (let i = 0; i < xy.length; i += 2) g.fillRect(-xy[i + 1] / 100 * S - 1, -xy[i] / 100 * S - 1, 2, 2);
   }
   const L = 0.45 * S, W = 0.35 * S;
   const stop = s && s.estop;
-  g.fillStyle = "#ffffff"; g.strokeStyle = stop ? "#e10600" : "#111111"; g.lineWidth = 1.5;
+  g.fillStyle = C.panel; g.strokeStyle = stop ? C.stop : ACCENT; g.lineWidth = 1.5;
   g.fillRect(-W / 2, -L / 2, W, L); g.strokeRect(-W / 2, -L / 2, W, L);
   g.fillStyle = g.strokeStyle; g.beginPath(); g.moveTo(0, -L / 2 + 3); g.lineTo(-5, -L / 2 + 11); g.lineTo(5, -L / 2 + 11); g.closePath(); g.fill();
   const cmd = s ? s.cmd : { vx: 0, vy: 0 };

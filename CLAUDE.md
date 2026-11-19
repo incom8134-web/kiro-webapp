@@ -51,7 +51,8 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 ## Conventions
 
 - Keep the page free of build tools and external downloads.
-- Every string shown in the page must exist in English and Korean once the language switch is added.
+- Every string shown in the page must exist in English and Korean (`web/i18n.js`).
+- Look: camera-first dark console (`web/style.css` tokens at the top). Green = live, amber = needs attention, red only for E-STOP. Tools live in the dock's four tabs.
 - Add a test for every change to the control logic.
 - The repo on the Jetson is `~/Desktop/kiro-webapp`. The old code is `~/so101` (its own git repo, branch `master`).
 - Never re-implement what the old code does. Start its scripts as jobs (`robot_server/robot.py`).

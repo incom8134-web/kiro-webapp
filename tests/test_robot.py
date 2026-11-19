@@ -177,3 +177,112 @@ def test_leader_and_wave_share_the_arm_and_estop_stops_them(cfg):
         assert note(op, "wave")["ok"]
         r = robot_until(op, lambda m: m["bridge"]["running"] and m["bridge"]["mode"] == "wave")
         robot_until(op, lambda m: not m["bridge"]["running"], tries=2000)   # the wave ends by itself
+
+
+def test_base_reports_wheels_without_power(cfg):
+    from types import SimpleNamespace
+
+    from robot_server.robot import Robot
+    r = Robot(cfg, MockBase())
+    try:
+        fake = SimpleNamespace(running=True, lines=[])
+        fake.output = lambda: list(fake.lines)
+        r.jobs.get = lambda name: fake if name == "base" else None
+        assert r.base_wheels() is None                       # nothing logged yet: starting
+        fake.lines = ["휠 서보 응답 0/4  !! 12 V 전원·서보 케이블 확인", "[ERROR] [mecanum_base_node-1]: process has died"]
+        assert r.base_wheels() == "off"                      # 12 V off: launch still runs, wheels do not
+        fake.lines.append("[mecanum_base_node-1] 베이스 준비: 포트 /dev/so101_base, 전압 12.1 V")
+        assert r.base_wheels() == "ok"                       # power on and restarted
+        fake.running = False
+        assert r.base_wheels() is None
+    finally:
+        r.close()
+
+
+VIEWER_MESSAGES = [
+    {"t": "base", "on": True}, {"t": "teleop", "side": "right", "on": True}, {"t": "arm", "side": "right", "action": "fold"},
+    {"t": "skill", "name": "demo_act", "on": True}, {"t": "voice", "on": True}, {"t": "system", "action": "shutdown"},
+    {"t": "say", "text": "go forward"}, {"t": "servo", "cmd": "scan", "port": "/dev/so101_base"},
+    {"t": "wizard", "step": "devices", "on": True}, {"t": "wizard_decide", "step": "devices", "status": "pass"},
+    {"t": "leader", "on": True, "side": "right"}, {"t": "wave", "side": "right"},
+    {"t": "leader_pos", "side": "right", "raw": [2048] * 6}, {"t": "talk", "on": True},
+    {"t": "drive", "x": 1, "y": 0, "z": 0, "en": True}, {"t": "engineer", "pin": "1111"},
+]
+
+
+@pytest.mark.parametrize("msg", VIEWER_MESSAGES, ids=[m["t"] for m in VIEWER_MESSAGES])
+def test_a_viewer_can_start_nothing(cfg, msg):
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Phone") as v:
+        v.send_json(msg)
+        time.sleep(0.4)
+        r = robot_until(v, lambda m: True)
+        assert not any(j["running"] for j in r["jobs"].values())
+        assert r["bridge"]["rx"] == 0
+        assert client.app.state.ctrl.operator is None
+        assert not client.app.state.ctrl.engineers
+
+
+def test_websocket_from_another_website_is_refused(cfg):
+    from starlette.websockets import WebSocketDisconnect
+    with TestClient(create_app(cfg, MockBase())) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"origin": "http://evil.example"}) as ws:
+                ws.receive_json()
+        with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:  # the page itself
+            assert ws.receive_json()["t"] == "state"
+
+
+def test_estop_while_a_program_is_starting_still_stops_it(cfg):
+    from robot_server.robot import Robot
+    base = MockBase()
+    robot = Robot(cfg, base)
+    real = robot.skill
+
+    def slow_skill(*a, **k):  # like waiting for the servo-bus lock
+        time.sleep(0.6)
+        return real(*a, **k)
+    robot.skill = slow_skill
+    with TestClient(create_app(cfg, base, robot)) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "skill", "name": "demo_act", "on": True})
+        time.sleep(0.1)
+        op.send_json({"t": "estop", "on": True})
+        assert note(op, "skill")["ok"]                      # it did start...
+        r = robot_until(op, lambda m: "skill" in m["jobs"] and not m["jobs"]["skill"]["running"], tries=600)
+        assert r["jobs"]["skill"]["code"] is not None       # ...and E-STOP stopped it right after
+
+
+def test_estop_kills_a_fold_and_stops_the_base_at_once(cfg):
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "base", "on": True})
+        assert note(op, "base")["ok"]
+        op.send_json({"t": "arm", "side": "right", "action": "fold"})
+        assert note(op, "arm")["ok"]
+        t0 = time.time()
+        op.send_json({"t": "estop", "on": True})
+        robot_until(op, lambda m: not m["jobs"]["arm_right"]["running"] and not m["jobs"]["base"]["running"], tries=600)
+        assert time.time() - t0 < 3.0
+        r = robot_until(op, lambda m: any("E-STOP:" in e["text"] for e in m["events"]))
+        assert any("killed arm_right" in e["text"] and "stopped base" in e["text"] for e in r["events"])
+
+
+def test_hand_cameras_plug_and_play():
+    from robot_server.camera import assign_wrists
+
+    def cams():
+        return [{"key": "top", "device": "/dev/video6", "present": True},
+                {"key": "right_wrist", "device": None, "present": False},
+                {"key": "left_wrist", "device": None, "present": False}]
+    # two webcams on unexpected ports: right hand first, then left
+    out = {c["key"]: c for c in assign_wrists(cams(), [("2.1", "/dev/video8"), ("2.4", "/dev/video10")])}
+    assert out["right_wrist"]["device"] == "/dev/video8" and out["right_wrist"]["auto"] == "2.1"
+    assert out["left_wrist"]["device"] == "/dev/video10"
+    # a camera already in its configured port keeps its place; the other slot takes the spare webcam
+    c = cams()
+    c[2].update(device="/dev/video8", present=True)
+    out = {x["key"]: x for x in assign_wrists(c, [("2.3.2", "/dev/video8"), ("2.1", "/dev/video10")])}
+    assert out["left_wrist"]["device"] == "/dev/video8" and "auto" not in out["left_wrist"]
+    assert out["right_wrist"]["device"] == "/dev/video10"
+    # no webcams: nothing changes
+    assert not any(x.get("present") for x in assign_wrists(cams(), [])[1:])
