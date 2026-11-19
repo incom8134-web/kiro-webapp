@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#0a1020">
 <title>KIRO Dashboard</title>
+<script src="theme.js"></script>
+<link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="dash">
 <header class="bar">
-  <div class="brand">KIRO<a class="dash-link" href="./" data-i18n="dash.control">Control</a></div>
+  <div class="brand"><span class="logo"><i class="ri-robot-2-fill"></i></span>KIRO</div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
@@ -17,49 +19,66 @@
     <div class="cell"><span class="k" data-i18n="d.uptime">Uptime</span><b id="uptime">...</b></div>
     <div class="cell"><span class="k" data-i18n="d.devices">Devices</span><b id="devices">...</b></div>
   </div>
-  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한국어</button></div>
-  <button id="estop" class="estop" type="button" data-i18n="estop">E-STOP</button>
+  <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
+  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
 </header>
 
 <div id="banner" class="banner" hidden></div>
 
-<div class="dgrid">
-  <section class="dview cam">
-    <div class="dhead"><span data-i18n="d.camera">Camera</span><span id="cam-name" class="mute"></span></div>
-    <div class="dbody dark">
-      <img id="cam" alt="" hidden>
-      <div id="cam-empty" class="empty"><span id="cam-msg"></span></div>
-    </div>
-    <div class="dwrists">
-      <div class="view wrist" data-cam="left_wrist"><img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div><span class="tag glass" data-i18n="cam.left_wrist">Left hand</span></div>
-      <div class="view wrist" data-cam="right_wrist"><img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div><span class="tag glass" data-i18n="cam.right_wrist">Right hand</span></div>
-    </div>
-  </section>
-  <section class="dview">
-    <div class="dhead"><span data-i18n="d.lidarview">Lidar</span><span id="scan-src" class="mute"></span></div>
-    <div class="dbody"><canvas id="lidar"></canvas></div>
-  </section>
-</div>
+<div class="dwrap">
+  <div class="dgrid">
+    <section class="dview">
+      <div class="dhead"><span><i class="ri-camera-3-line"></i><span data-i18n="d.camera">Camera</span></span><span id="cam-name" class="mute"></span></div>
+      <div class="dbody">
+        <img id="cam" alt="" hidden>
+        <div id="cam-empty" class="empty"><span id="cam-msg"></span></div>
+      </div>
+      <div class="dwrists">
+        <div class="view wrist" data-cam="left_wrist"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div><span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.left_wrist">Left hand</span></span></div>
+        <div class="view wrist" data-cam="right_wrist"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div><span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.right_wrist">Right hand</span></span></div>
+      </div>
+    </section>
+    <section class="dview">
+      <div class="dhead"><span><i class="ri-radar-line"></i><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
+      <div class="dbody light"><canvas id="lidar"></canvas></div>
+    </section>
+  </div>
 
-<div class="tiles" id="tiles"></div>
+  <div class="tiles" id="tiles"></div>
 
-<div class="lower">
-  <section class="dsec">
-    <h2><span class="n">01</span><span data-i18n="d.servos">Servo boards</span></h2>
-    <table class="kv dtable" id="servos"></table>
-  </section>
-  <section class="dsec">
-    <h2><span class="n">02</span><span data-i18n="d.programs">Programs</span></h2>
-    <table class="kv dtable" id="programs"></table>
-    <h2 style="margin-top:18px"><span class="n">03</span><span data-i18n="sec.voice">Voice</span></h2>
-    <p class="big-quote" id="voice">-</p>
-  </section>
-  <section class="dsec">
-    <h2><span class="n">04</span><span data-i18n="sec.log">Activity</span></h2>
-    <ul id="log" class="log"></ul>
-  </section>
+  <div class="charts">
+    <section class="chart-card"><div class="dhead"><span><i class="ri-cpu-line"></i><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-bar-chart-2-line"></i><span data-i18n="c.cores">CPU per core</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cores"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-temp-hot-line"></i><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-flashlight-line"></i><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-speed-up-line"></i><span data-i18n="c.speed">Robot speed</span></span><span class="mute">m/s</span></div><div class="chart-box"><canvas id="ch-speed"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-wifi-line"></i><span data-i18n="c.net">Wi-Fi traffic</span></span><span class="mute">KB/s</span></div><div class="chart-box"><canvas id="ch-net"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-radar-line"></i><span data-i18n="c.sides">Nearest object by side</span></span><span class="mute">m</span></div><div class="chart-box"><canvas id="ch-sides"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-battery-2-charge-line"></i><span data-i18n="c.svolt">Servo voltage per board</span></span><span class="mute">V</span></div><div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><i class="ri-temp-hot-line"></i><span data-i18n="c.stemp">Servo temperature per joint</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div></section>
+  </div>
+
+  <div class="lower">
+    <section class="dsec">
+      <h2><i class="ri-database-2-line"></i><span data-i18n="d.servos">Servo boards</span></h2>
+      <table class="kv dtable" id="servos"></table>
+    </section>
+    <section class="dsec">
+      <h2><i class="ri-terminal-box-line"></i><span data-i18n="d.programs">Programs</span></h2>
+      <table class="kv dtable" id="programs"></table>
+      <h2 style="margin-top:18px"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span></h2>
+      <p class="big-quote" id="voice">-</p>
+    </section>
+    <section class="dsec">
+      <h2><i class="ri-pulse-line"></i><span data-i18n="sec.log">Activity</span></h2>
+      <ul id="log" class="log"></ul>
+    </section>
+  </div>
 </div>
 <div class="foot" id="ver"></div>
+<script src="vendor/chartjs/chart.umd.min.js"></script>
 <script src="i18n.js"></script>
 <script src="dashboard.js"></script>
 </body>

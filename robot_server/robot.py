@@ -68,6 +68,19 @@ BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this ser
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
 
+def cpu_percent(prev: dict[str, list[int]], cur: dict[str, list[int]]) -> dict[str, float]:
+    """Busy % per CPU between two /proc/stat readings ({"cpu0": [user, nice, system, idle, iowait, ...]})."""
+    out = {}
+    for k, c in cur.items():
+        p = prev.get(k)
+        if not p:
+            continue
+        total = sum(c) - sum(p)
+        idle = (c[3] + c[4]) - (p[3] + p[4])
+        out[k] = round(100.0 * (total - idle) / total, 1) if total > 0 else 0.0
+    return out
+
+
 def leader_to_target(cal: dict, raw: list) -> dict:
     """Leader servo positions (raw ticks, IDs 1..6) -> twin_bridge target, the same maths as LeRobot
     (motors_bus._normalize): joints in degrees, 0 = middle of the calibrated range; gripper 0..100 %."""
@@ -121,6 +134,8 @@ class Robot:
         self._wave_stop = threading.Event()
         self._wave_thread: threading.Thread | None = None
         self._estop_lock = threading.Lock()
+        self._cpu_prev: dict = {}
+        self._net_prev: tuple | None = None
         self.refresh_cameras()
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
@@ -649,6 +664,52 @@ class Robot:
     # --------------------------------------------------------------- health
     def _jetson(self) -> dict:
         out: dict = {}
+        now = time.monotonic()
+        # CPU busy % per core (between two health readings)
+        try:
+            cur = {ln.split()[0]: [int(x) for x in ln.split()[1:8]]
+                   for ln in Path("/proc/stat").read_text().splitlines() if ln.startswith("cpu")}
+            pct = cpu_percent(self._cpu_prev, cur)
+            self._cpu_prev = cur
+            if pct:
+                out["cpu"] = pct.get("cpu")
+                out["cpu_cores"] = [pct[k] for k in sorted((k for k in pct if k != "cpu"), key=lambda k: int(k[3:]))]
+        except (OSError, ValueError, IndexError):
+            pass
+        # GPU load (Jetson: per mille)
+        for g in ("/sys/devices/platform/bus@0/17000000.gpu/load", "/sys/devices/platform/17000000.gpu/load", "/sys/devices/gpu.0/load"):
+            try:
+                out["gpu"] = round(int(Path(g).read_text()) / 10.0, 1)
+                break
+            except (OSError, ValueError):
+                continue
+        # Power from the board's INA3221 sensors: watts per rail
+        power = {}
+        for h in Path("/sys/bus/i2c/drivers/ina3221").glob("*/hwmon/hwmon*"):
+            for i in (1, 2, 3):
+                try:
+                    label = (h / f"in{i}_label").read_text().strip()
+                    mv, ma = int((h / f"in{i}_input").read_text()), int((h / f"curr{i}_input").read_text())
+                    power[label] = round(mv * ma / 1e6, 2)
+                except (OSError, ValueError):
+                    pass
+        if power:
+            out["power"] = power
+        # Wi-Fi traffic (KB/s) between two readings
+        try:
+            for ln in Path("/proc/net/dev").read_text().splitlines():
+                name, _, rest = ln.partition(":")
+                if name.strip().startswith(("wl", "wlan")):
+                    f = rest.split()
+                    rx, tx = int(f[0]), int(f[8])
+                    if self._net_prev:
+                        dt = max(0.1, now - self._net_prev[2])
+                        out["net"] = {"rx": round((rx - self._net_prev[0]) / dt / 1024, 1),
+                                      "tx": round((tx - self._net_prev[1]) / dt / 1024, 1)}
+                    self._net_prev = (rx, tx, now)
+                    break
+        except (OSError, ValueError, IndexError):
+            pass
         temps = []
         for z in Path("/sys/class/thermal").glob("thermal_zone*"):
             try:
@@ -661,6 +722,7 @@ class Robot:
         if temps:
             cpu = [v for k, v in temps if "cpu" in k.lower()]
             out["temp"] = round(max(cpu) if cpu else max(v for _, v in temps), 1)
+            out["temps"] = {k.replace("-thermal", ""): round(v, 1) for k, v in temps}
         try:
             out["load"] = round(os.getloadavg()[0], 2)
             out["cores"] = os.cpu_count()
@@ -670,6 +732,7 @@ class Robot:
             mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
             total = int(mem["MemTotal"].split()[0]); avail = int(mem["MemAvailable"].split()[0])
             out["mem"] = round(100 * (total - avail) / total)
+            out["mem_mb"] = [round((total - avail) / 1024), round(total / 1024)]
         except (OSError, KeyError, ValueError):
             pass
         du = shutil.disk_usage(Path.home())

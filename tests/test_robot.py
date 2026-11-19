@@ -286,3 +286,11 @@ def test_hand_cameras_plug_and_play():
     assert out["right_wrist"]["device"] == "/dev/video10"
     # no webcams: nothing changes
     assert not any(x.get("present") for x in assign_wrists(cams(), [])[1:])
+
+
+def test_cpu_percent_from_proc_stat():
+    from robot_server.robot import cpu_percent
+    prev = {"cpu": [100, 0, 100, 800, 0, 0, 0], "cpu0": [50, 0, 50, 400, 0, 0, 0]}
+    cur = {"cpu": [150, 0, 150, 900, 0, 0, 0], "cpu0": [50, 0, 50, 500, 0, 0, 0]}
+    assert cpu_percent(prev, cur) == {"cpu": 50.0, "cpu0": 0.0}   # 100 busy of 200; core 0 idle
+    assert cpu_percent({}, cur) == {}                             # first reading: nothing yet

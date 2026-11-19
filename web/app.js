@@ -16,7 +16,20 @@ const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const ACCENT = css("--accent", "#34d07f");
-const C = { ink: css("--ink", "#eef0f2"), line: css("--line", "#24272d"), panel: css("--panel", "#111316"), stop: css("--stop", "#ff3b30") };
+let ACC = ACCENT;
+let C = {};
+function readColors() {   // canvas colours follow the theme
+  ACC = css("--accent", "#38bdf8");
+  C = { ink: css("--ink", "#e8eef8"), line: css("--line", "#1f2b47"), panel: css("--panel", "#0f172a"), stop: css("--stop", "#ff3b30") };
+}
+readColors();
+
+/* A button with an icon and a label: change both without losing the icon. */
+function setBtn(el, text, icon) {
+  const span = el.querySelector("span:not(.fill)"), i = el.querySelector("i");
+  if (span) span.textContent = text;
+  if (i && icon) i.className = icon;
+}
 
 const state = { ws: null, open: false, server: null, robot: null, rtt: null, scan: null, cams: {} };
 const input = {
@@ -234,6 +247,9 @@ for (const b of document.querySelectorAll(".lang button")) {
   b.addEventListener("click", () => { setLang(b.dataset.lang); render(); });
 }
 $("turbo").addEventListener("change", () => $("turbo").blur());
+$("theme-btn").addEventListener("click", () => toggleTheme());
+window.addEventListener("kiro-theme", () => { readColors(); themeIcon($("theme-btn")); drawMap(); });
+themeIcon($("theme-btn"));
 
 const talk = $("talk");
 talk.addEventListener("pointerdown", (e) => { if (!isOperator()) return; talk.setPointerCapture(e.pointerId); setTalk(true); e.preventDefault(); });
@@ -331,7 +347,7 @@ function render() {
   const es = $("estop");
   const stopped = !!s && s.estop;
   es.classList.toggle("on", stopped);
-  es.textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
+  $("estop-label").textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
 
   const banner = $("banner");
   if (!state.open) {
@@ -384,7 +400,7 @@ function renderRobot() {
 
   // Base
   const baseOn = jobRunning("base");
-  $("base-btn").textContent = t(baseOn ? "btn.stop" : "btn.start");
+  setBtn($("base-btn"), t(baseOn ? "btn.stop" : "btn.start"), baseOn ? "ri-stop-fill" : "ri-play-fill");
   $("base-btn").classList.toggle("on", baseOn);
   const be = $("base-err");
   if (failTail(be, J.base)) be.textContent = t("base.exited", { code: J.base.code }) + "\n" + be.textContent;
@@ -431,7 +447,7 @@ function renderRobot() {
   const br = r.bridge || {};
   if (leader.on && br.running && br.mode === "leader") leader.sawRunning = true;
   if (leader.on && (estop || !me || (leader.sawRunning && !br.running))) leaderStop(estop ? t("hint.estop") : "");
-  $("leader-btn").querySelector("span").textContent = t(leader.on ? "leader.stop" : "leader.use");
+  setBtn($("leader-btn"), t(leader.on ? "leader.stop" : "leader.use"), leader.on ? "ri-stop-fill" : "ri-usb-line");
   $("leader-btn").classList.toggle("on", leader.on);
   $("leader-st").textContent = leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
@@ -442,7 +458,7 @@ function renderRobot() {
 
   // Voice
   const vOn = jobRunning("voice");
-  $("voice-btn").textContent = t(vOn ? "btn.stop" : "btn.start");
+  setBtn($("voice-btn"), t(vOn ? "btn.stop" : "btn.start"), vOn ? "ri-stop-fill" : "ri-play-fill");
   $("voice-btn").classList.toggle("on", vOn);
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
   $("voice-st").className = "st" + (vOn ? " live" : "");
@@ -531,7 +547,7 @@ function renderCams() {
       img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
     }
     img.hidden = false; empty.hidden = true;
-    const tag = view.querySelector(".tag");
+    const tag = view.querySelector(".tagtext");
     if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
   }
 }
@@ -565,7 +581,7 @@ function drawMap() {
   if (last && Math.hypot(o.x - last.x, o.y - last.y) > 1.5) trail.length = 0;
   if (!last || Math.hypot(o.x - last.x, o.y - last.y) > 0.02) { trail.push({ x: o.x, y: o.y }); if (trail.length > 600) trail.shift(); }
   if (trail.length > 1) {
-    g.strokeStyle = ACCENT; g.lineWidth = 1.5; g.beginPath();
+    g.strokeStyle = ACC; g.lineWidth = 1.5; g.beginPath();
     trail.forEach((p, i) => (i ? g.lineTo(sx(p.y), sy(p.x)) : g.moveTo(sx(p.y), sy(p.x))));
     g.lineTo(w / 2, h / 2); g.stroke();
   }
@@ -581,13 +597,13 @@ function drawMap() {
   }
   const L = 0.45 * S, W = 0.35 * S;
   const stop = s && s.estop;
-  g.fillStyle = C.panel; g.strokeStyle = stop ? C.stop : ACCENT; g.lineWidth = 1.5;
+  g.fillStyle = C.panel; g.strokeStyle = stop ? C.stop : ACC; g.lineWidth = 1.5;
   g.fillRect(-W / 2, -L / 2, W, L); g.strokeRect(-W / 2, -L / 2, W, L);
   g.fillStyle = g.strokeStyle; g.beginPath(); g.moveTo(0, -L / 2 + 3); g.lineTo(-5, -L / 2 + 11); g.lineTo(5, -L / 2 + 11); g.closePath(); g.fill();
   const cmd = s ? s.cmd : { vx: 0, vy: 0 };
   const ax = -cmd.vy * S * 3, ay = -cmd.vx * S * 3, al = Math.hypot(ax, ay);
   if (al > 3) {
-    g.strokeStyle = ACCENT; g.fillStyle = ACCENT; g.lineWidth = 2;
+    g.strokeStyle = ACC; g.fillStyle = ACC; g.lineWidth = 2;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(ax, ay); g.stroke();
     const a = Math.atan2(ay, ax);
     g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax - 7 * Math.cos(a - 0.5), ay - 7 * Math.sin(a - 0.5));

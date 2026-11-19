@@ -13,7 +13,7 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 | Part | State |
 |---|---|
 | Driving: on-screen sticks, gamepad, keyboard (W A S D or arrows, no extra key), one operator with PIN, E-STOP, heartbeat stop | Works. 31 automatic tests |
-| Camera-first console (dark): video fills the screen with map, speeds and sticks on it, hand cameras below, tools in four tabs (Drive, Arms, Voice, System). Works on phones | Works |
+| Dark and light theme (sun / moon button, follows the computer's setting). Camera-first console: video fills the screen with map, speeds and sticks on it, hand cameras below, tools in four tabs (Drive, Arms, Voice, System). Works on phones | Works |
 | Base shows when the wheels do not answer (12 V off) | Works |
 | Leader arm on the laptop (USB, Chrome or Edge, https page): plug in, press one button, the right arm follows | Built on the old twin_bridge. Protocol code checked; not yet tried with a real leader arm |
 | Wave button: the right arm waves its wrist and gripper from where it is, then holds | Built on the old twin_bridge. Not yet tried on the arm |
@@ -24,7 +24,7 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 | Run a skill (`right_arm_task2_act`) | Wired to `run_policy.sh`. Needs the `right_wrist` webcam |
 | Voice: hold-to-talk (button, V key, gamepad Y), Korean and English (follows the page language) | Wired to the old `voice_cmd`. Korean and English Vosk models installed in `~/models/vosk`; English checked on the robot 19 Nov |
 | Lidar points on the map (`/scan`, same mounting angle as the obstacle guard) | Works with the simulated room in mock mode. Lidar not plugged in yet |
-| Dashboard page `/dashboard.html`: camera, lidar, speed, distance, nearest object, Jetson, servos, programs, activity | Works. Read-only, for a big screen |
+| Dashboard page `/dashboard.html`: cameras, lidar, 10 live stat tiles (speed, distance, nearest object, power W, CPU, GPU, temperature, memory, Wi-Fi, link) and 9 charts (CPU and GPU, CPU per core, temperatures, power, speed, Wi-Fi, nearest object by side, servo voltage, servo temperature) | Works. Read-only, for a big screen. Charts show only real data |
 | Health: Jetson, servo voltage / temperature / current, cameras. Shutdown / restart | Works (shutdown needs `deploy/kiro-shutdown.sudoers`) |
 | Base extras: quick-command pad, typed commands, guard distance (close / safe) | Works (commands go through the old voice node) |
 | Engineer tools (own PIN): servo tester (scan, torque, move, change ID) and the 13-step check wizard | Works. Scan and wizard step 1 checked on the robot. Arm ports read-only unless ticked |

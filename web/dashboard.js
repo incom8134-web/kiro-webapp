@@ -1,20 +1,30 @@
 "use strict";
 /*
- * KIRO live dashboard. Read-only view for a big screen: it never drives.
- * Every number comes from the robot server. Small charts keep the last
- * 2 minutes, recorded in this browser since the page was opened.
+ * KIRO live dashboard. Read-only view for a big screen: it never drives (E-STOP still works).
+ * Every number comes from the robot server. Line charts keep the last 5 minutes, recorded in
+ * this browser since the page was opened. A chart with no data says so; nothing is invented.
  */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-const ACCENT = css("--accent", "#34d07f");
-const C = { ink: css("--ink", "#eef0f2"), line: css("--line-2", "#343840"), mute: css("--mute", "#858a93"), panel: css("--panel", "#111316"), stop: css("--stop", "#ff3b30") };
-const HISTORY_S = 120;
+const WINDOW_S = 300;
 const PX_PER_M = 70;
 
 const st = { ws: null, open: false, server: null, robot: null, scan: null, rtt: null, cam: null };
-const hist = {};      // key -> [{t, v}]
+const hist = {};      // key -> [{x: epoch seconds, y}]
 const trail = [];
+let theme = {};
+
+function readTheme() {
+  theme = {
+    ink: css("--ink", "#e8eef8"), ink2: css("--ink-2", "#b7c3d7"), mute: css("--mute", "#7c8aa5"),
+    line: css("--line", "#1f2b47"), line2: css("--line-2", "#2c3b5c"), panel: css("--panel", "#0f172a"),
+    raise: css("--raise", "#141e35"), accent: css("--accent", "#38bdf8"), stop: css("--stop", "#ff3b30"),
+    font: css("--font", "system-ui"),
+    series: css("--series", "#3987e5,#d95926,#199e70").split(",").map((x) => x.trim()),
+  };
+}
+readTheme();
 
 // ------------------------------------------------------------ connection
 function connect() {
@@ -35,28 +45,30 @@ function connect() {
 const send = (o) => { if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(o)); };
 setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 
-$("estop").addEventListener("click", () => {
-  // Anyone may stop the robot. Only the operator (on the control page) may release it.
+$("estop").addEventListener("click", () => {   // anyone may stop the robot; only the operator releases it
   if (!(st.server && st.server.estop)) send({ t: "estop", on: true });
 });
 window.addEventListener("keydown", (e) => { if (e.code === "Escape") send({ t: "estop", on: true }); });
-for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); buildTiles(); render(); });
+for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); buildTiles(); buildCharts(); render(); onRobot(); });
+$("theme-btn").addEventListener("click", () => toggleTheme());
+window.addEventListener("kiro-theme", () => { readTheme(); themeIcon($("theme-btn")); buildCharts(); drawLidar(); });
+themeIcon($("theme-btn"));
 
 // --------------------------------------------------------------- history
+const now = () => Date.now() / 1000;
 function record(key, v) {
   if (v == null || !Number.isFinite(v)) return;
-  const now = Date.now() / 1000;
   const h = hist[key] || (hist[key] = []);
-  h.push({ t: now, v });
-  while (h.length && h[0].t < now - HISTORY_S) h.shift();
+  h.push({ x: now(), y: v });
+  while (h.length && h[0].x < now() - WINDOW_S) h.shift();
 }
+const last = (key) => { const h = hist[key]; return h && h.length ? h[h.length - 1].y : null; };
 
 let lastSpeedSample = 0;
 function onState() {
   const s = st.server;
-  const now = Date.now();
-  if (now - lastSpeedSample > 500) {
-    lastSpeedSample = now;
+  if (Date.now() - lastSpeedSample > 500) {
+    lastSpeedSample = Date.now();
     const o = s.odom;
     record("speed", o ? Math.hypot(o.vx, o.vy) : Math.hypot(s.cmd.vx, s.cmd.vy));
     const n = nearest();
@@ -66,12 +78,28 @@ function onState() {
 }
 
 function onRobot() {
-  const j = (st.robot.health || {}).jetson || {};
-  record("temp", j.temp);
-  record("cpu", j.load != null && j.cores ? (100 * j.load) / j.cores : null);
+  const r = st.robot;
+  if (!r) return;
+  const j = (r.health || {}).jetson || {};
+  record("cpu", j.cpu);
+  record("gpu", j.gpu);
   record("mem", j.mem);
-  record("current", servoCurrent());
-  renderRobot();
+  const tz = j.temps || {};
+  record("t_cpu", tz.cpu);
+  record("t_gpu", tz.gpu);
+  const soc = Object.entries(tz).filter(([k]) => k.startsWith("soc")).map(([, v]) => v);
+  record("t_soc", soc.length ? soc.reduce((a, b) => a + b, 0) / soc.length : null);
+  const pw = j.power || {};
+  record("p_in", pw.VDD_IN);
+  record("p_cg", pw.VDD_CPU_GPU_CV);
+  record("p_soc", pw.VDD_SOC);
+  record("rx", j.net ? j.net.rx : null);
+  record("tx", j.net ? j.net.tx : null);
+  record("rtt", st.rtt);
+  renderTiles();
+  updateCharts();
+  renderLists();
+  renderCams();
 }
 
 // ------------------------------------------------------------- numbers
@@ -86,19 +114,24 @@ function nearest() {
   return best;
 }
 
+/* Nearest lidar point on each side of the robot (front, left, right, back), metres. */
+function sides() {
+  const sc = st.scan && performance.now() - st.scan.at < 1000 ? st.scan : null;
+  if (!sc || !sc.xy.length) return null;
+  const out = { front: null, left: null, right: null, back: null };
+  for (let i = 0; i < sc.xy.length; i += 2) {
+    const x = sc.xy[i] / 100, y = sc.xy[i + 1] / 100, d = Math.hypot(x, y);
+    if (d < 0.05) continue;
+    const deg = Math.atan2(y, x) * 180 / Math.PI;
+    const k = Math.abs(deg) <= 45 ? "front" : Math.abs(deg) >= 135 ? "back" : deg > 0 ? "left" : "right";
+    if (out[k] == null || d < out[k]) out[k] = d;
+  }
+  return out;
+}
+
 function direction(a) {
   const deg = (a * 180) / Math.PI;
   return Math.abs(deg) <= 45 ? "dir.front" : Math.abs(deg) >= 135 ? "dir.back" : deg > 0 ? "dir.left" : "dir.right";
-}
-
-function servoCurrent() {
-  const b = (st.robot && st.robot.health && st.robot.health.boards) || {};
-  let sum = 0, any = false;
-  for (const x of Object.values(b)) {
-    if (!x || x.state !== "ok") continue;
-    for (const s of Object.values(x.servos || {})) if (s.ma != null) { sum += s.ma; any = true; }
-  }
-  return any ? sum / 1000 : null;
 }
 
 function fmtUp(s) {
@@ -108,96 +141,166 @@ function fmtUp(s) {
 }
 
 // --------------------------------------------------------------- tiles
-// Each tile: one real value, its unit, and a 2-minute line of the same value.
 const TILES = [
-  { key: "speed", label: "d.speed", unit: "m/s", fmt: (v) => v.toFixed(2) },
-  { key: "dist", label: "d.dist", unit: "m", fmt: (v) => v.toFixed(1), noSpark: true },
-  { key: "nearest", label: "d.nearest", unit: "m", fmt: (v) => v.toFixed(2) },
-  { key: "temp", label: "d.temp", unit: "°C", fmt: (v) => v.toFixed(1) },
-  { key: "cpu", label: "d.cpu", unit: "%", fmt: (v) => Math.round(v) },
-  { key: "mem", label: "d.mem", unit: "%", fmt: (v) => Math.round(v) },
-  { key: "current", label: "d.current", unit: "A", fmt: (v) => v.toFixed(2) },
+  { key: "speed", icon: "ri-speed-up-line", label: "d.speed", unit: "m/s", fmt: (v) => v.toFixed(2) },
+  { key: "dist", icon: "ri-route-line", label: "d.dist", unit: "m", fmt: (v) => v.toFixed(1) },
+  { key: "nearest", icon: "ri-focus-3-line", label: "d.nearest", unit: "m", fmt: (v) => v.toFixed(2) },
+  { key: "p_in", icon: "ri-flashlight-line", label: "d.power", unit: "W", fmt: (v) => v.toFixed(1) },
+  { key: "cpu", icon: "ri-cpu-line", label: "d.cpu", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "gpu", icon: "ri-brain-line", label: "d.gpu", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "t_cpu", icon: "ri-temp-hot-line", label: "d.temp", unit: "°C", fmt: (v) => v.toFixed(1) },
+  { key: "mem", icon: "ri-hard-drive-2-line", label: "d.mem", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "net", icon: "ri-wifi-line", label: "d.net", unit: "KB/s", fmt: (v) => v.toFixed(1) },
+  { key: "rtt", icon: "ri-signal-wifi-3-line", label: "d.link", unit: "ms", fmt: (v) => Math.round(v) },
 ];
 
 function buildTiles() {
-  $("tiles").innerHTML = TILES.map((tl) => `<div class="tile" data-key="${tl.key}">
-    <span class="k">${esc(t(tl.label))}</span>
+  $("tiles").innerHTML = TILES.map((tl) => `<div class="tile">
+    <span class="k"><i class="${tl.icon}"></i>${esc(t(tl.label))}</span>
     <div class="num"><b id="v-${tl.key}">-</b><i>${tl.unit}</i></div>
-    <span class="sub mute" id="s-${tl.key}"></span>
-    ${tl.noSpark ? "" : `<svg class="spark" id="g-${tl.key}" preserveAspectRatio="none"></svg><span class="tip" id="tip-${tl.key}"></span>`}
-  </div>`).join("");
-  for (const tl of TILES) if (!tl.noSpark) hoverSpark(tl);
-}
-
-function current(key) {
-  const h = hist[key];
-  return h && h.length ? h[h.length - 1].v : null;
+    <span class="sub" id="s-${tl.key}"></span></div>`).join("");
 }
 
 function renderTiles() {
-  const s = st.server, r = st.robot;
+  const s = st.server, r = st.robot, j = (r && r.health && r.health.jetson) || {};
+  const n = nearest();
   const vals = {
-    speed: current("speed"), dist: s ? s.odo_m : null, nearest: current("nearest"),
-    temp: current("temp"), cpu: current("cpu"), mem: current("mem"), current: current("current"),
+    speed: last("speed"), dist: s ? s.odo_m : null, nearest: n ? n.d : null, p_in: last("p_in"), cpu: last("cpu"),
+    gpu: last("gpu"), t_cpu: last("t_cpu"), mem: last("mem"),
+    net: j.net ? j.net.rx + j.net.tx : null, rtt: st.rtt,
   };
   const subs = {
-    dist: t("d.since"),
-    nearest: (() => { const n = nearest(); return n ? t(direction(n.a)) : t("d.nolidar"); })(),
-    current: r && r.health && Object.values(r.health.boards || {}).some((x) => x && x.state === "ok") ? t("d.allservos") : t("d.noservos"),
-    cpu: r && r.health && r.health.jetson && r.health.jetson.cores ? `${r.health.jetson.cores} ${t("d.cores")}` : "",
+    dist: t("d.since"), nearest: n ? t(direction(n.a)) : t("d.nolidar"),
+    p_in: j.power ? `CPU+GPU ${j.power.VDD_CPU_GPU_CV} W · SoC ${j.power.VDD_SOC} W` : "",
+    cpu: j.cores ? `${j.cores} ${t("d.cores")}` : "", gpu: "Orin Nano",
+    t_cpu: j.temps && j.temps.gpu != null ? `GPU ${j.temps.gpu}°C` : "",
+    mem: j.mem_mb ? `${(j.mem_mb[0] / 1024).toFixed(1)} / ${(j.mem_mb[1] / 1024).toFixed(1)} GB` : "",
+    net: j.net ? `↓ ${j.net.rx} · ↑ ${j.net.tx}` : "", speed: t("d.last5"), rtt: t("d.thisdevice"),
   };
   for (const tl of TILES) {
     const v = vals[tl.key];
-    $("v-" + tl.key).textContent = v == null ? "-" : tl.fmt(v);
-    $("s-" + tl.key).textContent = subs[tl.key] || (tl.noSpark ? "" : t("d.last2min"));
-    if (!tl.noSpark) drawSpark(tl.key);
+    const el = $("v-" + tl.key);
+    if (!el) continue;
+    el.textContent = v == null ? "-" : tl.fmt(v);
+    $("s-" + tl.key).textContent = subs[tl.key] || "";
   }
 }
 
-function sparkPoints(key, w, h) {
-  const pts = hist[key] || [];
-  if (pts.length < 2) return null;
-  const now = Date.now() / 1000;
-  let lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v));
-  if (key === "speed" || key === "current" || key === "cpu" || key === "mem") lo = 0;  // magnitudes start at zero
-  if (hi - lo < 1e-6) hi = lo + 1;
-  const pad = 3;
-  return pts.map((p) => ({ x: ((p.t - (now - HISTORY_S)) / HISTORY_S) * w, y: pad + (1 - (p.v - lo) / (hi - lo)) * (h - 2 * pad), p }));
+// --------------------------------------------------------------- charts
+const charts = {};
+const timeTick = (v) => new Date(v * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function baseOptions(unit, opts = {}) {
+  const T = theme;
+  const tooltip = {
+    backgroundColor: T.panel, titleColor: T.ink, bodyColor: T.ink2, borderColor: T.line2, borderWidth: 1,
+    padding: 10, boxPadding: 4, usePointStyle: true,
+    callbacks: { label: (c) => ` ${c.dataset.label ? c.dataset.label + ": " : ""}${c.parsed.y != null && !opts.horizontal ? c.parsed.y : c.parsed.x} ${unit}`,
+                 title: (items) => (opts.time && items[0] ? timeTick(items[0].parsed.x) : items[0] ? items[0].label : "") },
+  };
+  const grid = { color: T.line, drawTicks: false };
+  const ticks = { color: T.mute, padding: 6, font: { size: 11 } };
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: opts.time ? { mode: "index", intersect: false } : { mode: "nearest", intersect: true },
+    plugins: {
+      legend: { display: !!opts.legend, position: "top", align: "end", labels: { color: T.ink2, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "rectRounded", font: { size: 11 } } },
+      tooltip,
+    },
+    indexAxis: opts.horizontal ? "y" : "x",
+    scales: {
+      x: opts.time
+        ? { type: "linear", min: now() - WINDOW_S, max: now(), grid, border: { display: false }, ticks: { ...ticks, maxTicksLimit: 5, callback: timeTick } }
+        : { grid: { ...grid, display: !!opts.horizontal }, border: { display: false }, ticks, beginAtZero: true, suggestedMax: opts.max },
+      y: opts.horizontal
+        ? { grid: { display: false }, border: { display: false }, ticks: { ...ticks, color: T.ink2 } }
+        : { grid, border: { display: false }, ticks, beginAtZero: true, suggestedMax: opts.max },
+    },
+  };
 }
 
-function drawSpark(key) {
-  const svg = $("g-" + key);
-  if (!svg) return;
-  const w = svg.clientWidth, h = svg.clientHeight;
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  const pts = sparkPoints(key, w, h);
-  if (!pts) { svg.innerHTML = ""; return; }
-  const d = pts.map((q, i) => `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`).join("");
-  const hov = svg.dataset.hover ? Number(svg.dataset.hover) : null;
-  let cross = "";
-  if (hov != null) {
-    const q = pts.reduce((a, b) => (Math.abs(b.x - hov) < Math.abs(a.x - hov) ? b : a));
-    cross = `<line x1="${q.x}" x2="${q.x}" y1="0" y2="${h}" class="cross"/><circle cx="${q.x}" cy="${q.y}" r="4" fill="${ACCENT}" stroke="#fff" stroke-width="2"/>`;
-    const tl = TILES.find((x) => x.key === key);
-    const ago = Math.max(0, Math.round(Date.now() / 1000 - q.p.t));
-    $("tip-" + key).textContent = `${tl.fmt(q.p.v)} ${tl.unit} · ${t("d.ago", { s: ago })}`;
-  } else {
-    $("tip-" + key).textContent = "";
-  }
-  svg.innerHTML = `<line x1="0" x2="${w}" y1="${h - 0.5}" y2="${h - 0.5}" class="base"/>` +
-    `<path d="${d}" fill="none" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` + cross;
+function lineChart(id, series, unit, opts = {}) {
+  const ds = series.map((s, i) => ({
+    label: t(s.label), key: s.key, data: [], borderColor: theme.series[i], backgroundColor: theme.series[i] + "22",
+    borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.25, fill: series.length === 1,
+  }));
+  return new Chart($(id), { type: "line", data: { datasets: ds }, options: baseOptions(unit, { time: true, legend: series.length > 1, ...opts }) });
 }
 
-function hoverSpark(tl) {
-  const svg = $("g-" + tl.key);
-  const tile = svg.closest(".tile");
-  tile.addEventListener("pointermove", (e) => {
-    const r = svg.getBoundingClientRect();
-    svg.dataset.hover = String(Math.max(0, Math.min(r.width, e.clientX - r.left)));
-    drawSpark(tl.key);
+function barChart(id, unit, opts = {}) {
+  return new Chart($(id), {
+    type: "bar",
+    data: { labels: [], datasets: [{ data: [], backgroundColor: theme.series[opts.slot || 0], borderRadius: 5, borderSkipped: "start", maxBarThickness: 34, categoryPercentage: 0.7, barPercentage: 0.9 }] },
+    options: baseOptions(unit, opts),
   });
-  tile.addEventListener("pointerleave", () => { delete svg.dataset.hover; drawSpark(tl.key); });
 }
+
+function buildCharts() {
+  for (const c of Object.values(charts)) c.destroy();
+  if (typeof Chart === "undefined") return;
+  Chart.defaults.font.family = theme.font;
+  Chart.defaults.color = theme.mute;
+  charts.cpugpu = lineChart("ch-cpugpu", [{ key: "cpu", label: "s.cpu" }, { key: "gpu", label: "s.gpu" }], "%", { max: 100 });
+  charts.cores = barChart("ch-cores", "%", { max: 100 });
+  charts.temps = lineChart("ch-temps", [{ key: "t_cpu", label: "s.cpu" }, { key: "t_gpu", label: "s.gpu" }, { key: "t_soc", label: "s.soc" }], "°C");
+  charts.power = lineChart("ch-power", [{ key: "p_in", label: "s.total" }, { key: "p_cg", label: "s.cpugpu" }, { key: "p_soc", label: "s.soc" }], "W");
+  charts.speed = lineChart("ch-speed", [{ key: "speed", label: "c.speed" }], "m/s", { max: 0.3 });
+  charts.net = lineChart("ch-net", [{ key: "rx", label: "s.rx" }, { key: "tx", label: "s.tx" }], "KB/s");
+  charts.sides = barChart("ch-sides", "m", { horizontal: true, slot: 2 });
+  charts.svolt = barChart("ch-svolt", "V", { slot: 0 });
+  charts.stemp = barChart("ch-stemp", "°C", { slot: 1 });
+  updateCharts();
+}
+
+function empty(chart, text) {   // show "no data" over a chart instead of drawing anything made up
+  const box = chart.canvas.parentElement, e = box.querySelector(".empty");
+  e.hidden = !text; e.textContent = text || "";
+  chart.canvas.style.visibility = text ? "hidden" : "visible";
+}
+
+function updateCharts() {
+  if (!charts.cpugpu) return;
+  const r = st.robot, j = (r && r.health && r.health.jetson) || {};
+  for (const name of ["cpugpu", "temps", "power", "speed", "net"]) {
+    const c = charts[name];
+    let any = false;
+    for (const d of c.data.datasets) { d.data = (hist[d.key] || []).slice(); any = any || d.data.length > 0; }
+    // the time axis grows from the first reading up to 5 minutes, so short histories fill the chart
+    const first = Math.min(...c.data.datasets.map((d) => (d.data[0] ? d.data[0].x : Infinity)));
+    c.options.scales.x.min = Math.max(now() - WINDOW_S, Number.isFinite(first) ? first : now() - WINDOW_S);
+    c.options.scales.x.max = now();
+    empty(c, any ? "" : t("c.nodata"));
+    c.update("none");
+  }
+  const cores = j.cpu_cores || [];
+  charts.cores.data.labels = cores.map((_, i) => `${t("s.core")} ${i}`);
+  charts.cores.data.datasets[0].data = cores;
+  empty(charts.cores, cores.length ? "" : t("c.nodata"));
+  charts.cores.update("none");
+
+  const sd = sides();
+  const order = ["front", "left", "right", "back"].filter((k) => sd && sd[k] != null);
+  charts.sides.data.labels = order.map((k) => t("dir." + k));
+  charts.sides.data.datasets[0].data = order.map((k) => +sd[k].toFixed(2));
+  empty(charts.sides, order.length ? "" : t("d.nolidar"));
+  charts.sides.update("none");
+
+  const boards = (r && r.health && r.health.boards) || {};
+  const names = { right_follower: "arm.right", left_follower: "arm.left", right_leader: "arm.right", left_leader: "arm.left", base: "sec.base" };
+  const ok = Object.entries(boards).filter(([, x]) => x && x.state === "ok");
+  charts.svolt.data.labels = ok.map(([k]) => t(names[k] || k) + (k.includes("leader") ? ` ${t("arm.leader")}` : ""));
+  charts.svolt.data.datasets[0].data = ok.map(([, x]) => x.vmin);
+  empty(charts.svolt, ok.length ? "" : t("c.noservo"));
+  charts.svolt.update("none");
+
+  const joints = [];
+  for (const [k, x] of ok) for (const [id, sv] of Object.entries(x.servos || {})) if (sv.t != null) joints.push([`${t(names[k] || k)[0]}${k.includes("leader") ? "L" : ""}${id}`, sv.t]);
+  charts.stemp.data.labels = joints.map((x) => x[0]);
+  charts.stemp.data.datasets[0].data = joints.map((x) => x[1]);
+  empty(charts.stemp, joints.length ? "" : t("c.noservo"));
+  charts.stemp.update("none");
+}
+setInterval(() => { if (st.robot) updateCharts(); }, 2000);   // keep the time axis moving
 
 // --------------------------------------------------------------- render
 function render() {
@@ -210,9 +313,9 @@ function render() {
   $("opstat").textContent = !s || !s.operator ? t("op.none") : s.operator.name;
   $("uptime").textContent = s ? fmtUp(s.up_s) : "-";
   $("devices").textContent = s ? s.clients : "-";
-  const es = $("estop"), stopped = !!s && s.estop;
-  es.classList.toggle("on", stopped);
-  es.textContent = stopped ? t("estop.stopped") : t("estop");
+  const stopped = !!s && s.estop;
+  $("estop").classList.toggle("on", stopped);
+  $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");
   const banner = $("banner");
   if (!st.open) { banner.hidden = false; banner.className = "banner"; banner.textContent = t("banner.offline"); }
   else if (stopped) {
@@ -224,10 +327,9 @@ function render() {
   drawLidar();
 }
 
-function renderRobot() {
+function renderLists() {
   const r = st.robot;
   if (!r) return;
-  // Servo boards
   const names = { right_follower: ["arm.right", "arm.follower"], left_follower: ["arm.left", "arm.follower"],
     right_leader: ["arm.right", "arm.leader"], left_leader: ["arm.left", "arm.leader"], base: ["sec.base", null] };
   const b = (r.health && r.health.boards) || {};
@@ -238,7 +340,7 @@ function renderRobot() {
     if (!x) continue;
     const label = t(a) + (c ? " " + t(c) : "");
     if (x.state !== "ok") {
-      const why = x.state === "missing" ? t("arm.missing") : x.state === "busy" ? t("h.inuse", { job: x.by }) : x.state === "silent" ? t("h.noread") : (x.msg || x.state);
+      const why = x.state === "missing" ? t("arm.missing") : x.state === "busy" ? t("h.inuse", { job: x.by }) : x.state === "silent" ? t("arm.nopower") : (x.msg || x.state);
       rows.push(`<tr><td>${esc(label)}</td><td colspan="3" class="mute">${esc(why)}</td></tr>`);
       continue;
     }
@@ -247,10 +349,9 @@ function renderRobot() {
   }
   $("servos").innerHTML = rows.join("");
 
-  // Programs
   const J = r.jobs || {};
-  const progs = [["base", "sec.base"], ["teleop_right", "d.tele_r"], ["teleop_left", "d.tele_l"], ["teleop_both", "d.tele_b"],
-    ["arm_right", "d.pose_r"], ["arm_left", "d.pose_l"], ["skill", "sec.skills"], ["voice", "sec.voice"]];
+  const progs = [["base", "sec.base"], ["teleop_right", "d.tele_r"], ["teleop_left", "d.tele_l"], ["arm_right", "d.pose_r"],
+    ["arm_left", "d.pose_l"], ["bridge", "leader.title"], ["skill", "sec.skills"], ["voice", "sec.voice"], ["wizard", "eng.wizard"]];
   $("programs").innerHTML = progs.map(([k, label]) => {
     const j = J[k];
     const stTxt = !j ? `<span class="mute">${t("d.never")}</span>` : j.running
@@ -260,53 +361,47 @@ function renderRobot() {
   }).join("");
 
   $("voice").textContent = (r.voice && r.voice.text) || "-";
-
   const ev = (r.events || []).slice().reverse();
   $("log").innerHTML = ev.length ? ev.map((e) => `<li><time>${new Date(e.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>${esc(e.who)}: ${esc(e.text)}</span></li>`).join("")
     : `<li class="mute">${t("log.empty")}</li>`;
-
-  renderCam();
-  renderWrists();
 }
 
-// ---------------------------------------------------------------- camera
-function renderCam() {
+// ---------------------------------------------------------------- cameras
+function renderCams() {
   const cams = (st.robot && st.robot.cams) || [];
-  const cam = cams.find((c) => c.present && c.key === "top") || cams.find((c) => c.present);
+  // main camera
+  const cam = cams.find((c) => c.present && c.key === "top");
   const img = $("cam");
-  $("cam-name").textContent = cam ? cam.key : "";
-  if (!cam || cam.paused_by) {
+  $("cam-name").textContent = cam ? t("cam.top") : "";
+  if (!cam || cam.paused_by || cam.error) {
     if (st.cam) { img.removeAttribute("src"); st.cam = null; }
     img.hidden = true; $("cam-empty").hidden = false;
-    $("cam-msg").textContent = !cam ? t("cam.none") : t("cam.paused", { job: cam.paused_by });
-    return;
+    $("cam-msg").textContent = !cam ? t("cam.notconnected") : cam.paused_by ? t("cam.inuse") : t("cam.busy");
+  } else {
+    if (st.cam !== cam.key) { st.cam = cam.key; img.src = `/camera/${encodeURIComponent(cam.key)}.mjpg?t=${Date.now()}`; }
+    img.hidden = false; $("cam-empty").hidden = true;
   }
-  if (st.cam !== cam.key) { st.cam = cam.key; img.src = `/camera/${encodeURIComponent(cam.key)}.mjpg?t=${Date.now()}`; }
-  img.hidden = false; $("cam-empty").hidden = true;
-}
-$("cam").addEventListener("error", () => { st.cam = null; $("cam").hidden = true; setTimeout(renderCam, 2000); });
-
-/* The two arm (hand) cameras under the main camera. */
-const wristOn = {};
-function renderWrists() {
-  const cams = (st.robot && st.robot.cams) || [];
+  // the two arm cameras
   for (const view of document.querySelectorAll(".dwrists .view[data-cam]")) {
     const key = view.dataset.cam, c = cams.find((x) => x.key === key);
-    const img = view.querySelector("img"), empty = view.querySelector(".empty"), msg = view.querySelector(".msg");
+    const im = view.querySelector("img"), em = view.querySelector(".empty"), msg = view.querySelector(".msg");
     const why = !c || !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : c.error ? t("cam.busy") : "";
     if (why) {
-      if (wristOn[key]) { img.removeAttribute("src"); wristOn[key] = false; }
-      img.hidden = true; empty.hidden = false; msg.textContent = why;
+      if (view.dataset.on) { im.removeAttribute("src"); delete view.dataset.on; }
+      im.hidden = true; em.hidden = false; msg.textContent = why;
       continue;
     }
-    if (!wristOn[key]) {
-      wristOn[key] = true;
-      img.onerror = () => { wristOn[key] = false; img.hidden = true; empty.hidden = false; setTimeout(renderWrists, 2000); };
-      img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
+    if (!view.dataset.on) {
+      view.dataset.on = "1";
+      im.onerror = () => { delete view.dataset.on; im.hidden = true; em.hidden = false; setTimeout(renderCams, 2000); };
+      im.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
     }
-    img.hidden = false; empty.hidden = true;
+    im.hidden = false; em.hidden = true;
+    const tag = view.querySelector(".tagtext");
+    if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
   }
 }
+$("cam").addEventListener("error", () => { st.cam = null; $("cam").hidden = true; setTimeout(renderCams, 2000); });
 
 // ----------------------------------------------------------------- lidar
 function drawLidar() {
@@ -318,21 +413,19 @@ function drawLidar() {
   const g = c.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
-  const s = st.server, o = (s && s.odom) || { x: 0, y: 0, th: 0 }, S = PX_PER_M;
+  const s = st.server, o = (s && s.odom) || { x: 0, y: 0, th: 0 }, S = PX_PER_M, T = theme;
   const sx = (wy) => w / 2 - (wy - o.y) * S, sy = (wx) => h / 2 - (wx - o.x) * S;
 
-  // range rings every 1 m around the robot
-  g.strokeStyle = C.line; g.lineWidth = 1;
+  g.strokeStyle = T.line2; g.lineWidth = 1;
   for (let r = 1; r * S < Math.max(w, h); r++) { g.beginPath(); g.arc(w / 2, h / 2, r * S, 0, 2 * Math.PI); g.stroke(); }
-  g.fillStyle = C.mute; g.font = "11px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = T.mute; g.font = "11px " + T.font;
   for (let r = 1; r <= 3; r++) g.fillText(`${r} m`, w / 2 + 4, h / 2 - r * S - 4);
 
-  // path driven
-  const last = trail[trail.length - 1];
-  if (last && Math.hypot(o.x - last.x, o.y - last.y) > 1.5) trail.length = 0;
-  if (!last || Math.hypot(o.x - last.x, o.y - last.y) > 0.02) { trail.push({ x: o.x, y: o.y }); if (trail.length > 2000) trail.shift(); }
+  const lt = trail[trail.length - 1];
+  if (lt && Math.hypot(o.x - lt.x, o.y - lt.y) > 1.5) trail.length = 0;
+  if (!lt || Math.hypot(o.x - lt.x, o.y - lt.y) > 0.02) { trail.push({ x: o.x, y: o.y }); if (trail.length > 2000) trail.shift(); }
   if (trail.length > 1) {
-    g.strokeStyle = ACCENT; g.lineWidth = 2; g.beginPath();
+    g.strokeStyle = T.accent; g.lineWidth = 2; g.beginPath();
     trail.forEach((p, i) => (i ? g.lineTo(sx(p.y), sy(p.x)) : g.moveTo(sx(p.y), sy(p.x))));
     g.stroke();
   }
@@ -341,24 +434,23 @@ function drawLidar() {
   const sc = st.scan && performance.now() - st.scan.at < 1000 ? st.scan : null;
   $("scan-src").textContent = sc ? (sc.src === "mock" ? t("scan.mock") : t("scan.live")) : t("d.nolidar");
   if (sc) {
-    const xy = sc.xy;
-    g.fillStyle = C.ink;
-    for (let i = 0; i < xy.length; i += 2) g.fillRect(-xy[i + 1] / 100 * S - 1.5, -xy[i] / 100 * S - 1.5, 3, 3);
+    g.fillStyle = T.ink;
+    for (let i = 0; i < sc.xy.length; i += 2) g.fillRect(-sc.xy[i + 1] / 100 * S - 1.5, -sc.xy[i] / 100 * S - 1.5, 3, 3);
     const n = nearest();
     if (n) {
-      const px = -Math.sin(n.a) * n.d * S, py = -Math.cos(n.a) * n.d * S;
-      g.strokeStyle = ACCENT; g.lineWidth = 1; g.setLineDash([4, 4]);
-      g.beginPath(); g.moveTo(0, 0); g.lineTo(px, py); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = T.accent; g.lineWidth = 1; g.setLineDash([4, 4]);
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(-Math.sin(n.a) * n.d * S, -Math.cos(n.a) * n.d * S); g.stroke(); g.setLineDash([]);
     }
   }
   const L = 0.45 * S, W = 0.35 * S;
-  g.fillStyle = C.panel; g.strokeStyle = s && s.estop ? C.stop : ACCENT; g.lineWidth = 2;
+  g.fillStyle = T.raise; g.strokeStyle = s && s.estop ? T.stop : T.accent; g.lineWidth = 2;
   g.fillRect(-W / 2, -L / 2, W, L); g.strokeRect(-W / 2, -L / 2, W, L);
   g.fillStyle = g.strokeStyle; g.beginPath(); g.moveTo(0, -L / 2 + 4); g.lineTo(-7, -L / 2 + 15); g.lineTo(7, -L / 2 + 15); g.closePath(); g.fill();
   g.restore();
 }
-window.addEventListener("resize", () => { drawLidar(); for (const tl of TILES) if (!tl.noSpark) drawSpark(tl.key); });
+window.addEventListener("resize", drawLidar);
 
 buildTiles();
+buildCharts();
 render();
 connect();

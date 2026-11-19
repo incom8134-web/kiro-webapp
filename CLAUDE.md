@@ -50,9 +50,9 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 
 ## Conventions
 
-- Keep the page free of build tools and external downloads.
+- Keep the page free of build tools. Libraries come from cdnjs but are **stored in `web/vendor/`** (the hotspot has no internet); see `web/vendor/README.md` for versions and checksums.
 - Every string shown in the page must exist in English and Korean (`web/i18n.js`).
-- Look: camera-first dark console (`web/style.css` tokens at the top). Green = live, amber = needs attention, red only for E-STOP. Tools live in the dock's four tabs.
+- Look: camera-first console with a **dark and a light theme** (`web/style.css` tokens at the top, `web/theme.js`). Blue = interactive, green = live, amber = needs attention, red only for E-STOP. Icons: Remix Icon. Charts: Chart.js (dashboard), colours from the `--series` palette. Tools live in the dock's four tabs.
 - Add a test for every change to the control logic.
 - The repo on the Jetson is `~/Desktop/kiro-webapp`. The old code is `~/so101` (its own git repo, branch `master`), backed up to the **private** GitHub repo `incom8134-web/so101-jetson` (all branches, 19 Nov 2026). The Jetson is logged in to GitHub with `gh` (device login).
 - Never re-implement what the old code does. Start its scripts as jobs (`robot_server/robot.py`).

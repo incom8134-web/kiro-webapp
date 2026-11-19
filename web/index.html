@@ -3,30 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0a0b0d">
+<meta name="theme-color" content="#0a1020">
 <title>KIRO Command Center</title>
+<script src="theme.js"></script>
+<link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="console">
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-drive" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2"/><path d="M3.8 10.5h6M14.2 10.5h6M12 14.2v6"/></symbol>
-  <symbol id="i-arm" viewBox="0 0 24 24"><path d="M4 20h7M7.5 20l2.5-7 6.5-3.5 2.5 3"/><circle cx="10" cy="13" r="1.6"/><circle cx="16.5" cy="9.5" r="1.6"/><path d="M19 12.5l1.5 2.5M19 12.5l2.5-.5"/></symbol>
-  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
-  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></symbol>
-  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
-  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0zM12 17v4"/></symbol>
-</svg>
-
 <header class="bar">
-  <div class="brand"><span class="mark"></span>KIRO</div>
+  <div class="brand"><span class="logo"><i class="ri-robot-2-fill"></i></span>KIRO</div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
   </div>
-  <a class="toplink" href="dashboard.html" title="Dashboard"><svg class="ic"><use href="#i-grid"/></svg><span data-i18n="dash.open">Dashboard</span></a>
+  <a class="toplink" href="dashboard.html"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
   <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
-  <button id="estop" class="estop" type="button" data-i18n="estop">E-STOP</button>
+  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
 </header>
 
 <div id="banner" class="banner" hidden></div>
@@ -35,20 +29,21 @@
   <section class="stage">
     <div class="view main" data-cam="top">
       <img class="cam" alt="" hidden>
-      <div class="empty"><span class="msg"></span></div>
+      <div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div>
+      <span class="tag"><i class="ri-camera-3-line"></i><span data-i18n="cam.top">Main camera</span></span>
       <div class="inset glass">
-        <div class="head"><span><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose" class="mute"></span></div>
+        <div class="head"><span><i class="ri-radar-line"></i><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose" class="mute"></span></div>
         <canvas id="map"></canvas>
       </div>
     </div>
     <div class="wrists">
       <div class="view wrist" data-cam="left_wrist">
-        <img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div>
-        <span class="tag glass" data-i18n="cam.left_wrist">Left hand</span>
+        <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
+        <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.left_wrist">Left hand</span></span>
       </div>
       <div class="view wrist" data-cam="right_wrist">
-        <img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div>
-        <span class="tag glass" data-i18n="cam.right_wrist">Right hand</span>
+        <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
+        <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.right_wrist">Right hand</span></span>
       </div>
     </div>
     <div class="pad">
@@ -69,56 +64,57 @@
     <section class="control">
       <form id="take-box" class="row" autocomplete="off">
         <input id="pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="pin" aria-label="PIN">
-        <button id="take" class="btn primary" type="submit" data-i18n="take">Take control</button>
+        <button id="take" class="btn primary" type="submit"><i class="ri-steering-2-line"></i><span data-i18n="take">Take control</span></button>
       </form>
       <div id="held-box" class="row" hidden>
         <span class="grow live" data-i18n="op.you">You are driving</span>
         <label class="switch"><input type="checkbox" id="turbo"><span class="track"></span><span data-i18n="turbo">Turbo</span></label>
-        <button id="release" class="btn" type="button" data-i18n="release">Release</button>
+        <button id="release" class="btn" type="button"><i class="ri-logout-box-r-line"></i><span data-i18n="release">Release</span></button>
       </div>
       <p id="note" class="note" role="status"></p>
     </section>
 
     <nav class="tabs" role="tablist">
-      <button type="button" data-tab="drive"><svg class="ic"><use href="#i-drive"/></svg><span data-i18n="tab.drive">Drive</span><i class="dot"></i></button>
-      <button type="button" data-tab="arms"><svg class="ic"><use href="#i-arm"/></svg><span data-i18n="sec.arms">Arms</span><i class="dot"></i></button>
-      <button type="button" data-tab="voice"><svg class="ic"><use href="#i-mic"/></svg><span data-i18n="sec.voice">Voice</span><i class="dot"></i></button>
-      <button type="button" data-tab="system"><svg class="ic"><use href="#i-gear"/></svg><span data-i18n="sec.health">System</span><i class="dot"></i></button>
+      <button type="button" data-tab="drive"><i class="ri-steering-2-line"></i><span data-i18n="tab.drive">Drive</span><b class="dot"></b></button>
+      <button type="button" data-tab="arms"><i class="ri-robot-3-line"></i><span data-i18n="sec.arms">Arms</span><b class="dot"></b></button>
+      <button type="button" data-tab="voice"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span><b class="dot"></b></button>
+      <button type="button" data-tab="system"><i class="ri-settings-3-line"></i><span data-i18n="sec.health">System</span><b class="dot"></b></button>
     </nav>
 
     <div class="panels">
       <!-- DRIVE -->
       <section class="panel" data-panel="drive">
         <div class="card">
-          <div class="row head"><h3 data-i18n="sec.base">Base</h3><span id="base-st" class="st"></span><span class="grow"></span>
-            <button id="base-btn" class="btn" type="button" data-op></button></div>
+          <div class="row head"><h3><span class="badge"><i class="ri-steering-2-line"></i></span><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
+            <button id="base-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="base-err" class="err small" hidden></p>
         </div>
         <div class="card keys">
+          <div class="row head"><h3><span class="badge"><i class="ri-keyboard-line"></i></span><span data-i18n="k.title">Keyboard and gamepad</span></h3></div>
           <div class="keyrow"><span class="caps"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span data-i18n="k.move">move</span></div>
           <div class="keyrow"><span class="caps"><kbd>Q</kbd><kbd>E</kbd></span><span data-i18n="k.turn">turn</span></div>
-          <div class="keyrow"><span class="caps"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span><span data-i18n="k.arrows">drive and turn</span></div>
+          <div class="keyrow"><span class="caps"><kbd><i class="ri-arrow-up-line"></i></kbd><kbd><i class="ri-arrow-down-line"></i></kbd><kbd><i class="ri-arrow-left-line"></i></kbd><kbd><i class="ri-arrow-right-line"></i></kbd></span><span data-i18n="k.arrows">drive and turn</span></div>
           <div class="keyrow"><span class="caps"><kbd class="w">Shift</kbd></span><span data-i18n="k.fast">faster</span></div>
-          <div class="keyrow"><span class="caps"><kbd class="w">Esc</kbd></span><span data-i18n="k.stop">E-STOP</span></div>
-          <p class="small mute" data-i18n="k.pad">Gamepad: hold LB and use the sticks.</p>
+          <div class="keyrow"><span class="caps"><kbd class="w">Esc</kbd></span><span data-i18n="k.stop">emergency stop</span></div>
+          <div class="keyrow"><span class="caps"><kbd class="w"><i class="ri-gamepad-line"></i></kbd></span><span data-i18n="k.pad">Gamepad: hold LB and use the sticks.</span></div>
         </div>
       </section>
 
       <!-- ARMS -->
       <section class="panel" data-panel="arms">
         <div class="card">
-          <div class="row head"><h3 data-i18n="sec.arms">Arms</h3><span id="arms-st" class="st"></span></div>
+          <div class="row head"><h3><span class="badge"><i class="ri-robot-3-line"></i></span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
           <p id="arms-err" class="err small" hidden></p>
         </div>
         <div class="card">
-          <div class="row head"><h3 data-i18n="leader.title">Leader arm</h3></div>
-          <button id="leader-btn" class="btn wide big" type="button" data-op><svg class="ic"><use href="#i-plug"/></svg><span></span></button>
+          <div class="row head"><h3><span class="badge"><i class="ri-usb-line"></i></span><span data-i18n="leader.title">Leader arm</span></h3></div>
+          <button id="leader-btn" class="btn wide big" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
           <p id="leader-st" class="small mute"></p>
-          <button id="wave-btn" class="btn wide" type="button" data-op data-i18n="wave">Wave</button>
+          <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
         </div>
         <div class="card">
-          <div class="row head"><h3 data-i18n="sec.skills">Skills</h3><span id="skill-st" class="st"></span></div>
+          <div class="row head"><h3><span class="badge"><i class="ri-brain-line"></i></span><span data-i18n="sec.skills">Skills</span></h3><span id="skill-st" class="st"></span></div>
           <div id="skills"></div>
           <pre id="skill-tail" class="tail" hidden></pre>
         </div>
@@ -127,16 +123,16 @@
       <!-- VOICE -->
       <section class="panel" data-panel="voice">
         <div class="card">
-          <div class="row head"><h3 data-i18n="sec.voice">Voice</h3><span id="voice-st" class="st"></span><span class="grow"></span>
-            <button id="voice-btn" class="btn" type="button" data-op></button></div>
+          <div class="row head"><h3><span class="badge"><i class="ri-mic-line"></i></span><span data-i18n="sec.voice">Voice</span></h3><span id="voice-st" class="st"></span><span class="grow"></span>
+            <button id="voice-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="voice-note" class="small mute" hidden></p>
           <div id="voice-on" hidden>
-            <button id="talk" class="btn talk" type="button"><svg class="ic"><use href="#i-mic"/></svg><span data-i18n="voice.talk">Hold to talk</span></button>
+            <button id="talk" class="btn talk" type="button"><i class="ri-mic-fill"></i><span data-i18n="voice.talk">Hold to talk</span></button>
             <p class="heard"><span class="mute small" data-i18n="voice.heard">Heard</span> <b id="voice-text">-</b></p>
             <div class="quick" id="quick"></div>
             <form id="say-box" class="row" autocomplete="off">
               <input id="say-text" class="grow" type="text" data-i18n-ph="base.typed">
-              <button class="btn" type="submit" data-i18n="base.send" data-op>Send</button>
+              <button class="btn" type="submit" data-op><i class="ri-send-plane-fill"></i><span data-i18n="base.send">Send</span></button>
             </form>
           </div>
         </div>
@@ -145,24 +141,24 @@
       <!-- SYSTEM -->
       <section class="panel" data-panel="system">
         <div class="card">
-          <div class="row head"><h3 data-i18n="sec.health">System</h3><span id="sys-sum" class="st"></span></div>
+          <div class="row head"><h3><span class="badge"><i class="ri-cpu-line"></i></span><span data-i18n="sec.health">System</span></h3><span id="sys-sum" class="st"></span></div>
           <table class="kv" id="health"></table>
           <div class="row" style="margin-top:12px">
-            <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.reboot">Restart</span></button>
-            <button id="shutdown" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.shutdown">Shut down</span></button>
+            <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><i class="ri-restart-line"></i><span data-i18n="h.reboot">Restart</span></button>
+            <button id="shutdown" class="btn hold" type="button" data-op><span class="fill"></span><i class="ri-shut-down-line"></i><span data-i18n="h.shutdown">Shut down</span></button>
             <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
           </div>
         </div>
 
         <details class="card fold" id="sec-eng">
-          <summary class="row head"><h3 data-i18n="sec.eng">Engineer</h3><span id="eng-st" class="st"></span></summary>
+          <summary class="row head"><h3><span class="badge"><i class="ri-tools-line"></i></span><span data-i18n="sec.eng">Engineer</span></h3><span id="eng-st" class="st"></span></summary>
           <form id="eng-box" class="row" autocomplete="off">
             <input id="eng-pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="eng.pin">
-            <button class="btn" type="submit" data-i18n="eng.unlock" data-op>Unlock</button>
+            <button class="btn" type="submit" data-op><i class="ri-lock-unlock-line"></i><span data-i18n="eng.unlock">Unlock</span></button>
           </form>
           <p id="eng-hint" class="small mute"></p>
           <div id="eng-body" hidden>
-            <div class="row"><span class="grow small mute" data-i18n="eng.unlocked"></span><button id="eng-lock" class="btn" type="button" data-i18n="eng.lock">Lock</button></div>
+            <div class="row"><span class="grow small mute" data-i18n="eng.unlocked"></span><button id="eng-lock" class="btn" type="button"><i class="ri-lock-line"></i><span data-i18n="eng.lock">Lock</span></button></div>
 
             <h4 class="sub" data-i18n="base.profile">Guard distance</h4>
             <select id="guard-profile" class="wide">
@@ -176,7 +172,7 @@
               <select id="sv-port" class="grow" aria-label="port"></select>
               <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" aria-label="from ID">
               <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
-              <button id="sv-scan" class="btn primary" type="button" data-i18n="eng.scan">Scan</button>
+              <button id="sv-scan" class="btn primary" type="button"><i class="ri-search-line"></i><span data-i18n="eng.scan">Scan</span></button>
             </div>
             <label class="switch"><input type="checkbox" id="sv-armok"><span class="track"></span><span data-i18n="eng.armok">Allow control on arm ports</span></label>
             <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
@@ -203,7 +199,7 @@
             <ol id="wz-steps" class="steps"></ol>
             <div id="wz-detail"></div>
             <pre id="wz-tail" class="tail" hidden></pre>
-            <div class="row"><button id="wz-report" class="btn" type="button" data-i18n="eng.report">Download report</button></div>
+            <div class="row"><button id="wz-report" class="btn" type="button"><i class="ri-download-2-line"></i><span data-i18n="eng.report">Download report</span></button></div>
           </div>
         </details>
       </section>
