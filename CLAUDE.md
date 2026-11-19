@@ -27,7 +27,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 
 ```bash
 ./run.sh            # mock robot, http://localhost:8080, PIN 0000
-./run.sh robot      # real robot, needs ROS 2 and KIRO_OPERATOR_PIN
+./run.sh robot      # real robot, needs ROS 2; asks for the PINs
 .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 

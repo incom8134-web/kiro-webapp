@@ -61,7 +61,7 @@ The certificate lives in `~/.config/kiro-webapp/tls/` (never in git). Set `KIRO_
 Choose your own PINs (the engineer PIN opens the servo tester and check wizard; leave it out to keep them off):
 
 ```bash
-cd ~/Desktop/kiro-webapp && KIRO_OPERATOR_PIN=your-pin KIRO_ENGINEER_PIN=longer-pin ./run.sh robot
+~/Desktop/kiro-webapp/run.sh robot     # asks for the operator and engineer PINs (hidden, never saved)
 ```
 
 The page must say **ROBOT** at the top. Then, in this order:
