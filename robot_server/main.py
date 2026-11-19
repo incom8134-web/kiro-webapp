@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import guard
 from .base import make_base
 from .config import MOCK_ENGINEER_PIN, Config
 from .control import Controller
@@ -56,6 +57,10 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     logs = install_log()
     log_subs: set[str] = set()  # pages showing the server log (the dashboard terminal)
     state: dict = {"base": base, "robot": robot, "odo_m": 0.0, "last_xy": None, "started": time.time()}
+    # Obstacle stop: on unless KIRO_GUARD=0; the operator can switch it on the Drive tab.
+    gcfg = guard.GuardCfg(half_len=cfg.robot_len / 2, half_wid=cfg.robot_wid / 2, stop=cfg.guard_stop,
+                          slow=max(cfg.guard_slow, cfg.guard_stop))
+    state["guard"] = {"on": cfg.guard, "lidar": False, "block": []}
 
     async def send(cid: str, msg: dict) -> None:
         """Never lets one device stall the server: a page that stops reading (left the Wi-Fi,
@@ -82,7 +87,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         s.update(t="state", backend=b.name, odom=b.odom(), version=__version__,
                  default_pin=cfg.pin_is_default and b.name == "mock",
                  mock_engineer_pin=b.name == "mock" and ctrl.engineer_pin == MOCK_ENGINEER_PIN,
-                 odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]))
+                 odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]),
+                 guard={**state["guard"], "stop_m": gcfg.stop})
         return s
 
     def who(cid: str) -> str:
@@ -109,7 +115,17 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         dt, st["last"] = now - st["last"], now
         cmd = ctrl.tick()
         b = state["base"]
-        b.apply(cmd.vx, cmd.vy, cmd.wz, cmd.publish, dt)
+        vx, vy = cmd.vx, cmd.vy
+        g = state["guard"]
+        sc = b.scan(cfg.scan_points) if g["on"] and hasattr(b, "scan") else None
+        g["lidar"] = bool(sc)
+        if sc:  # obstacle stop: an obstacle close in the way stops that direction; turning stays free
+            lim = guard.limits(sc["xy"], gcfg)
+            g["block"] = guard.blocked(vx, vy, lim) if cmd.publish else []
+            vx, vy = guard.apply(vx, vy, lim)
+        else:
+            g["block"] = []
+        b.apply(vx, vy, cmd.wz, cmd.publish, dt)
         st["n"] += 1
         n = st["n"]
         o = b.odom()
@@ -310,6 +326,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 elif t == "leader_pos":  # leader arm on the laptop, about 30 per second: fast path
                     if cid == ctrl.operator and not ctrl.estop:
                         state["robot"].leader_pos(str(msg.get("side", "right")), msg.get("raw"))
+                elif t == "guard":  # obstacle stop on or off: the operator's decision, written to the log
+                    if cid == ctrl.operator:
+                        state["guard"]["on"] = bool(msg.get("on"))
+                        state["robot"].event(who(cid), "obstacle stop " + ("on" if state["guard"]["on"] else "OFF"))
+                    else:
+                        await send(cid, {"t": "note", "ok": False, "msg": "Take control first.", "about": "guard"})
                 elif t == "talk":  # hold-to-talk: fast, no thread needed
                     if cid == ctrl.operator and not ctrl.estop:
                         ok, text = state["robot"].talk(bool(msg.get("on")))

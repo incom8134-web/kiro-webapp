@@ -14,7 +14,7 @@ const SEND_MS = 50;      // 20 messages per second
 const DEADZONE = 0.12;   // ignore tiny gamepad stick noise
 const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
-const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;   // the page colours live on <body> (console.css)
 const ACCENT = css("--accent", "#34d07f");
 let ACC = ACCENT;
 let C = {};
@@ -257,6 +257,7 @@ for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) talk.addEv
 talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base"), profile: $("guard-profile").value }));
+$("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
 $("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
@@ -366,7 +367,16 @@ function render() {
   $("vy").textContent = cmd.vy.toFixed(2);
   $("wz").textContent = cmd.wz.toFixed(2);
 
+  // Obstacle stop of the server: on / off, and whether it is holding the robot right now
+  const gd = (s && s.guard) || { on: false, lidar: false, block: [] };
+  const held = gd.block && gd.block.length ? t("guard.held", { where: gd.block.map((d) => t("dir." + d)).join(", ") }) : "";
+  $("guard-sw").checked = !!gd.on;
+  $("guard-st").textContent = !s ? "" : !gd.on ? t("guard.off") : !gd.lidar ? t("guard.nolidar") : held || t("guard.on", { cm: Math.round((gd.stop_m || 0) * 100) });
+  $("guard-st").className = "st grow" + (s && gd.on && gd.lidar && !held ? " live" : "");
+  $("guard-note").textContent = !s ? "" : !gd.on ? t("guard.offnote") : !gd.lidar ? t("guard.nolidarnote") : "";
+
   const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
+    : held ? held
     : !jobRunning("base") && s.backend === "ros" ? t("hint.nobase")
     : state.robot && state.robot.wheels === "off" ? t("st.nowheels") : "";
   $("hint").textContent = hint;

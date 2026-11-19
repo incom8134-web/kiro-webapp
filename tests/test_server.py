@@ -83,3 +83,40 @@ def test_dashboard_terminal_gets_the_server_log_without_pins():
                 assert "4321" not in seen and "9876" not in seen
     finally:
         kiro.setLevel(old)
+
+
+def test_obstacle_stop_blocks_driving_and_only_the_operator_can_switch_it():
+    b = MockBase()
+    b.x = 3.5 - 0.225 - 0.10           # the front edge is 10 cm from the front wall of the pretend room
+    start = b.x
+    with TestClient(create_app(Config(pin="4321"), b)) as client:
+        with client.websocket_connect("/ws?name=Laptop") as op, client.websocket_connect("/ws?name=Phone") as viewer:
+            op.send_json({"t": "take", "pin": "4321"})
+            assert read_until(op, lambda m: m["t"] == "note")["ok"] is True
+            op.send_json({"t": "drive", "x": 0, "y": 0, "z": 0, "en": False})
+
+            def drive(seconds):
+                end = time.time() + seconds
+                while time.time() < end:
+                    op.send_json({"t": "drive", "x": 1, "y": 0, "z": 0, "en": True, "src": "test"})
+                    time.sleep(0.05)
+
+            drive(1.0)
+            s = read_until(op, lambda m: m["t"] == "state" and m["cmd"]["vx"] > 0.1)
+            assert s["guard"]["on"] is True and s["guard"]["lidar"] is True and "front" in s["guard"]["block"]
+            assert b.x == start        # the command asked for forward, the robot did not move
+
+            viewer.send_json({"t": "guard", "on": False})   # a viewer cannot switch it off
+            assert read_until(viewer, lambda m: m["t"] == "note")["ok"] is False
+            assert read_until(op, lambda m: m["t"] == "state")["guard"]["on"] is True
+
+            op.send_json({"t": "guard", "on": False})       # the operator can
+            assert read_until(op, lambda m: m["t"] == "state" and not m["guard"]["on"])["guard"]["block"] == []
+            drive(0.6)
+            assert b.x > start         # with the obstacle stop off the command goes through
+
+
+def test_obstacle_stop_can_start_switched_off():
+    with TestClient(create_app(Config(pin="4321", guard=False), MockBase())) as client:
+        with client.websocket_connect("/ws?name=Laptop") as op:
+            assert read_until(op, lambda m: m["t"] == "state")["guard"]["on"] is False

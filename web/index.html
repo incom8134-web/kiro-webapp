@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#09090b">
+<meta name="theme-color" content="#0a0a0a">
 <title>HAEBOT Robot</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="console.css">
 </head>
 <body class="console">
 <header class="bar">
@@ -90,6 +91,11 @@
           <div class="row head"><h3><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
             <button id="base-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="base-err" class="err small" hidden></p>
+          <div class="row guardrow">
+            <label class="switch"><input type="checkbox" id="guard-sw" data-op><span class="track"></span><span data-i18n="guard.sw">Obstacle stop</span></label>
+            <span id="guard-st" class="st grow"></span>
+          </div>
+          <p id="guard-note" class="small note"></p>
         </div>
         <div class="card keys">
           <div class="row head"><h3><span data-i18n="k.title">Keyboard and gamepad</span></h3></div>

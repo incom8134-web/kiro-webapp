@@ -86,6 +86,16 @@ const STRINGS = {
     "d.tele_r": "Teleop right", "d.tele_l": "Teleop left", "d.tele_b": "Teleop both", "d.pose_r": "Right arm pose", "d.pose_l": "Left arm pose",
     "dir.front": "in front", "dir.left": "on the left", "dir.right": "on the right", "dir.back": "behind",
     "dash.open": "Dashboard", "scan.live": "· lidar", "scan.mock": "· simulated lidar",
+    "guard.sw": "Obstacle stop", "guard.on": "on · stops {cm} cm before an obstacle", "guard.off": "OFF", "guard.nolidar": "no lidar",
+    "guard.held": "Obstacle {where}: stopped", "guard.offnote": "The robot will not stop for obstacles. Switch this on unless you have a reason.",
+    "guard.nolidarnote": "No lidar data, so the robot cannot stop for obstacles. On the real robot, start the base.",
+    "b.hero": "HAEBOT is {s}", "b.st.ready": "ready", "b.st.driving": "driving", "b.st.stopped": "stopped", "b.st.offline": "offline",
+    "b.herosub": "Live numbers from the robot. History covers the last 5 minutes.",
+    "b.ago5": "5 min ago", "b.now": "now", "b.speedhist": "Speed, last 5 min", "b.peak": "peak",
+    "b.load": "Jetson load", "b.mem": "Memory", "b.metric": "Load to show", "b.range": "Chart range", "b.r1": "1 min", "b.r5": "5 min",
+    "b.other": "Other", "b.pings": "Recent pings", "b.slow": "slow", "b.opencontrol": "Open control", "b.full": "Full screen",
+    "b.cams.pause": "Turn the cameras off (uses no Wi-Fi)", "b.cams.play": "Turn the cameras on", "b.cams.off": "Cameras are off",
+    "b.guard.on": "Obstacle stop on", "b.guard.off": "Obstacle stop OFF", "b.guard.nolidar": "No lidar: no obstacle stop",
     "map": "Map", "pose": "x {x} m  y {y} m  {th}°", "pose.none": "No position yet",
     "speed.fwd": "Forward m/s", "speed.side": "Sideways m/s", "speed.turn": "Turn rad/s",
 
@@ -202,6 +212,16 @@ const STRINGS = {
     "d.tele_r": "오른팔 원격조종", "d.tele_l": "왼팔 원격조종", "d.tele_b": "양팔 원격조종", "d.pose_r": "오른팔 자세", "d.pose_l": "왼팔 자세",
     "dir.front": "앞", "dir.left": "왼쪽", "dir.right": "오른쪽", "dir.back": "뒤",
     "dash.open": "대시보드", "scan.live": "· 라이다", "scan.mock": "· 모의 라이다",
+    "guard.sw": "장애물 정지", "guard.on": "켜짐 · 장애물 {cm} cm 앞에서 정지", "guard.off": "꺼짐", "guard.nolidar": "라이다 없음",
+    "guard.held": "장애물 {where}: 정지함", "guard.offnote": "로봇이 장애물 앞에서 멈추지 않습니다. 특별한 이유가 없으면 켜 두세요.",
+    "guard.nolidarnote": "라이다 데이터가 없어 장애물 앞에서 멈출 수 없습니다. 실제 로봇에서는 베이스를 켜세요.",
+    "b.hero": "HAEBOT {s}", "b.st.ready": "준비 완료", "b.st.driving": "주행 중", "b.st.stopped": "비상정지", "b.st.offline": "연결 끊김",
+    "b.herosub": "로봇에서 실시간으로 받는 수치입니다. 기록은 최근 5분입니다.",
+    "b.ago5": "5분 전", "b.now": "지금", "b.speedhist": "속도, 최근 5분", "b.peak": "최고",
+    "b.load": "젯슨 부하", "b.mem": "메모리", "b.metric": "표시할 부하", "b.range": "차트 범위", "b.r1": "1분", "b.r5": "5분",
+    "b.other": "기타", "b.pings": "최근 핑", "b.slow": "느림", "b.opencontrol": "조종 화면 열기", "b.full": "전체 화면",
+    "b.cams.pause": "카메라 끄기 (Wi-Fi 사용 안 함)", "b.cams.play": "카메라 켜기", "b.cams.off": "카메라가 꺼져 있습니다",
+    "b.guard.on": "장애물 정지 켜짐", "b.guard.off": "장애물 정지 꺼짐", "b.guard.nolidar": "라이다 없음: 장애물 정지 없음",
     "map": "지도", "pose": "x {x} m  y {y} m  {th}°", "pose.none": "위치 정보 없음",
     "speed.fwd": "전진 m/s", "speed.side": "횡이동 m/s", "speed.turn": "회전 rad/s",
 
@@ -250,6 +270,7 @@ function applyStrings(root = document) {
   for (const el of root.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
   for (const el of root.querySelectorAll("[data-i18n-ph]")) el.placeholder = t(el.dataset.i18nPh);
   for (const el of root.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+  for (const el of root.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
 }
 
 function setLang(l) {

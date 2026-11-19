@@ -34,6 +34,14 @@ class Config:
     turbo_vy: float = 0.30
     turbo_wz: float = 1.5
 
+    # Obstacle stop of the web server (robot_server/guard.py): uses the lidar points on every speed
+    # command the page sends. The operator can switch it off on the Drive tab. KIRO_GUARD=0 starts with it off.
+    guard: bool = True
+    guard_stop: float = 0.20   # m of free space at which the robot stops
+    guard_slow: float = 0.45   # m of free space at which it starts to slow down
+    robot_len: float = 0.45    # m, the box the map draws for the robot
+    robot_wid: float = 0.35
+
     # How fast the speed may rise (slowing down is always instant)
     accel_lin: float = 0.6  # m/s^2
     accel_ang: float = 3.0  # rad/s^2
@@ -78,6 +86,11 @@ class Config:
             turbo_vx=_f("KIRO_TURBO_VX", d.turbo_vx),
             turbo_vy=_f("KIRO_TURBO_VY", d.turbo_vy),
             turbo_wz=_f("KIRO_TURBO_WZ", d.turbo_wz),
+            guard=os.environ.get("KIRO_GUARD", "1") != "0",
+            guard_stop=_f("KIRO_GUARD_STOP", d.guard_stop),
+            guard_slow=_f("KIRO_GUARD_SLOW", d.guard_slow),
+            robot_len=_f("KIRO_ROBOT_LEN", d.robot_len),
+            robot_wid=_f("KIRO_ROBOT_WID", d.robot_wid),
             accel_lin=_f("KIRO_ACCEL_LIN", d.accel_lin),
             accel_ang=_f("KIRO_ACCEL_ANG", d.accel_ang),
             cmd_topic=os.environ.get("KIRO_CMD_TOPIC", d.cmd_topic),

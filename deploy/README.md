@@ -75,6 +75,8 @@ The page must say **ROBOT** at the top. Then, in this order:
 | 5 | Close the browser tab while driving | Wheels stop (heartbeat) |
 | 6 | Floor test at low speed, turbo off | |
 
+**Obstacle stop.** There are two layers. The web server has its own (new on 19 Nov 2026, **not yet tried on the real robot**): it stops 20 cm before an obstacle, lets you turn and back away, and has a switch on the Drive tab. It needs lidar data, which on the real robot arrives after **Start base**. The old lidar guard in `~/so101` still runs with the base. Test it first with the robot **on blocks**, then slowly on the floor with a box in front. If it holds the robot when nothing is in the way (wrong lidar angle), switch it off on the Drive tab, or start with `KIRO_GUARD=0 ./run.sh robot`.
+
 Arms (5 V arm power on, leader arms plugged in):
 
 | Button | Runs (old code) |

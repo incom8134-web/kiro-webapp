@@ -15,7 +15,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 
 - This is a real robot. Never start anything that moves wheels or arms without telling the user first and getting a yes.
 - First wheel tests are done with the robot lifted on blocks. Arms can fall when torque is switched off.
-- Never weaken the safety rules in `robot_server/control.py` (dead-man, heartbeat stop, E-STOP latch, one operator) without the user agreeing.
+- Never weaken the safety rules in `robot_server/control.py` (dead-man, heartbeat stop, E-STOP latch, one operator) or the obstacle stop in `robot_server/guard.py` without the user agreeing.
 
 ## Secrets and big files
 
@@ -36,6 +36,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | Path | Content |
 |---|---|
 | `robot_server/control.py` | Operator lock, PIN, E-STOP, watchdog, speed limits. Pure logic with tests |
+| `robot_server/guard.py` | Obstacle stop of the web server: lidar points limit the speed in each direction (stops 20 cm before an obstacle; turning and backing away stay free). Pure logic with tests. On by default, the operator can switch it off on the Drive tab, `KIRO_GUARD=0` starts with it off |
 | `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_raw` into the old lidar guard, `/e_stop`, voice topics; reads `/odom`) |
 | `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
@@ -44,7 +45,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/servo_tool.py` | Servo tester commands, reusing the old `so101_servo_tester.Bus` |
 | `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |
 | `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/` |
-| `web/` | Plain HTML, CSS, JavaScript. `i18n.js` holds every string in English and Korean, `feetech.js` reads the leader arm over Web Serial (read only). No build step, no CDN |
+| `web/` | Plain HTML, CSS, JavaScript. `style.css` holds the shared parts, `console.css` the look of the control page, `dashboard.css` the look of the dashboard. `i18n.js` holds every string in English and Korean, `feetech.js` reads the leader arm over Web Serial (read only). No build step, no CDN |
 | `deploy/` | Hotspot script, systemd unit, shutdown sudoers rule, robot setup steps |
 | `docs/` | Handover, architecture, plan, to-do list |
 
@@ -52,8 +53,9 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 
 - Keep the page free of build tools. Libraries come from cdnjs but are **stored in `web/vendor/`** (the hotspot has no internet); see `web/vendor/README.md` for versions and checksums.
 - Every string shown in the page must exist in English and Korean (`web/i18n.js`).
-- Look: camera-first console with a **dark and a light theme** (`web/style.css` tokens at the top, `web/theme.js`). Blue = interactive, green = live, amber = needs attention, red only for E-STOP. Icons: Remix Icon. Charts: Chart.js (dashboard), colours from the `--series` palette. Tools live in the dock's four tabs.
+- Look (19 Nov 2026): dark ground with **rounded tiles**, round buttons, a **dark and a light theme** (tokens at the top of `web/console.css` and `web/dashboard.css`, `web/theme.js`). Lime = live and the main action, lilac = second data colour, amber = needs attention, red only for E-STOP. Numbers in Geist Mono, text in Inter. Icons: Remix Icon. Charts: Chart.js plus small bar strips drawn in HTML. The dashboard opens with the camera block (big camera with readouts, lidar, hand cameras, speed), then the tiles. Tools live in the dock's four tabs.
 - Add a test for every change to the control logic.
 - The repo on the Jetson is `~/Desktop/kiro-webapp`. The old code is `~/so101` (its own git repo, branch `master`), backed up to the **private** GitHub repo `incom8134-web/so101-jetson` (all branches, 19 Nov 2026). The Jetson is logged in to GitHub with `gh` (device login).
+- Claude Code skills live in `.claude/skills/` (`impeccable` for design work, `skill-test-skill`).
 - Never re-implement what the old code does. Start its scripts as jobs (`robot_server/robot.py`).
 - The old robot notes on the Jetson (`CLAUDE.md` in the old code folder, probably `~/so101`) are the source of truth for hardware facts: device names, servo IDs, voltages, known problems.
