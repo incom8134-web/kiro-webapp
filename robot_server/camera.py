@@ -41,8 +41,10 @@ def find_cameras(so101_dir: Path) -> list[dict]:
 class Camera:
     """One preview stream. Thread-safe."""
 
-    def __init__(self, key: str, device: str, fourcc: str | None = None):
+    def __init__(self, key: str, device: str, fourcc: str | None = None,
+                 size: tuple[int, int] = (PREVIEW_W, PREVIEW_H), fps: float = PREVIEW_FPS):
         self.key, self.device, self.fourcc = key, device, fourcc
+        self.size, self.fps = size, fps
         self._lock = threading.Condition()
         self._jpeg: bytes | None = None
         self._seq = 0
@@ -114,7 +116,7 @@ class Camera:
             return
         self.error = None
         log.info("camera %s opened (%s)", self.key, self.device)
-        period, next_t, fails = 1.0 / PREVIEW_FPS, 0.0, 0
+        period, next_t, fails = 1.0 / self.fps, 0.0, 0
         try:
             while not self._stop.is_set():
                 ok, frame = cap.read()  # keep reading at full rate so the picture is never old
@@ -134,7 +136,7 @@ class Camera:
                 if now < next_t:
                     continue
                 next_t = now + period
-                small = cv2.resize(frame, (PREVIEW_W, PREVIEW_H), interpolation=cv2.INTER_AREA)
+                small = cv2.resize(frame, self.size, interpolation=cv2.INTER_AREA)
                 ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 if ok:
                     with self._lock:

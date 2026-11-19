@@ -38,6 +38,7 @@ The server sends speeds only while the operator is active. When driving ends it 
 | Fold / Hold / Release | `arm_<side>` | `arm_tuck.py --tuck / --hold / --release --yes` | follower ports |
 | Skill Run | `skill` | `run_policy.sh run <model> 20` | right follower, `cam:top`, `cam:right_wrist` |
 | Voice start | `voice` | `ros2 run so101_base voice_cmd` (push-to-talk, `lang:=ko` or `en`) | microphone |
+| Leader arm on the laptop, Wave | `bridge` | `twin_bridge.py --arms right --listen 127.0.0.1:5558 --allow-from 127.0.0.1 --ramp 90 --deadman 0.5`. The server converts leader readings to angles (LeRobot's maths, leader calibration file) and sends them by UDP | follower port |
 | Check wizard step | `wizard` | `wizard_runner.py <step>`: runs `hw_test_wizard.Wizard.t_<step>` from the old code without a screen | per step (see `WIZARD_USES`) |
 
 Not jobs (short, one command each, under the servo-probe lock): servo tester commands (`servo_tool.py`, reusing `so101_servo_tester.Bus`) and quick / typed commands (published on `/voice/say` for the old voice node).
@@ -64,6 +65,9 @@ All messages are JSON with a field `t`.
 | `voice` | `on` | Start or stop the voice node (operator) |
 | `talk` | `on` | Hold-to-talk. Publishes `/voice/listen` (operator) |
 | `system` | `action` (`shutdown`, `reboot`) | Jetson power (operator) |
+| `leader` | `on`, `side` | Start or stop the arm bridge for the leader arm on the laptop (operator) |
+| `leader_pos` | `side`, `raw` (6 servo positions 0-4095) | Leader arm readings, about 30 per second (operator) |
+| `wave` | `side` | Small wave from the current pose (operator) |
 | `say` | `text` | Quick or typed command for the voice node (operator) |
 | `engineer` | `pin` or `lock` | Unlock / lock the engineer tools (operator) |
 | `servo` | `cmd` (`scan`, `torque`, `move`, `setid`), `port`, `id`, `value`, `lo`, `hi`, `arm_ok` | Servo tester (engineer) |
@@ -100,6 +104,8 @@ Axes: `x` forward, `y` left, `z` turning left. The same directions ROS uses.
 |---|---|
 | `/` | Control: drive, arms, skills, voice, health |
 | `/dashboard.html` | Read-only stats for a big screen. Charts keep the last 2 minutes in the browser |
+
+The server answers on http (8080) and https (8443, self-made certificate). https is needed by the browser for Web Serial (leader arm) and the microphone.
 
 ## Camera
 

@@ -9,12 +9,13 @@
 </head>
 <body>
 <header class="bar">
-  <div class="brand">KIRO<a class="dash-link" href="dashboard.html" data-i18n="dash.open">Dashboard</a></div>
+  <div class="brand">KIRO</div>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
   </div>
+  <a class="toplink" href="dashboard.html" data-i18n="dash.open">Dashboard</a>
   <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한국어</button></div>
   <button id="estop" class="estop" type="button" data-i18n="estop">E-STOP</button>
 </header>
@@ -22,115 +23,100 @@
 <div id="banner" class="banner" hidden></div>
 
 <main>
-  <section class="stage" id="stage">
-    <img id="cam" class="cam" alt="" hidden>
-    <div id="cam-empty" class="empty"><span id="cam-msg"></span><small id="cam-why"></small></div>
-    <div id="camtabs" class="camtabs"></div>
-
-    <div class="inset">
-      <div class="head"><span><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose"></span></div>
-      <canvas id="map"></canvas>
+  <section class="stage">
+    <div class="view main" data-cam="top">
+      <img class="cam" alt="" hidden>
+      <div class="empty"><span class="msg"></span></div>
+      <div class="inset">
+        <div class="head"><span><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose"></span></div>
+        <canvas id="map"></canvas>
+      </div>
+      <div id="hint" class="hint"></div>
+      <div class="speeds">
+        <div><span data-i18n="speed.fwd">Forward m/s</span><b id="vx">0.00</b></div>
+        <div><span data-i18n="speed.side">Sideways m/s</span><b id="vy">0.00</b></div>
+        <div><span data-i18n="speed.turn">Turn rad/s</span><b id="wz">0.00</b></div>
+      </div>
+      <div class="stick-wrap l"><div id="stick-move" class="stick"><div class="knob"></div></div><span data-i18n="stick.move">Move</span></div>
+      <div class="stick-wrap r"><div id="stick-turn" class="stick h"><div class="knob"></div></div><span data-i18n="stick.turn">Turn</span></div>
     </div>
-
-    <div id="hint" class="hint"></div>
-    <div class="speeds">
-      <div><span data-i18n="speed.fwd">Forward m/s</span><b id="vx">0.00</b></div>
-      <div><span data-i18n="speed.side">Sideways m/s</span><b id="vy">0.00</b></div>
-      <div><span data-i18n="speed.turn">Turn rad/s</span><b id="wz">0.00</b></div>
+    <div class="wrists">
+      <div class="view wrist" data-cam="left_wrist">
+        <img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div>
+        <span class="tag" data-i18n="cam.left_wrist">Left hand</span>
+      </div>
+      <div class="view wrist" data-cam="right_wrist">
+        <img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div>
+        <span class="tag" data-i18n="cam.right_wrist">Right hand</span>
+      </div>
     </div>
-    <div class="stick-wrap l"><div id="stick-move" class="stick"><div class="knob"></div></div><span data-i18n="stick.move">Move</span></div>
-    <div class="stick-wrap r"><div id="stick-turn" class="stick h"><div class="knob"></div></div><span data-i18n="stick.turn">Turn</span></div>
   </section>
 
   <aside class="rail">
     <section class="sec">
-      <h2><span class="n">01</span><span data-i18n="sec.control">Control</span><span id="src" class="st"></span></h2>
-      <form id="take-box" autocomplete="off" class="row">
+      <form id="take-box" class="row" autocomplete="off">
         <input id="pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="pin" aria-label="PIN">
         <button id="take" class="btn primary" type="submit" data-i18n="take">Take control</button>
       </form>
       <div id="held-box" class="row" hidden>
-        <span class="grow" data-i18n="held">You are in control.</span>
-        <button id="release" class="btn" type="button" data-i18n="release">Release control</button>
+        <span class="grow live" data-i18n="op.you">You are driving</span>
+        <label class="chk"><input type="checkbox" id="turbo"><span data-i18n="turbo">Turbo</span></label>
+        <button id="release" class="btn" type="button" data-i18n="release">Release</button>
       </div>
-      <p id="note" class="small" role="status"></p>
-      <label class="switch"><input type="checkbox" id="turbo"><span data-i18n="turbo">Turbo speed</span></label>
-      <p id="pad" class="mute small"></p>
-      <details>
-        <summary data-i18n="help">How to drive</summary>
-        <table class="keys">
-          <tr><th></th><th data-i18n="help.gamepad"></th><th data-i18n="help.keys"></th><th data-i18n="help.screen"></th></tr>
-          <tr><td data-i18n="help.enable"></td><td data-i18n="help.holdLB"></td><td data-i18n="help.holdSpace"></td><td data-i18n="help.touch"></td></tr>
-          <tr><td data-i18n="help.move"></td><td data-i18n="help.ls"></td><td>W A S D</td><td data-i18n="help.ls"></td></tr>
-          <tr><td data-i18n="help.turn"></td><td data-i18n="help.rs"></td><td>Q / E</td><td data-i18n="help.rs"></td></tr>
-          <tr><td data-i18n="help.turbo"></td><td>RB</td><td>Shift</td><td data-i18n="help.switch"></td></tr>
-          <tr><td data-i18n="help.talk"></td><td data-i18n="help.holdY"></td><td data-i18n="help.holdV"></td><td data-i18n="help.button"></td></tr>
-          <tr><td>E-STOP</td><td>Back</td><td>Esc</td><td data-i18n="help.red"></td></tr>
-        </table>
-      </details>
+      <p id="note" class="note" role="status"></p>
+      <p class="keys small mute" data-i18n="keys">Keys: W A S D or arrows · Q E turn · Shift turbo · gamepad: hold LB</p>
     </section>
 
     <section class="sec">
-      <h2><span class="n">02</span><span data-i18n="sec.base">Base</span><span id="base-st" class="st"></span></h2>
+      <div class="row head"><h2 data-i18n="sec.base">Base</h2><span id="base-st" class="st"></span><span class="grow"></span>
+        <button id="base-btn" class="btn" type="button" data-op></button></div>
+      <p id="base-err" class="err small" hidden></p>
+    </section>
+
+    <section class="sec">
+      <div class="row head"><h2 data-i18n="sec.arms">Arms</h2><span id="arms-st" class="st"></span></div>
+      <div class="armgrid" id="arms"></div>
       <div class="row">
-        <button id="base-btn" class="btn" type="button" data-op></button>
-        <span id="base-lidar" class="mute small grow"></span>
+        <button id="leader-btn" class="btn grow" type="button" data-op></button>
+        <button id="wave-btn" class="btn" type="button" data-op data-i18n="wave">Wave</button>
       </div>
-      <div class="row">
-        <label class="small mute" for="guard-profile" data-i18n="base.profile">Guard distance</label>
-        <select id="guard-profile">
-          <option value="close" data-i18n="base.close">Close</option>
-          <option value="safe" data-i18n="base.safe">Safe</option>
-        </select>
-      </div>
-      <p id="guard-off" class="small err" data-i18n="base.guardoff" hidden></p>
-      <p id="base-guard" class="small mute"></p>
-      <div class="quick" id="quick"></div>
-      <form id="say-box" class="row" autocomplete="off">
-        <input id="say-text" class="grow" type="text" data-i18n-ph="base.typed">
-        <button class="btn" type="submit" data-i18n="base.send" data-op>Send</button>
-      </form>
-      <p id="quick-hint" class="small mute" data-i18n="base.quickhint"></p>
-      <pre id="base-tail" class="tail" hidden></pre>
+      <p id="leader-st" class="small mute"></p>
+      <p id="arms-err" class="err small" hidden></p>
     </section>
 
     <section class="sec">
-      <h2><span class="n">03</span><span data-i18n="sec.arms">Arms</span><span id="arms-st" class="st"></span></h2>
-      <p id="left-blocked" class="err small" data-i18n="arm.leftblocked" hidden></p>
-      <div id="arms"></div>
-      <pre id="arms-tail" class="tail" hidden></pre>
+      <div class="row head"><h2 data-i18n="sec.voice">Voice</h2><span id="voice-st" class="st"></span><span class="grow"></span>
+        <button id="voice-btn" class="btn" type="button" data-op></button></div>
+      <div id="voice-on" hidden>
+        <button id="talk" class="btn talk" type="button" data-i18n="voice.talk">Hold to talk</button>
+        <p class="heard"><span class="mute small" data-i18n="voice.heard">Heard</span> <b id="voice-text">-</b></p>
+        <div class="quick" id="quick"></div>
+        <form id="say-box" class="row" autocomplete="off">
+          <input id="say-text" class="grow" type="text" data-i18n-ph="base.typed">
+          <button class="btn" type="submit" data-i18n="base.send" data-op>Send</button>
+        </form>
+      </div>
+      <p id="voice-note" class="small mute" hidden></p>
     </section>
 
-    <section class="sec">
-      <h2><span class="n">04</span><span data-i18n="sec.skills">Skills</span><span id="skill-st" class="st"></span></h2>
+    <details class="sec fold" id="d-skills">
+      <summary class="row head"><h2 data-i18n="sec.skills">Skills</h2><span id="skill-st" class="st"></span></summary>
       <div id="skills"></div>
       <pre id="skill-tail" class="tail" hidden></pre>
-    </section>
+    </details>
 
-    <section class="sec">
-      <h2><span class="n">05</span><span data-i18n="sec.voice">Voice</span><span id="voice-st" class="st"></span></h2>
-      <div class="row"><button id="voice-btn" class="btn" type="button" data-op></button></div>
-      <div class="row"><button id="talk" class="btn talk" type="button" data-i18n="voice.talk" data-op>Hold to talk</button></div>
-      <table class="kv"><tr><th data-i18n="voice.heard">Heard</th><td id="voice-text">-</td></tr></table>
-      <p id="voice-note" class="small mute" data-i18n="voice.koonly"></p>
-    </section>
-
-    <section class="sec">
-      <h2><span class="n">06</span><span data-i18n="sec.health">Health</span></h2>
+    <details class="sec fold" id="d-system">
+      <summary class="row head"><h2 data-i18n="sec.health">System</h2><span id="sys-sum" class="st"></span></summary>
       <table class="kv" id="health"></table>
       <div class="row" style="margin-top:12px">
         <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.reboot">Restart</span></button>
         <button id="shutdown" class="btn hold" type="button" data-op><span class="fill"></span><span data-i18n="h.shutdown">Shut down</span></button>
         <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
       </div>
-    </section>
+    </details>
 
-    <section class="sec">
-      <h2><span class="n">07</span><span data-i18n="sec.log">Activity</span></h2>
-      <ul id="log" class="log"></ul>
-    </section>
-    <section class="sec" id="sec-eng">
-      <h2><span class="n">08</span><span data-i18n="sec.eng">Engineer</span><span id="eng-st" class="st"></span></h2>
+    <details class="sec fold" id="sec-eng">
+      <summary class="row head"><h2 data-i18n="sec.eng">Engineer</h2><span id="eng-st" class="st"></span></summary>
       <form id="eng-box" class="row" autocomplete="off">
         <input id="eng-pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="eng.pin">
         <button class="btn" type="submit" data-i18n="eng.unlock" data-op>Unlock</button>
@@ -139,6 +125,15 @@
       <div id="eng-body" hidden>
         <div class="row"><span class="grow small mute" data-i18n="eng.unlocked"></span><button id="eng-lock" class="btn" type="button" data-i18n="eng.lock">Lock</button></div>
 
+        <h3 class="sub" data-i18n="base.profile">Guard distance</h3>
+        <div class="row">
+          <select id="guard-profile" class="grow">
+            <option value="close" data-i18n="base.close">Close</option>
+            <option value="safe" data-i18n="base.safe">Safe</option>
+          </select>
+        </div>
+        <p id="guard-off" class="small mute" data-i18n="base.guardoff" hidden></p>
+
         <h3 class="sub" data-i18n="eng.servo">Servo tester</h3>
         <div class="row">
           <select id="sv-port" class="grow" aria-label="port"></select>
@@ -146,7 +141,7 @@
           <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
           <button id="sv-scan" class="btn primary" type="button" data-i18n="eng.scan">Scan</button>
         </div>
-        <label class="switch"><input type="checkbox" id="sv-armok"><span data-i18n="eng.armok">Allow control on arm ports</span></label>
+        <label class="chk"><input type="checkbox" id="sv-armok"><span data-i18n="eng.armok">Allow control on arm ports</span></label>
         <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
         <div id="sv-one" hidden>
           <p class="small"><b id="sv-sel"></b></p>
@@ -173,12 +168,12 @@
         <pre id="wz-tail" class="tail" hidden></pre>
         <div class="row"><button id="wz-report" class="btn" type="button" data-i18n="eng.report">Download report</button></div>
       </div>
-    </section>
-
+    </details>
     <div class="foot" id="ver"></div>
   </aside>
 </main>
 <script src="i18n.js"></script>
+<script src="feetech.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

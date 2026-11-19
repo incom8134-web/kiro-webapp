@@ -6,6 +6,15 @@
       "runtimeExecutable": "./run.sh",
       "runtimeArgs": [],
       "port": 8080
+    },
+    {
+      "name": "kiro-mock-8090",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "KIRO_PORT=8090 KIRO_HTTPS_PORT=8453 KIRO_BACKEND=mock ./run.sh"
+      ],
+      "port": 8090
     }
   ]
 }

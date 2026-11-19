@@ -141,3 +141,39 @@ def test_mock_sends_scan_and_odometer(cfg):
         assert m["src"] == "mock" and len(m["xy"]) == 2 * cfg.scan_points
         s = next(m for m in iter(op.receive_json, None) if m["t"] == "state")
         assert "odo_m" in s and "up_s" in s
+
+
+def test_leader_to_target_matches_lerobot_maths():
+    from robot_server.robot import JOINTS, leader_to_target
+    cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
+    mid = leader_to_target(cal, [2000] * 6)
+    assert all(abs(mid[j]) < 0.01 for j in JOINTS[:5]) and mid["gripper"] == 50.0
+    t = leader_to_target(cal, [2000 + 1024, 2000, 2000, 2000 - 1024, 2000, 3500])
+    assert abs(t["shoulder_pan"] - 90.0) < 0.1 and abs(t["wrist_flex"] + 90.0) < 0.1
+    assert t["gripper"] == 100.0                     # gripper is clamped to its range
+    cal["gripper"]["drive_mode"] = 1
+    assert leader_to_target(cal, [2000] * 5 + [1500])["gripper"] == 75.0
+
+
+def test_leader_and_wave_share_the_arm_and_estop_stops_them(cfg):
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "leader", "on": True, "side": "left"})
+        assert note(op, "leader")["msg"] == "LEFT_BLOCKED"
+        op.send_json({"t": "leader", "on": True, "side": "right"})
+        assert note(op, "leader")["ok"]
+        for _ in range(5):
+            op.send_json({"t": "leader_pos", "side": "right", "raw": [2048] * 6})
+        op.send_json({"t": "leader_pos", "side": "right", "raw": [9999] * 6})   # out of range: ignored
+        r = robot_until(op, lambda m: m["bridge"]["running"] and m["bridge"]["rx"] == 5)
+        assert r["bridge"]["mode"] == "leader"
+        op.send_json({"t": "wave", "side": "right"})
+        assert "busy" in note(op, "wave")["msg"]
+        op.send_json({"t": "estop", "on": True})
+        robot_until(op, lambda m: not m["bridge"]["running"])
+        op.send_json({"t": "estop", "on": False})
+        op.send_json({"t": "drive", "en": False})
+        op.send_json({"t": "wave", "side": "right"})
+        assert note(op, "wave")["ok"]
+        r = robot_until(op, lambda m: m["bridge"]["running"] and m["bridge"]["mode"] == "wave")
+        robot_until(op, lambda m: not m["bridge"]["running"], tries=2000)   # the wave ends by itself

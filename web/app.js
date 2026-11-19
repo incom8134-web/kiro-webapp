@@ -6,7 +6,7 @@
  * 2. Reads three inputs (gamepad, on-screen sticks, keyboard) and picks one.
  * 3. While this device is the operator, sends the drive command 20 times per
  *    second. That message is also the heartbeat: if it stops, the robot stops.
- * 4. Shows the camera, arms, skills, voice and health, and sends button presses.
+ * 4. Cameras, arms (with the leader arm on this laptop), voice, skills, health.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -14,9 +14,9 @@ const SEND_MS = 50;      // 20 messages per second
 const DEADZONE = 0.12;   // ignore tiny gamepad stick noise
 const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
-
-const state = { ws: null, open: false, server: null, robot: null, rtt: null, cam: null, camKey: null, scan: null };
 const ACCENT = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#00843d";
+
+const state = { ws: null, open: false, server: null, robot: null, rtt: null, scan: null, cams: {} };
 const input = {
   keys: new Set(),
   move: { x: 0, y: 0, active: false },   // left on-screen stick
@@ -30,6 +30,8 @@ let noteTimer = null;
 
 const isOperator = () => !!state.server && state.server.you.role === "operator";
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const jobs = () => (state.robot && state.robot.jobs) || {};
+const jobRunning = (name) => !!(jobs()[name] && jobs()[name].running);
 
 // ---------------------------------------------------------------- connection
 function deviceName() {
@@ -85,7 +87,16 @@ function readPad() {
 
 const pressed = (p, i) => !!(p && p.buttons[i] && p.buttons[i].pressed);
 
-/* Pick ONE input. Order: real gamepad (LB held) > on-screen sticks > keyboard (Space held).
+/* Keyboard: holding a movement key IS the dead-man. Letting go of all keys stops. */
+const KEYMAP = {
+  KeyW: ["x", 1], ArrowUp: ["x", 1], KeyS: ["x", -1], ArrowDown: ["x", -1],
+  KeyA: ["y", 1], KeyD: ["y", -1],
+  KeyQ: ["z", 1], ArrowLeft: ["z", 1], KeyE: ["z", -1], ArrowRight: ["z", -1],
+};
+const LETTER = { w: "KeyW", a: "KeyA", s: "KeyS", d: "KeyD", q: "KeyQ", e: "KeyE", v: "KeyV" };
+const keyCode = (e) => (e.code && e.code !== "Unidentified" ? e.code : LETTER[(e.key || "").toLowerCase()] || "");
+
+/* Pick ONE input. Order: real gamepad (LB held) > on-screen sticks > keyboard.
  * x = forward, y = left, z = turn left, each from -1 to 1. en = dead-man is held. */
 function currentInput() {
   const turboUi = $("turbo").checked;
@@ -99,11 +110,16 @@ function currentInput() {
     return { src: "screen", en: true, turbo: turboUi,
              x: -input.move.y, y: -input.move.x, z: -input.turn.x };
   }
-  const k = input.keys;
-  if (k.has("Space")) {
-    const axis = (pos, neg) => (k.has(pos) ? 1 : 0) - (k.has(neg) ? 1 : 0);
-    return { src: "keyboard", en: true, turbo: turboUi || k.has("ShiftLeft") || k.has("ShiftRight"),
-             x: axis("KeyW", "KeyS"), y: axis("KeyA", "KeyD"), z: axis("KeyQ", "KeyE") };
+  const v = { x: 0, y: 0, z: 0 };
+  let held = input.keys.has("Space");
+  for (const k of input.keys) {
+    const m = KEYMAP[k];
+    if (m) { v[m[0]] += m[1]; held = true; }
+  }
+  if (held) {
+    const cl = (a) => Math.max(-1, Math.min(1, a));
+    return { src: "keyboard", en: true, turbo: turboUi || input.keys.has("ShiftLeft") || input.keys.has("ShiftRight"),
+             x: cl(v.x), y: cl(v.y), z: cl(v.z) };
   }
   return { src: "none", en: false, turbo: false, x: 0, y: 0, z: 0 };
 }
@@ -153,22 +169,27 @@ function dropInputs() { input.keys.clear(); endMove(); endTurn(); setTalk(false)
 window.addEventListener("blur", dropInputs);
 document.addEventListener("visibilitychange", () => { if (document.hidden) dropInputs(); });
 
-const DRIVE_KEYS = new Set(["Space", "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"]);
-const typing = (e) => e.target instanceof HTMLInputElement && (e.target.type === "password" || e.target.type === "text");
+const typing = (e) => {
+  const el = e.target;
+  return el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLInputElement && ["password", "text", "number"].includes(el.type));
+};
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Escape") { send({ t: "estop", on: true }); return; }
-  if (typing(e)) return; // typing the PIN
-  if (e.code === "KeyV" && !e.repeat && isOperator()) setTalk(true);
-  if (DRIVE_KEYS.has(e.code)) {
-    input.keys.add(e.code);
-    if (e.code === "Space") e.preventDefault(); // no page scroll
+  if (e.code === "Escape" || e.key === "Escape") { send({ t: "estop", on: true }); return; }
+  if (typing(e)) return;
+  const code = keyCode(e);
+  if (code === "KeyV" && !e.repeat && isOperator()) setTalk(true);
+  if (KEYMAP[code] || code === "Space" || code === "ShiftLeft" || code === "ShiftRight") {
+    input.keys.add(code);
+    if (isOperator() && (KEYMAP[code] || code === "Space")) e.preventDefault(); // no page scroll, no button press
   }
 });
 window.addEventListener("keyup", (e) => {
-  input.keys.delete(e.code);
-  if (e.code === "KeyV") setTalk(false);
+  const code = keyCode(e);
+  input.keys.delete(code);
+  if (code === "KeyV") setTalk(false);
 });
-// A focused button would react to Space. Remove focus after every click.
+// A focused button would react to Space or arrows. Remove focus after every click.
 document.addEventListener("click", (e) => {
   const el = e.target.closest("button, summary, input[type=checkbox]");
   if (el) el.blur();
@@ -208,8 +229,9 @@ $("estop").addEventListener("click", () => {
   send({ t: "estop", on });
 });
 for (const b of document.querySelectorAll(".lang button")) {
-  b.addEventListener("click", () => { setLang(b.dataset.lang); render(); renderRobot(); });
+  b.addEventListener("click", () => { setLang(b.dataset.lang); render(); });
 }
+$("turbo").addEventListener("change", () => $("turbo").blur());
 
 const talk = $("talk");
 talk.addEventListener("pointerdown", (e) => { if (!isOperator()) return; talk.setPointerCapture(e.pointerId); setTalk(true); e.preventDefault(); });
@@ -218,8 +240,16 @@ talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base"), profile: $("guard-profile").value }));
 $("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
+$("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
+$("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
 
-/* Hold a button for HOLD_MS to confirm. Used for shutdown, restart and torque release. */
+// Folded sections remember whether they were open
+for (const d of document.querySelectorAll("details.fold")) {
+  try { d.open = localStorage.getItem("kiro-open-" + d.id) === "1"; } catch (e) { /* ignore */ }
+  d.addEventListener("toggle", () => { try { localStorage.setItem("kiro-open-" + d.id, d.open ? "1" : "0"); } catch (e) { /* ignore */ } });
+}
+
+/* Hold a button for HOLD_MS to confirm. Used for shutdown, restart, torque release, servo writes. */
 function holdButton(el, action) {
   let timer = null, start = 0, raf = 0;
   const fill = el.querySelector(".fill");
@@ -241,9 +271,9 @@ function showNote(text, isError) {
   const known = { "LEFT_BLOCKED": "arm.leftblocked" };
   const n = $("note");
   n.textContent = known[text] ? t(known[text]) : text;
-  n.className = "small" + (isError ? " err" : "");
+  n.className = "note" + (isError ? " err" : "");
   clearTimeout(noteTimer);
-  noteTimer = setTimeout(() => { n.textContent = ""; n.className = "small"; renderHintNote(); }, 5000);
+  noteTimer = setTimeout(() => { n.textContent = ""; n.className = "note"; renderHintNote(); }, 5000);
 }
 
 function renderHintNote() {
@@ -298,87 +328,67 @@ function render() {
   $("vx").textContent = cmd.vx.toFixed(2);
   $("vy").textContent = cmd.vy.toFixed(2);
   $("wz").textContent = cmd.wz.toFixed(2);
-  $("src").textContent = s && s.src !== "none" ? s.src : "";
 
-  $("hint").textContent = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral") : t("hint.go");
+  const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
+    : !jobRunning("base") && s.backend === "ros" ? t("hint.nobase") : "";
+  $("hint").textContent = hint;
+  $("hint").hidden = !hint;
   $("stick-move").classList.toggle("off", !me);
   $("stick-turn").classList.toggle("off", !me);
   for (const el of document.querySelectorAll("[data-op]")) el.disabled = !me;
 
-  const p = input.pad || readPad();
-  $("pad").textContent = p ? t("pad", { id: p.id.replace(/\s*\(.*\)\s*$/, "").slice(0, 34) }) : t("pad.none");
-
   const o = s && s.odom;
-  $("pose").textContent = o ? t("pose", { x: o.x.toFixed(2), y: o.y.toFixed(2), th: Math.round(o.th * 180 / Math.PI) }) : t("pose.none");
-  $("ver").textContent = s ? `KIRO Command Center v${s.version} · ${s.clients} device${s.clients === 1 ? "" : "s"}` : "";
+  $("pose").textContent = o ? t("pose", { x: o.x.toFixed(2), y: o.y.toFixed(2), th: Math.round(o.th * 180 / Math.PI) }) : "";
+  $("ver").textContent = s ? `KIRO v${s.version} · ${s.clients} device${s.clients === 1 ? "" : "s"}` : "";
   drawMap();
   renderRobot();
 }
 
-// ------------------------------------------------------------- robot panels
-const jobs = () => (state.robot && state.robot.jobs) || {};
-const jobRunning = (name) => !!(jobs()[name] && jobs()[name].running);
-
-function tail(el, job) {
-  if (!job || !job.tail || !job.tail.length) { el.hidden = true; return; }
-  el.hidden = false;
-  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
-  el.textContent = job.tail.join("\n");
-  if (atEnd) el.scrollTop = el.scrollHeight;
-}
-
-function stLine(el, job) {
-  el.textContent = job && job.running ? t("skill.running") : "";
-  el.className = "st" + (job && job.running ? " live" : "");
+/* A job's last lines, shown only when it ended with an error (not when we stopped it). */
+function failTail(el, job) {
+  const failed = !!job && !job.running && job.code > 0 && job.code !== 130;
+  el.hidden = !failed;
+  if (failed) el.textContent = job.tail.slice(-5).join("\n");
+  return failed;
 }
 
 function renderRobot() {
   const r = state.robot;
   if (!r) return;
   const me = isOperator();
+  const s = state.server;
+  const estop = !!(s && s.estop);
   const J = jobs();
 
   // Base
   const baseOn = jobRunning("base");
-  $("base-btn").textContent = t(baseOn ? "base.stop" : "base.start");
+  $("base-btn").textContent = t(baseOn ? "btn.stop" : "btn.start");
   $("base-btn").classList.toggle("on", baseOn);
-  $("base-st").textContent = t(baseOn ? "base.running" : "base.stopped");
+  $("base-st").textContent = baseOn ? t("st.on") : "";
   $("base-st").className = "st" + (baseOn ? " live" : "");
-  $("base-lidar").textContent = t(r.lidar ? "base.lidar.yes" : "base.lidar.no");
-  $("guard-off").hidden = r.obstacle_stop !== false;
-  $("guard-profile").disabled = !me || baseOn;
-  const bj = J.base;
-  $("base-guard").textContent = baseOn && r.voice && r.voice.guard ? `${t("base.guard")}: ${r.voice.guard}` :
-    bj && !bj.running && bj.code ? t("base.exited", { code: bj.code }) : "";
-  tail($("base-tail"), bj);
+  const be = $("base-err");
+  if (failTail(be, J.base)) be.textContent = t("base.exited", { code: J.base.code }) + "\n" + be.textContent;
 
-  // Arms
-  $("left-blocked").hidden = !!r.left_arm_ok;
+  // Arms: right and left, each with teleop and the three poses
   const b = (r.health && r.health.boards) || {};
-  const armRow = (side) => {
-    const f = b[side + "_follower"], l = b[side + "_leader"];
-    const blocked = side !== "right" && !r.left_arm_ok;
+  const armCol = (side) => {
+    const blocked = side === "left" && !r.left_arm_ok;
     const tele = jobRunning("teleop_" + side);
-    const dis = (!me || (blocked)) ? "disabled" : "";
-    const board = (x, label) => !x ? "" : x.state === "missing" ? `${label} ${t("arm.missing")}` :
-      x.state === "busy" ? `${label} ${t("h.inuse", { job: x.by })}` :
-      x.state === "ok" ? `${label} ${x.vmin ?? "-"} V · ${x.tmax ?? "-"}°C · ${x.n}/${x.of}` :
-      x.state === "silent" ? `${label} ${t("h.noread")}` : `${label} ${x.msg || x.state}`;
-    info[side] = side === "both" ? "" : [board(f, t("arm.follower")), board(l, t("arm.leader"))].filter(Boolean).join("\n");
-    return `<div class="arm">
-      <div class="row"><span class="name grow">${t("arm." + side)}</span>
-        <span class="mute small">${t("arm.teleop")}</span>
-        <button class="btn${tele ? " on" : ""}" data-tele="${side}" ${dis}>${t(tele ? "arm.off" : "arm.on")}</button></div>
-      ${side === "both" ? "" : `<p class="small mute" id="arm-info-${side}"></p>`}
-      <div class="row seg">
-        <button class="btn" data-arm="${side}" data-act="fold" ${dis}>${t("arm.fold")}</button>
-        <button class="btn" data-arm="${side}" data-act="hold" ${dis}>${t("arm.hold")}</button>
+    const f = b[side + "_follower"];
+    const off = !me || blocked ? "disabled" : "";
+    const status = blocked ? t("arm.locked") : f && f.state === "missing" ? t("arm.missing")
+      : f && f.state === "ok" ? `${f.vmin ?? "-"} V` : f && f.state === "silent" ? t("arm.nopower") : "";
+    return `<div class="armcol">
+      <div class="row"><b class="grow">${t("arm." + side)}</b><span class="small mute">${esc(status)}</span></div>
+      <button class="btn wide${tele ? " on" : ""}" data-tele="${side}" ${off}>${t(tele ? "arm.teleop.off" : "arm.teleop.on")}</button>
+      <div class="trio">
+        <button class="btn" data-arm="${side}" data-act="fold" ${off}>${t("arm.fold")}</button>
+        <button class="btn" data-arm="${side}" data-act="hold" ${off}>${t("arm.hold")}</button>
         <button class="btn hold" data-arm="${side}" data-act="release" ${me ? "" : "disabled"}><span class="fill"></span>${t("arm.release")}</button>
       </div></div>`;
   };
   const arms = $("arms");
-  const info = {};
-  const html = ["right", "left", "both"].map(armRow).join("");
+  const html = armCol("right") + armCol("left");
   if (arms.dataset.html !== html) {
     arms.innerHTML = html; arms.dataset.html = html;
     for (const el of arms.querySelectorAll("[data-tele]")) el.addEventListener("click", () => send({ t: "teleop", side: el.dataset.tele, on: !jobRunning("teleop_" + el.dataset.tele) }));
@@ -387,120 +397,114 @@ function renderRobot() {
       else el.addEventListener("click", () => send({ t: "arm", side: el.dataset.arm, action: el.dataset.act }));
     }
   }
-  for (const side of ["right", "left"]) { const el = $("arm-info-" + side); if (el) el.innerText = info[side]; }
-  const armJob = ["teleop_right", "teleop_left", "teleop_both", "arm_right", "arm_left", "arm_both"].map((n) => J[n])
-    .filter(Boolean).sort((a, b2) => (b2.ended || 1e12) - (a.ended || 1e12) || b2.started - a.started)[0];
-  tail($("arms-tail"), armJob);
-  const anyArm = Object.keys(J).some((n) => (n.startsWith("teleop_") || n.startsWith("arm_")) && J[n].running);
-  $("arms-st").textContent = anyArm ? t("skill.running") : "";
+  const armJobs = ["teleop_right", "teleop_left", "arm_right", "arm_left", "bridge"].map((n) => J[n]).filter(Boolean);
+  const anyArm = armJobs.some((j) => j.running);
+  $("arms-st").textContent = anyArm ? t("st.busy") : "";
   $("arms-st").className = "st" + (anyArm ? " live" : "");
+  const lastArm = armJobs.sort((a, c) => (c.ended || 1e12) - (a.ended || 1e12) || c.started - a.started)[0];
+  failTail($("arms-err"), lastArm);
+
+  // Leader arm on this laptop, and the wave
+  const br = r.bridge || {};
+  if (leader.on && br.running && br.mode === "leader") leader.sawRunning = true;
+  if (leader.on && (estop || !me || (leader.sawRunning && !br.running))) leaderStop(estop ? t("hint.estop") : "");
+  $("leader-btn").textContent = t(leader.on ? "leader.stop" : "leader.use");
+  $("leader-btn").classList.toggle("on", leader.on);
+  $("leader-st").textContent = leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
+    : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
+    : t("leader.hint");
+  const waving = !!(br.running && br.mode === "wave");
+  $("wave-btn").disabled = !me || leader.on || waving || estop;
+  $("wave-btn").classList.toggle("on", waving);
+
+  // Voice
+  const vOn = jobRunning("voice");
+  $("voice-btn").textContent = t(vOn ? "btn.stop" : "btn.start");
+  $("voice-btn").classList.toggle("on", vOn);
+  $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
+  $("voice-st").className = "st" + (vOn ? " live" : "");
+  $("voice-on").hidden = !vOn;
+  $("talk").disabled = !me || !vOn;
+  $("voice-text").textContent = (r.voice && r.voice.text) || "-";
+  const noEn = LANG === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
+  $("voice-note").hidden = vOn || !noEn;
+  $("voice-note").textContent = noEn ? t("voice.koonly") : "";
+  renderQuick();
 
   // Skills
   const sk = J.skill;
   const skillOn = jobRunning("skill");
   const models = r.models || [];
-  const sh = models.length ? models.map((m) => `<div class="row"><span class="grow"><b>${esc(m.name)}</b><br><span class="small mute">${esc(m.type.toUpperCase())} · ${esc(t("skill.needs", { cams: m.cams.join(", ") || "-" }))}</span></span>
-      <button class="btn${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${me ? "" : "disabled"}>${t(skillOn ? "skill.stop" : "skill.run")}</button></div>`).join("")
+  const sh = models.length ? models.map((m) => `<div class="row"><span class="grow"><b>${esc(m.name)}</b> <span class="small mute">${esc(m.cams.join(" + "))}</span></span>
+      <button class="btn${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${me ? "" : "disabled"}>${t(skillOn ? "btn.stop" : "skill.run")}</button></div>`).join("")
     : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
   const skills = $("skills");
   if (skills.dataset.html !== sh) {
     skills.innerHTML = sh; skills.dataset.html = sh;
     for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => send({ t: "skill", name: el.dataset.skill, on: !jobRunning("skill") }));
   }
-  stLine($("skill-st"), sk);
-  tail($("skill-tail"), sk);
+  $("skill-st").textContent = skillOn ? t("st.on") : "";
+  $("skill-st").className = "st" + (skillOn ? " live" : "");
+  failTail($("skill-tail"), sk);
 
-  renderQuick();
-  renderEngineer();
-
-  // Voice
-  const vOn = jobRunning("voice");
-  $("voice-btn").textContent = t(vOn ? "voice.stop" : "voice.start");
-  $("voice-btn").classList.toggle("on", vOn);
-  $("voice-st").textContent = t(vOn ? "voice.ready" : "voice.off");
-  $("voice-st").className = "st" + (vOn ? " live" : "");
-  $("talk").disabled = !me || !vOn;
-  $("voice-text").textContent = (r.voice && (r.voice.text || r.voice.status)) || "-";
-  // The speech language follows the page language when voice is started
-  $("voice-note").hidden = LANG !== "en" || (r.voice_models || []).some((m) => m.includes("-en"));
-  if (vOn) $("voice-st").textContent += ` · ${(r.voice_lang || "ko").toUpperCase()}`;
-
-  // Health
+  // System
   const h = r.health || {}, jt = h.jetson || {};
-  const rows = [];
-  rows.push([t("h.jetson"), [jt.temp != null ? `${jt.temp}°C` : null, jt.load != null ? `${t("h.cpu")} ${jt.load}/${jt.cores}` : null,
-    jt.mem != null ? `${t("h.mem")} ${jt.mem}%` : null, jt.disk != null ? `${t("h.disk")} ${jt.disk}% (${jt.disk_free_gb} GB)` : null].filter(Boolean).join(" · ")]);
+  $("sys-sum").textContent = [jt.temp != null ? `${jt.temp}°C` : null, jt.load != null && jt.cores ? `CPU ${Math.round(100 * jt.load / jt.cores)}%` : null,
+    b.base && b.base.state === "ok" ? `${b.base.vmin} V` : null].filter(Boolean).join(" · ");
+  const rows = [[t("h.jetson"), [jt.temp != null ? `${jt.temp}°C` : null, jt.mem != null ? `${t("h.mem")} ${jt.mem}%` : null,
+    jt.disk != null ? `${t("h.disk")} ${jt.disk}%` : null].filter(Boolean).join(" · ")]];
   const names = { right_follower: `${t("arm.right")} ${t("arm.follower")}`, left_follower: `${t("arm.left")} ${t("arm.follower")}`,
     right_leader: `${t("arm.right")} ${t("arm.leader")}`, left_leader: `${t("arm.left")} ${t("arm.leader")}`, base: t("sec.base") };
   for (const [k, label] of Object.entries(names)) {
     const x = b[k];
     if (!x) continue;
-    let v = x.state === "missing" ? t("arm.missing") : x.state === "busy" ? t("h.inuse", { job: x.by }) :
-      x.state === "silent" ? t("h.noread") : x.state === "ok" ? `<b>${x.vmin ?? "-"} V</b> · ${x.tmax ?? "-"}°C · ${x.n}/${x.of}${x.alarm ? " · ALARM" : ""}` : esc(x.msg || x.state);
+    const v = x.state === "missing" ? t("arm.missing") : x.state === "busy" ? t("h.inuse", { job: x.by }) :
+      x.state === "silent" ? t("arm.nopower") : x.state === "ok" ? `<b>${x.vmin ?? "-"} V</b> · ${x.tmax ?? "-"}°C${x.alarm ? " · ALARM" : ""}` : esc(x.msg || x.state);
     rows.push([label, v]);
   }
-  for (const c of r.cams || []) rows.push([`cam ${c.key}`, c.present ? (c.live ? "live" : "ok") : esc(c.reason || t("arm.missing"))]);
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
 
-  // Activity
-  const ev = (r.events || []).slice().reverse();
-  $("log").innerHTML = ev.length ? ev.map((e) => `<li><time>${new Date(e.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>${esc(e.who)}: ${esc(e.text)}</span></li>`).join("")
-    : `<li class="mute">${t("log.empty")}</li>`;
-
   renderCams();
-  for (const el of document.querySelectorAll("[data-op]")) if (el.id !== "talk") el.disabled = !me;
+  renderEngineer();
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn"].includes(el.id)) el.disabled = !me;
 }
 
-// ------------------------------------------------------------------ camera
+// ------------------------------------------------------------------ cameras
+/* Main camera on top, the two hand cameras below it. Each view shows its stream or why not. */
 function renderCams() {
-  const r = state.robot;
-  const cams = (r && r.cams) || [];
-  const present = cams.filter((c) => c.present);
-  let key = state.camKey;
-  if (!key) { try { key = localStorage.getItem("kiro-cam"); } catch (e) { /* ignore */ } }
-  if (!present.some((c) => c.key === key)) key = present.length ? present[0].key : null;
-  state.camKey = key;
-
-  const tabs = $("camtabs");
-  const th = present.length > 1 ? present.map((c) => `<button type="button" data-cam="${esc(c.key)}" class="${c.key === key ? "on" : ""}">${esc(c.key)}</button>`).join("") : "";
-  if (tabs.dataset.html !== th) {
-    tabs.innerHTML = th; tabs.dataset.html = th;
-    for (const b of tabs.querySelectorAll("[data-cam]")) b.addEventListener("click", () => {
-      state.camKey = b.dataset.cam;
-      try { localStorage.setItem("kiro-cam", b.dataset.cam); } catch (e) { /* ignore */ }
-      renderCams();
-    });
+  const cams = (state.robot && state.robot.cams) || [];
+  for (const view of document.querySelectorAll(".view[data-cam]")) {
+    const key = view.dataset.cam;
+    const c = cams.find((x) => x.key === key);
+    const img = view.querySelector("img.cam"), empty = view.querySelector(".empty"), msg = view.querySelector(".msg");
+    const why = !c ? t("cam.notconfigured") : !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : "";
+    if (why) {
+      if (state.cams[key]) { img.removeAttribute("src"); state.cams[key] = false; }
+      img.hidden = true; empty.hidden = false; msg.textContent = why;
+      empty.title = c && c.reason && c.reason !== "정상" ? c.reason : "";
+      continue;
+    }
+    if (c.error) {   // the server could not open it (another program has it): say so, retry every 5 s
+      empty.hidden = false; img.hidden = true; msg.textContent = t("cam.busy");
+      const now = Date.now();
+      if (!state.cams[key + ":retry"] || now - state.cams[key + ":retry"] > 5000) {
+        state.cams[key + ":retry"] = now;
+        img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${now}`;
+        state.cams[key] = true;
+      }
+      continue;
+    }
+    if (!state.cams[key]) {
+      state.cams[key] = true;
+      img.onerror = () => {   // stream ended (camera busy or server restarting): say so, try again shortly
+        state.cams[key] = false; img.hidden = true; empty.hidden = false; msg.textContent = t("cam.connecting");
+        setTimeout(renderCams, 2000);
+      };
+      img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
+    }
+    img.hidden = false; empty.hidden = true;
   }
-
-  const cam = present.find((c) => c.key === key);
-  const img = $("cam");
-  const missing = cams.filter((c) => !c.present).map((c) => t("cam.reason", { key: c.key, reason: c.reason || "-" })).join(" · ");
-  if (!cam) {
-    stopCam();
-    $("cam-msg").textContent = t("cam.none"); $("cam-why").textContent = missing;
-    $("cam-empty").hidden = false; return;
-  }
-  if (cam.paused_by) {
-    stopCam();
-    const running = Object.values(jobs()).find((j) => j.running && j.uses.includes("cam:" + cam.key));
-    $("cam-msg").textContent = t("cam.paused", { job: running ? running.label : cam.paused_by });
-    $("cam-why").textContent = ""; $("cam-empty").hidden = false; return;
-  }
-  if (state.cam !== key) {
-    state.cam = key;
-    img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
-  }
-  img.hidden = false; $("cam-empty").hidden = true;
 }
-
-function stopCam() {
-  const img = $("cam");
-  if (state.cam) { img.removeAttribute("src"); state.cam = null; }
-  img.hidden = true;
-}
-
-// The stream ends when a job takes the camera or the server restarts: try again shortly.
-$("cam").addEventListener("error", () => { state.cam = null; $("cam").hidden = true; setTimeout(renderCams, 2000); });
 
 /* Top-down view. The robot stays in the middle; forward is up. */
 function drawMap() {
@@ -518,23 +522,17 @@ function drawMap() {
   const s = state.server;
   const o = (s && s.odom) || { x: 0, y: 0, th: 0 };
   const S = PX_PER_M;
-  const sx = (wy) => w / 2 - (wy - o.y) * S;   // world y (left) -> screen x
-  const sy = (wx) => h / 2 - (wx - o.x) * S;   // world x (forward) -> screen y
+  const sx = (wy) => w / 2 - (wy - o.y) * S;
+  const sy = (wx) => h / 2 - (wx - o.x) * S;
 
-  // grid, one line every 0.5 m
   const step = 0.5 * S;
   g.strokeStyle = "#e4e4e8"; g.lineWidth = 1; g.beginPath();
   for (let x = ((w / 2 + o.y * S) % step + step) % step; x < w; x += step) { g.moveTo(x, 0); g.lineTo(x, h); }
   for (let y = ((h / 2 + o.x * S) % step + step) % step; y < h; y += step) { g.moveTo(0, y); g.lineTo(w, y); }
   g.stroke();
 
-  // start point
-  g.strokeStyle = "#6b6b70"; g.lineWidth = 1; g.beginPath();
-  g.moveTo(sx(0) - 5, sy(0)); g.lineTo(sx(0) + 5, sy(0)); g.moveTo(sx(0), sy(0) - 5); g.lineTo(sx(0), sy(0) + 5); g.stroke();
-
-  // path driven so far
   const last = trail[trail.length - 1];
-  if (last && Math.hypot(o.x - last.x, o.y - last.y) > 1.5) trail.length = 0;   // position was reset
+  if (last && Math.hypot(o.x - last.x, o.y - last.y) > 1.5) trail.length = 0;
   if (!last || Math.hypot(o.x - last.x, o.y - last.y) > 0.02) { trail.push({ x: o.x, y: o.y }); if (trail.length > 600) trail.shift(); }
   if (trail.length > 1) {
     g.strokeStyle = ACCENT; g.lineWidth = 1.5; g.beginPath();
@@ -542,7 +540,6 @@ function drawMap() {
     g.lineTo(w / 2, h / 2); g.stroke();
   }
 
-  // robot body (0.45 m long, 0.35 m wide)
   g.save(); g.translate(w / 2, h / 2); g.rotate(-o.th);
   // lidar points, robot frame (x forward = up, y left = left). Hidden when older than 1 s.
   const sc = state.scan && performance.now() - state.scan.at < 1000 ? state.scan : null;
@@ -557,8 +554,6 @@ function drawMap() {
   g.fillStyle = "#ffffff"; g.strokeStyle = stop ? "#e10600" : "#111111"; g.lineWidth = 1.5;
   g.fillRect(-W / 2, -L / 2, W, L); g.strokeRect(-W / 2, -L / 2, W, L);
   g.fillStyle = g.strokeStyle; g.beginPath(); g.moveTo(0, -L / 2 + 3); g.lineTo(-5, -L / 2 + 11); g.lineTo(5, -L / 2 + 11); g.closePath(); g.fill();
-
-  // speed arrow
   const cmd = s ? s.cmd : { vx: 0, vy: 0 };
   const ax = -cmd.vy * S * 3, ay = -cmd.vx * S * 3, al = Math.hypot(ax, ay);
   if (al > 3) {
@@ -569,7 +564,6 @@ function drawMap() {
     g.lineTo(ax - 7 * Math.cos(a + 0.5), ay - 7 * Math.sin(a + 0.5)); g.closePath(); g.fill();
   }
   g.restore();
-  g.fillStyle = "#6b6b70"; g.font = "10px " + getComputedStyle(document.body).fontFamily; g.fillText("0.5 m", 6, h - 6);
 }
 window.addEventListener("resize", drawMap);
 
@@ -582,9 +576,9 @@ const QUICK = {
 const QUICK_GRID = ["rotl", "fwd", "rotr", "left", "stop", "right", "", "back", ""];
 
 function renderQuick() {
-  const r = state.robot, me = isOperator();
+  const me = isOperator();
   const ok = me && jobRunning("voice") && !(state.server && state.server.estop);
-  const html = QUICK_GRID.map((k) => k ? `<button type="button" class="btn${k === "stop" ? " stopq" : ""}" data-q="${k}" ${ok || (k === "stop" && me && jobRunning("voice")) ? "" : "disabled"}>${t("q." + k)}</button>`
+  const html = QUICK_GRID.map((k) => k ? `<button type="button" class="btn${k === "stop" ? " stopq" : ""}" data-q="${k}" ${ok || (k === "stop" && me) ? "" : "disabled"}>${t("q." + k)}</button>`
     : `<span class="gap"></span>`).join("");
   const box = $("quick");
   if (box.dataset.html !== html + LANG) {
@@ -594,7 +588,6 @@ function renderQuick() {
       send({ t: "say", text: QUICK[lang][b.dataset.q] });
     });
   }
-  $("quick-hint").hidden = jobRunning("voice");
 }
 $("say-box").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -602,6 +595,63 @@ $("say-box").addEventListener("submit", (e) => {
   if (v) send({ t: "say", text: v });
   $("say-text").value = ""; $("say-text").blur();
 });
+
+// ------------------------------------------------- leader arm on this laptop
+/* Plug the leader arm into this laptop's USB and press the button. The browser finds the
+ * servo board, reads the six joints 30 times per second and sends them to the robot, which
+ * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
+const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false };
+
+async function leaderStart() {
+  if (!LeaderArm.supported()) {
+    showNote(t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` }), true);
+    return;
+  }
+  try {
+    let ports = (await navigator.serial.getPorts()).filter((p) => FEETECH_VENDORS.includes(p.getInfo().usbVendorId));
+    if (!ports.length) ports = [await navigator.serial.requestPort({ filters: FEETECH_VENDORS.map((v) => ({ usbVendorId: v })) })];
+    let found = null;
+    for (const port of ports) {           // try each granted board until six servos answer
+      const arm = new LeaderArm(port);
+      try { await arm.open(); } catch (e) { continue; }
+      if (await arm.readPositions()) { found = arm; break; }
+      await arm.close();
+    }
+    if (!found) { showNote(t("leader.noservos"), true); return; }
+    Object.assign(leader, { arm: found, on: true, ok: 0, fail: 0, sawRunning: false });
+    send({ t: "leader", on: true, side: leader.side });
+    renderRobot();
+    leaderLoop();
+  } catch (e) {
+    if (e && e.name !== "NotFoundError") showNote(String((e && e.message) || e), true);   // NotFoundError = chooser closed
+  }
+}
+
+async function leaderLoop() {
+  while (leader.on && leader.arm) {
+    const t0 = performance.now();
+    let pos = null;
+    try { pos = await leader.arm.readPositions(); } catch (e) { leaderStop(t("leader.lost")); return; }
+    if (pos) {
+      leader.ok++; leader.fail = 0;
+      if (isOperator()) send({ t: "leader_pos", side: leader.side, raw: pos });
+    } else if (++leader.fail > 15) { leaderStop(t("leader.lost")); return; }
+    const wait = 33 - (performance.now() - t0);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+async function leaderStop(reason) {
+  const was = leader.on;
+  leader.on = false;
+  if (was) send({ t: "leader", on: false, side: leader.side });
+  const a = leader.arm;
+  leader.arm = null;
+  if (a) await a.close();
+  if (reason) showNote(reason, true);
+  renderRobot();
+}
+if (LeaderArm.supported()) navigator.serial.addEventListener("disconnect", () => { if (leader.on) leaderStop(t("leader.unplugged")); });
 
 // ----------------------------------------------------------- engineer tools
 const eng = { steps: null, sel: 0, servo: null, prep: {} };
@@ -614,6 +664,7 @@ $("eng-box").addEventListener("submit", (e) => {
   $("eng-pin").value = ""; $("eng-pin").blur();
 });
 $("eng-lock").addEventListener("click", () => send({ t: "engineer", lock: true }));
+$("guard-profile").addEventListener("change", () => $("guard-profile").blur());
 
 const svPort = () => $("sv-port").value;
 $("sv-scan").addEventListener("click", () => send({ t: "servo", cmd: "scan", port: svPort(), lo: +$("sv-lo").value, hi: +$("sv-hi").value }));
@@ -628,18 +679,19 @@ function renderEngineer() {
   const me = isOperator(), en = isEngineer();
   $("eng-box").hidden = en;
   $("eng-body").hidden = !en;
-  $("eng-st").textContent = en ? t("eng.unlock") + " ✓" : "";
+  $("eng-st").textContent = en ? "✓" : "";
   $("eng-st").className = "st" + (en ? " live" : "");
   $("eng-hint").textContent = en ? "" : !me ? t("eng.needop") : s && s.mock_engineer_pin ? t("eng.mockpin") : "";
-  if (!en || !r) return;
+  if (!r) return;
+  $("guard-off").hidden = r.obstacle_stop !== false;
+  $("guard-profile").disabled = !me || jobRunning("base");
+  if (!en) return;
 
-  // ports
   const ports = r.ports || [];
   const sel = $("sv-port"), cur = sel.value;
   const opts = ports.map((p) => `<option value="${esc(p.dev)}">${esc(p.dev)}${p.dev !== p.real ? " (" + esc(p.real.replace("/dev/", "")) + ")" : ""}</option>`).join("");
   if (sel.dataset.html !== opts) { sel.innerHTML = opts || `<option value="">-</option>`; sel.dataset.html = opts; if (cur) sel.value = cur; }
 
-  // scan table
   const sc = r.servo_scan;
   const cols = t("eng.cols").split("|");
   let tb;
@@ -661,7 +713,6 @@ function renderEngineer() {
   const has = !!(sc && sc.port === svPort() && sc.servos.some((v) => v.id === eng.servo));
   $("sv-one").hidden = !has;
   if (has) $("sv-sel").textContent = `${svPort()} · ID ${eng.servo}`;
-
   renderWizard();
 }
 
@@ -709,7 +760,7 @@ function renderWizard() {
       send({ t: "wizard", step: st.key, on: true, seconds: eng.secs || 20 });
     };
     const rb = $("wz-run");
-    if (rb) motion ? holdButton(rb, run) : rb.addEventListener("click", run);
+    if (rb) { if (motion) holdButton(rb, run); else rb.addEventListener("click", run); }
     const sb = $("wz-stop");
     if (sb) sb.addEventListener("click", () => send({ t: "wizard", step: st.key, on: false }));
     for (const [id, v] of [["wz-pass", "pass"], ["wz-fail", "fail"], ["wz-skip", "skip"]]) {
@@ -717,7 +768,6 @@ function renderWizard() {
       if (b) b.addEventListener("click", () => send({ t: "wizard_decide", step: st.key, status: v }));
     }
   }
-  // log of the selected step: live while running, else the saved result
   const lines = running && wj ? wj.tail : (res[st.key] && res[st.key].lines) || [];
   const tl = $("wz-tail");
   tl.hidden = !lines.length;

@@ -8,13 +8,16 @@ The Jetson on the robot runs everything and creates its own Wi-Fi network. One o
 
 ## Status
 
-**Version 0.4 (18 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
+**Version 0.5 (19 Nov 2026).** Runs on the Jetson. Checked on the robot: page over the network, live camera, robot mode connected to ROS 2, read-only servo check. **Wheels and arms have not been moved from the page yet** (12 V and 5 V power were off).
 
 | Part | State |
 |---|---|
-| Driving: on-screen sticks, gamepad, keyboard, one operator with PIN, E-STOP, heartbeat stop | Works. 24 automatic tests |
+| Driving: on-screen sticks, gamepad, keyboard (W A S D or arrows, no extra key), one operator with PIN, E-STOP, heartbeat stop | Works. 30 automatic tests |
+| Simpler page: main camera with left and right hand cameras below it; Skills, System and Engineer fold away | Works |
+| Leader arm on the laptop (USB, Chrome or Edge, https page): plug in, press one button, the right arm follows | Built on the old twin_bridge. Protocol code checked; not yet tried with a real leader arm |
+| Wave button: the right arm waves its wrist and gripper from where it is, then holds | Built on the old twin_bridge. Not yet tried on the arm |
 | Swiss-style page, English / Korean switch, phone layout | Works |
-| Live camera (Gemini 335 `top`, wrist webcams when plugged in) | Works on the robot |
+| Live camera (Gemini 335 `top`, wrist webcams when plugged in, MJPG 320x240) | Top works on the robot. Hand cameras were not plugged in on 19 Nov |
 | Base start / stop (old launcher with lidar guard) | Wired, needs 12 V wheel power to test |
 | Arms: fold, hold, release, teleop right / left / both | Wired to the old scripts. Left arm blocked until recalibrated |
 | Run a skill (`right_arm_task2_act`) | Wired to `run_policy.sh`. Needs the `right_wrist` webcam |
@@ -60,9 +63,9 @@ python -m venv .venv
 
 | Action | Gamepad | Keyboard | Screen |
 |---|---|---|---|
-| **Enable** (must be held) | hold LB | hold Space | touch a stick |
-| Move | left stick | W A S D | left stick |
-| Turn | right stick | Q / E | right stick |
+| **Enable** (must be held) | hold LB | hold a movement key | touch a stick |
+| Move | left stick | W A S D or arrow keys (holding the key is the safety hold) | left stick |
+| Turn | right stick | Q / E or left / right arrows | right stick |
 | Turbo | RB | Shift | Turbo switch |
 | Talk (voice on) | hold Y | hold V | Hold to talk button |
 | **E-STOP** | Back / Select | Esc | red button |

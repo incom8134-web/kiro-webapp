@@ -44,6 +44,18 @@ cd ~/Desktop/kiro-webapp && ./run.sh
 
 Open **http://localhost:8080** on the Jetson, or **http://10.42.0.1:8080** from a laptop or phone on GeminiBOT. PIN **0000**. Buttons start harmless stand-in programs. The camera is real. Stop with Ctrl+C.
 
+## 4b. Leader arm on a laptop (optional)
+
+The leader arm can be plugged into the **laptop** instead of the robot. The browser reads it over USB (Web Serial), which only works in **Chrome or Edge** and only on an **https** page:
+
+1. On the laptop open **https://10.42.0.1:8443** (on the Jetson itself: https://localhost:8443).
+2. The browser warns that the certificate is not trusted (the robot made it itself). Choose *Advanced*, then *Proceed*. Once per laptop.
+3. Take control, plug the leader arm (with its power on) into the laptop, press **Use leader arm**. The first time, pick the USB device in the list. After that it is found automatically.
+
+The right follower arm then follows. Pressing the button again, E-STOP, closing the tab or unplugging the leader stops it, and the follower holds where it is.
+
+The certificate lives in `~/.config/kiro-webapp/tls/` (never in git). Set `KIRO_HTTPS_PORT=0` to turn https off.
+
 ## 5. Real robot
 
 Choose your own PINs (the engineer PIN opens the servo tester and check wizard; leave it out to keep them off):

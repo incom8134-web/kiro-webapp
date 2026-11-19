@@ -44,7 +44,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/servo_tool.py` | Servo tester commands, reusing the old `so101_servo_tester.Bus` |
 | `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |
 | `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/` |
-| `web/` | Plain HTML, CSS, JavaScript. `i18n.js` holds every string in English and Korean. No build step, no CDN |
+| `web/` | Plain HTML, CSS, JavaScript. `i18n.js` holds every string in English and Korean, `feetech.js` reads the leader arm over Web Serial (read only). No build step, no CDN |
 | `deploy/` | Hotspot script, systemd unit, shutdown sudoers rule, robot setup steps |
 | `docs/` | Handover, architecture, plan, to-do list |
 

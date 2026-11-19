@@ -23,7 +23,8 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
-OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide"}
+OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
+                    "leader", "wave"}
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide"}  # also need the engineer PIN
 
 
@@ -134,6 +135,10 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             call = lambda: r.wizard(str(msg.get("step")), on, name, int(msg.get("seconds") or 20))  # noqa: E731
         elif t == "wizard_decide":
             call = lambda: r.wizard_decide(str(msg.get("step")), str(msg.get("status")), name)  # noqa: E731
+        elif t == "leader":
+            call = lambda: r.leader(on, str(msg.get("side", "right")), name)  # noqa: E731
+        elif t == "wave":
+            call = lambda: r.wave(str(msg.get("side", "right")), name)  # noqa: E731
         elif t == "teleop":
             call = lambda: r.teleop(str(msg.get("side")), on, name)  # noqa: E731
         elif t == "arm":
@@ -252,6 +257,9 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                             state["robot"].event(who(cid), "unlocked engineer tools")
                             steps = await asyncio.to_thread(state["robot"].wizard_steps)
                             await send(cid, {"t": "wizard_steps", "steps": steps})
+                elif t == "leader_pos":  # leader arm on the laptop, about 30 per second: fast path
+                    if cid == ctrl.operator and not ctrl.estop:
+                        state["robot"].leader_pos(str(msg.get("side", "right")), msg.get("raw"))
                 elif t == "talk":  # hold-to-talk: fast, no thread needed
                     if cid == ctrl.operator and not ctrl.estop:
                         ok, text = state["robot"].talk(bool(msg.get("on")))

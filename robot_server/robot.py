@@ -11,6 +11,8 @@ app did, with stdin closed and output captured for the page:
   voice     ros2 run so101_base voice_cmd   push-to-talk voice driving (Korean or English)
   servo     so101_servo_tester.Bus          scan / torque / move / change ID (servo_tool.py)
   wizard    hw_test_wizard.Wizard.t_<step>  one step of the 13-step check (wizard_runner.py)
+  bridge    twin_bridge.py                  follower arm driven by target angles: the leader arm on the
+                                            laptop (Web Serial) and the wave. Limits, speed ramp, deadman
 
 In mock mode the same buttons start harmless stand-in commands.
 """
@@ -18,9 +20,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -58,6 +62,26 @@ WIZARD_USES = {
     "camera_uvc": {"cam:top"}, "gamepad": {"/dev/input/js0"}, "wheels": {"/dev/so101_base"}, "mecanum_floor": {"/dev/so101_base"},
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
+JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]  # servo IDs 1..6
+BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
+HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
+
+
+def leader_to_target(cal: dict, raw: list) -> dict:
+    """Leader servo positions (raw ticks, IDs 1..6) -> twin_bridge target, the same maths as LeRobot
+    (motors_bus._normalize): joints in degrees, 0 = middle of the calibrated range; gripper 0..100 %."""
+    out = {}
+    for i, j in enumerate(JOINTS):
+        c, v = cal[j], float(raw[i])
+        lo, hi = c["range_min"], c["range_max"]
+        if j == "gripper":
+            n = (min(hi, max(lo, v)) - lo) / (hi - lo) * 100.0
+            out[j] = round(100.0 - n if c.get("drive_mode") else n, 2)
+        else:
+            out[j] = round((v - (lo + hi) / 2.0) * 360.0 / 4095.0, 2)
+    return out
+
+
 SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p device:=auto -p output_topic:=/cmd_vel_raw "
@@ -87,6 +111,14 @@ class Robot:
         self._wizard_steps: list[dict] | None = None
         self._wizard_running: str | None = None
         self.wizard_results: dict[str, dict] = {}
+        self.bridge_side: str | None = None
+        self.bridge_mode: str | None = None
+        self.leader_cal: dict | None = None
+        self.leader_rx, self.leader_last, self.leader_deg = 0, 0.0, None
+        self._seq = 0
+        self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._wave_stop = threading.Event()
+        self._wave_thread: threading.Thread | None = None
         self.refresh_cameras()
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
@@ -106,7 +138,9 @@ class Robot:
             if cam is None or cam.device != dev:
                 if cam:
                     cam.pause("refresh")
-                cam = Camera(key, dev, c.get("fourcc"))
+                wrist = key != "top"  # hand cameras: smaller and slower, MJPG so two webcams fit on USB 2
+                cam = Camera(key, dev, c.get("fourcc") or ("MJPG" if wrist else None),
+                             size=(320, 240) if wrist else (480, 360), fps=8.0 if wrist else 10.0)
                 self.cams[key] = cam
             self.jobs.holders[f"cam:{key}"] = (lambda k=key: self.cams[k].pause("job"),
                                                lambda k=key: self.cams[k].resume())
@@ -410,12 +444,133 @@ class Robot:
         res["t"] = time.time()
         self.wizard_results[step] = res
 
+    # ------------------------------------------- leader arm on the laptop, wave
+    def _bridge_start(self, side: str, mode: str, who: str) -> tuple[bool, str]:
+        if side not in ("right", "left"):
+            return False, "Unknown arm."
+        if self.jobs.running("bridge"):
+            if self.bridge_side == side and self.bridge_mode == mode:
+                return True, ""
+            return False, "The arm is busy (leader arm or wave). Stop it first."
+        why = self._arm_ok(side)
+        if why:
+            return False, why
+        missing = self._missing([f"{side}_follower"])
+        if missing:
+            return False, "Not connected: " + ", ".join(missing)
+        if self.mock:
+            cmd = self._mock_cmd(f"twin_bridge {side} ({mode})")
+        else:
+            cmd = [str(self.venv / "bin" / "python"), str(self.so101 / "twin_bridge.py"), "--arms", side,
+                   "--to", "127.0.0.1:5005", "--listen", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}", "--allow-from", "127.0.0.1",
+                   "--ramp", "90", "--deadman", "0.5", "--status-json", "--quiet"]
+        ok, msg = self._start("bridge", JobSpec(cmd, frozenset({PORT[f"{side}_follower"]}), cwd=str(self.so101) if not self.mock else None,
+                                                env=self._venv_env(), label=f"{mode} {side} arm", stop_wait=8.0), who)
+        if ok:
+            self.bridge_side, self.bridge_mode = side, mode
+            self.leader_rx, self.leader_last = 0, 0.0
+        return ok, msg
+
+    def _bridge_send(self, side: str, target: dict) -> None:
+        self._seq += 1
+        pkt = {"cmd": "target", "t": time.time(), "seq": self._seq, "units": "deg", "arms": {side: target}}
+        try:
+            self._udp.sendto(json.dumps(pkt).encode(), BRIDGE_ADDR)
+        except OSError:
+            pass
+
+    def _bridge_status(self) -> dict | None:
+        """Last '@STATUS {json}' line of the bridge (current joint angles, state)."""
+        j = self.jobs.get("bridge")
+        if not j:
+            return None
+        for line in reversed(j.lines):
+            if line.startswith("@STATUS "):
+                try:
+                    return json.loads(line[8:])
+                except ValueError:
+                    return None
+        return None
+
+    def leader(self, on: bool, side: str, who: str) -> tuple[bool, str]:
+        if not on:
+            if self.bridge_mode == "leader":
+                return self._stop_job("bridge", who)
+            return True, ""
+        f = HF_CALIB / "teleoperators" / "so_leader" / f"{side}_leader.json"
+        try:
+            self.leader_cal = json.loads(f.read_text())
+        except (OSError, ValueError):
+            if not self.mock:
+                return False, f"Leader calibration not found: {f}"
+            self.leader_cal = None
+        return self._bridge_start(side, "leader", who)
+
+    def leader_pos(self, side: str, raw: object) -> None:
+        """Called about 30 times per second while the leader arm streams. Never blocks."""
+        if self.bridge_mode != "leader" or self.bridge_side != side or not self.jobs.running("bridge"):
+            return
+        if not isinstance(raw, list) or len(raw) != 6 or not all(isinstance(v, (int, float)) and 0 <= v <= 4095 for v in raw):
+            return
+        self.leader_rx += 1
+        self.leader_last = time.monotonic()
+        if self.leader_cal is None:  # mock mode without calibration
+            return
+        self.leader_deg = leader_to_target(self.leader_cal, raw)
+        self._bridge_send(side, self.leader_deg)
+
+    def wave(self, side: str, who: str) -> tuple[bool, str]:
+        """A small hello from the arm's current pose: wrist waves, gripper opens and closes, back to start."""
+        if self._wave_thread and self._wave_thread.is_alive():
+            return False, "Already waving."
+        ok, msg = self._bridge_start(side, "wave", who)
+        if not ok:
+            return ok, msg
+        self._wave_stop.clear()
+        self._wave_thread = threading.Thread(target=self._wave_run, args=(side, who), daemon=True)
+        self._wave_thread.start()
+        return True, "Waving."
+
+    def _wave_run(self, side: str, who: str) -> None:
+        try:
+            start = None
+            t_end = time.monotonic() + 20  # the bridge needs a few seconds to connect to the arm
+            while time.monotonic() < t_end and not self._wave_stop.is_set():
+                st = self._bridge_status()
+                if self.mock:
+                    start = {j: 0.0 for j in JOINTS}
+                    break
+                if st and st.get("arms", {}).get(side, {}).get("obs"):
+                    start = dict(st["arms"][side]["obs"])
+                    break
+                time.sleep(0.2)
+            if start is None:
+                self.event(who, "wave: the arm did not answer")
+                return
+            period, cycles, rate = 1.6, 3, 30.0
+            t0 = time.monotonic()
+            while not self._wave_stop.is_set():
+                t = time.monotonic() - t0
+                if t > period * cycles + 1.2:
+                    break
+                a = math.sin(2 * math.pi * t / period) if t < period * cycles else 0.0
+                tgt = dict(start)
+                tgt["wrist_flex"] = start["wrist_flex"] + 20.0 * a
+                tgt["gripper"] = max(0.0, min(100.0, start["gripper"] + 25.0 * a))
+                if not self.mock:
+                    self._bridge_send(side, tgt)
+                time.sleep(1.0 / rate)
+        finally:
+            if self.bridge_mode == "wave":
+                self.jobs.stop("bridge")  # torque stays on: the arm holds where it is
+
     # --------------------------------------------------------------- E-STOP
     def on_estop(self, who: str) -> None:
         """Stop everything that can move by itself. Teleop stays: a person holds the leader arm."""
         if self.ros is not None and hasattr(self.ros, "publish_str") and self.jobs.running("voice"):
             self.ros.publish_str("/voice/say", "멈춰")
-        stopped = self.jobs.stop_all(lambda j: j.name in ("skill", "voice", "wizard"))
+        self._wave_stop.set()
+        stopped = self.jobs.stop_all(lambda j: j.name in ("skill", "voice", "wizard", "bridge"))
         if stopped:
             self.event(who, "E-STOP stopped " + ", ".join(stopped))
 
@@ -510,10 +665,14 @@ class Robot:
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "ports": [] if self.mock else self.serial_ports(),
             "servo_scan": self.servo_scan, "wizard": self.wizard_results,
+            "bridge": {"running": self.jobs.running("bridge"), "side": self.bridge_side, "mode": self.bridge_mode,
+                       "state": (self._bridge_status() or {}).get("state"), "rx": self.leader_rx,
+                       "fresh": time.monotonic() - self.leader_last < 0.5 if self.leader_last else False},
         }
 
     def close(self) -> None:
         self._stop.set()
+        self._wave_stop.set()
         stopped = self.jobs.stop_all()
         log.info("server stopping; stopped: %s", ", ".join(stopped) or "nothing running")
         for cam in self.cams.values():
