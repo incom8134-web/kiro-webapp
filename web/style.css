@@ -83,8 +83,8 @@ main { display: grid; grid-template-columns: 1fr var(--dock-w); min-height: 0; }
 .stage { display: flex; flex-direction: column; gap: 2px; background: var(--bg); min-height: 0; overflow: hidden; padding: 0; container-type: size; }
 .view { position: relative; overflow: hidden; background: var(--view); min-height: 0; }
 .view.main { flex: 1 1 auto; }
-.wrists { flex: none; height: min(37.5cqw, 44cqh); display: grid; gap: 2px; justify-content: center;
-  grid-template-columns: repeat(2, minmax(0, calc(min(37.5cqw, 44cqh) * 4 / 3))); }
+.wrists { flex: none; height: min(37.5cqw, 36cqh); display: grid; gap: 2px; justify-content: center;
+  grid-template-columns: repeat(2, minmax(0, calc(min(37.5cqw, 36cqh) * 4 / 3))); }
 .view img.cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .view .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: 13px; text-align: center; padding: 12px;
   background: repeating-linear-gradient(135deg, #07080a 0 14px, #0b0c0f 14px 28px); }
@@ -95,16 +95,18 @@ main { display: grid; grid-template-columns: 1fr var(--dock-w); min-height: 0; }
 .inset .head .mute { font-weight: 400; font-variant-numeric: tabular-nums; }
 .inset canvas { display: block; width: 100%; height: 196px; }
 
-.speeds { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; border-radius: var(--radius); overflow: hidden; }
+/* control bar under the arm cameras: Move stick, speeds, Turn stick. Nothing covers the video. */
+.pad { flex: none; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; padding: 10px 22px; background: var(--panel); border-top: 1px solid var(--line); }
+.pad-mid { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; }
+.speeds { display: flex; border-radius: var(--radius); overflow: hidden; background: var(--raise); border: 1px solid var(--line); }
 .speeds div { padding: 7px 14px; min-width: 96px; }
-.speeds div + div { border-left: 1px solid rgba(255, 255, 255, .08); }
+.speeds div + div { border-left: 1px solid var(--line); }
 .speeds span { display: block; font-size: 10px; color: var(--mute); text-transform: uppercase; letter-spacing: .08em; }
 .speeds b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hint { position: absolute; left: 50%; bottom: 88px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.hint { padding: 5px 14px; border-radius: 999px; font-size: 12px; white-space: nowrap; background: var(--raise-2); color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
-.stick-wrap { position: absolute; bottom: 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: rgba(255, 255, 255, .7); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
-.stick-wrap.l { left: 18px; } .stick-wrap.r { right: 18px; }
-.stick { width: 148px; height: 148px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02) 70%); position: relative; touch-action: none; backdrop-filter: blur(4px); }
+.stick-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--mute); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
+.stick { width: 128px; height: 128px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02) 70%); position: relative; touch-action: none; backdrop-filter: blur(4px); }
 .stick::before, .stick::after { content: ""; position: absolute; background: rgba(255, 255, 255, .16); }
 .stick::before { left: 50%; top: 14%; bottom: 14%; width: 1px; }
 .stick::after { top: 50%; left: 14%; right: 14%; height: 1px; }
@@ -256,12 +258,14 @@ details summary { cursor: pointer; color: var(--mute); }
   .inset canvas { height: 92px; }
   .inset .head { padding: 4px 8px; }
   .inset .head #pose, .inset .head #scan-src { display: none; }
-  .stick { width: 120px; height: 120px; }
-  .speeds { bottom: auto; top: 8px; left: auto; right: 8px; transform: none; }
-  .speeds div { min-width: 0; padding: 4px 7px; }
+  .stick { width: 112px; height: 112px; }
+  .pad { padding: 10px 12px; gap: 8px; }
+  .speeds { flex-direction: column; }
+  .speeds div { min-width: 0; padding: 3px 8px; }
+  .speeds div + div { border-left: 0; border-top: 1px solid var(--line); }
   .speeds span { font-size: 8px; letter-spacing: .04em; }
   .speeds b { font-size: 14px; }
-  .hint { bottom: 150px; }
+  .hint { white-space: normal; text-align: center; }
   .dock { border-left: 0; border-top: 1px solid var(--line); }
   .tabs { position: sticky; top: 92px; z-index: 4; background: var(--panel); }
   .panels { overflow: visible; }

@@ -40,14 +40,6 @@
         <div class="head"><span><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose" class="mute"></span></div>
         <canvas id="map"></canvas>
       </div>
-      <div id="hint" class="hint glass"></div>
-      <div class="speeds glass">
-        <div><span data-i18n="speed.fwd">Forward m/s</span><b id="vx">0.00</b></div>
-        <div><span data-i18n="speed.side">Sideways m/s</span><b id="vy">0.00</b></div>
-        <div><span data-i18n="speed.turn">Turn rad/s</span><b id="wz">0.00</b></div>
-      </div>
-      <div class="stick-wrap l"><div id="stick-move" class="stick"><div class="knob"></div></div><span data-i18n="stick.move">Move</span></div>
-      <div class="stick-wrap r"><div id="stick-turn" class="stick h"><div class="knob"></div></div><span data-i18n="stick.turn">Turn</span></div>
     </div>
     <div class="wrists">
       <div class="view wrist" data-cam="left_wrist">
@@ -58,6 +50,18 @@
         <img class="cam" alt="" hidden><div class="empty"><span class="msg"></span></div>
         <span class="tag glass" data-i18n="cam.right_wrist">Right hand</span>
       </div>
+    </div>
+    <div class="pad">
+      <div class="stick-wrap"><div id="stick-move" class="stick"><div class="knob"></div></div><span data-i18n="stick.move">Move</span></div>
+      <div class="pad-mid">
+        <div id="hint" class="hint"></div>
+        <div class="speeds">
+          <div><span data-i18n="speed.fwd">Forward m/s</span><b id="vx">0.00</b></div>
+          <div><span data-i18n="speed.side">Sideways m/s</span><b id="vy">0.00</b></div>
+          <div><span data-i18n="speed.turn">Turn rad/s</span><b id="wz">0.00</b></div>
+        </div>
+      </div>
+      <div class="stick-wrap"><div id="stick-turn" class="stick h"><div class="knob"></div></div><span data-i18n="stick.turn">Turn</span></div>
     </div>
   </section>
 
