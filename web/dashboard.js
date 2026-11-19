@@ -141,21 +141,21 @@ function fmtUp(s) {
 
 // --------------------------------------------------------------- tiles
 const TILES = [
-  { key: "speed", icon: "ri-speed-up-line", label: "d.speed", unit: "m/s", fmt: (v) => v.toFixed(2) },
-  { key: "dist", icon: "ri-route-line", label: "d.dist", unit: "m", fmt: (v) => v.toFixed(1) },
-  { key: "nearest", icon: "ri-focus-3-line", label: "d.nearest", unit: "m", fmt: (v) => v.toFixed(2) },
-  { key: "p_in", icon: "ri-flashlight-line", label: "d.power", unit: "W", fmt: (v) => v.toFixed(1) },
-  { key: "cpu", icon: "ri-cpu-line", label: "d.cpu", unit: "%", fmt: (v) => Math.round(v) },
-  { key: "gpu", icon: "ri-brain-line", label: "d.gpu", unit: "%", fmt: (v) => Math.round(v) },
-  { key: "t_cpu", icon: "ri-temp-hot-line", label: "d.temp", unit: "°C", fmt: (v) => v.toFixed(1) },
-  { key: "mem", icon: "ri-hard-drive-2-line", label: "d.mem", unit: "%", fmt: (v) => Math.round(v) },
-  { key: "net", icon: "ri-wifi-line", label: "d.net", unit: "KB/s", fmt: (v) => v.toFixed(1) },
-  { key: "rtt", icon: "ri-signal-wifi-3-line", label: "d.link", unit: "ms", fmt: (v) => Math.round(v) },
+  { key: "speed", label: "d.speed", unit: "m/s", fmt: (v) => v.toFixed(2) },
+  { key: "dist", label: "d.dist", unit: "m", fmt: (v) => v.toFixed(1) },
+  { key: "nearest", label: "d.nearest", unit: "m", fmt: (v) => v.toFixed(2) },
+  { key: "p_in", label: "d.power", unit: "W", fmt: (v) => v.toFixed(1) },
+  { key: "cpu", label: "d.cpu", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "gpu", label: "d.gpu", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "t_cpu", label: "d.temp", unit: "°C", fmt: (v) => v.toFixed(1) },
+  { key: "mem", label: "d.mem", unit: "%", fmt: (v) => Math.round(v) },
+  { key: "net", label: "d.net", unit: "KB/s", fmt: (v) => v.toFixed(1) },
+  { key: "rtt", label: "d.link", unit: "ms", fmt: (v) => Math.round(v) },
 ];
 
 function buildTiles() {
   $("tiles").innerHTML = TILES.map((tl) => `<div class="tile">
-    <span class="k"><i class="${tl.icon}"></i>${esc(t(tl.label))}</span>
+    <span class="k">${esc(t(tl.label))}</span>
     <div class="num"><b id="v-${tl.key}">-</b><i>${tl.unit}</i></div>
     <span class="sub" id="s-${tl.key}"></span></div>`).join("");
 }

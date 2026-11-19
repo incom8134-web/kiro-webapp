@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0a1020">
+<meta name="theme-color" content="#09090b">
 <title>HAEBOT Robot · Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
@@ -30,22 +30,22 @@
 
 <div class="dwrap">
   <details class="liveview" id="d-live">
-  <summary><span><i class="ri-live-line"></i><span data-i18n="d.live">Live view: cameras and lidar</span></span><span class="mute small" id="live-hint"></span></summary>
+  <summary><span><span data-i18n="d.live">Live view: cameras and lidar</span></span><span class="mute small" id="live-hint"></span></summary>
   <div class="quad">
     <section class="qbox" data-cam="top">
-      <div class="qhead"><span><i class="ri-camera-3-line"></i><span data-i18n="cam.top">Main camera</span></span><span class="mute qauto"></span></div>
+      <div class="qhead"><span><span data-i18n="cam.top">Main camera</span></span><span class="mute qauto"></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
     </section>
     <section class="qbox" data-cam="left_wrist">
-      <div class="qhead"><span><i class="ri-webcam-line"></i><span data-i18n="cam.left_wrist">Left hand</span></span><span class="mute qauto"></span></div>
+      <div class="qhead"><span><span data-i18n="cam.left_wrist">Left hand</span></span><span class="mute qauto"></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
     <section class="qbox" data-cam="right_wrist">
-      <div class="qhead"><span><i class="ri-webcam-line"></i><span data-i18n="cam.right_wrist">Right hand</span></span><span class="mute qauto"></span></div>
+      <div class="qhead"><span><span data-i18n="cam.right_wrist">Right hand</span></span><span class="mute qauto"></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
     <section class="qbox">
-      <div class="qhead"><span><i class="ri-radar-line"></i><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
+      <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
       <div class="qbody light"><canvas id="lidar"></canvas></div>
     </section>
   </div>
@@ -54,30 +54,30 @@
   <div class="tiles" id="tiles"></div>
 
   <div class="charts">
-    <section class="chart-card"><div class="dhead"><span><i class="ri-cpu-line"></i><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-bar-chart-2-line"></i><span data-i18n="c.cores">CPU per core</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cores"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-temp-hot-line"></i><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-flashlight-line"></i><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-speed-up-line"></i><span data-i18n="c.speed">Robot speed</span></span><span class="mute">m/s</span></div><div class="chart-box"><canvas id="ch-speed"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-wifi-line"></i><span data-i18n="c.net">Wi-Fi traffic</span></span><span class="mute">KB/s</span></div><div class="chart-box"><canvas id="ch-net"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-radar-line"></i><span data-i18n="c.sides">Nearest object by side</span></span><span class="mute">m</span></div><div class="chart-box"><canvas id="ch-sides"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-battery-2-charge-line"></i><span data-i18n="c.svolt">Servo voltage per board</span></span><span class="mute">V</span></div><div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><i class="ri-temp-hot-line"></i><span data-i18n="c.stemp">Servo temperature per joint</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cores">CPU per core</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cores"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.speed">Robot speed</span></span><span class="mute">m/s</span></div><div class="chart-box"><canvas id="ch-speed"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.net">Wi-Fi traffic</span></span><span class="mute">KB/s</span></div><div class="chart-box"><canvas id="ch-net"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.sides">Nearest object by side</span></span><span class="mute">m</span></div><div class="chart-box"><canvas id="ch-sides"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.svolt">Servo voltage per board</span></span><span class="mute">V</span></div><div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.stemp">Servo temperature per joint</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div></section>
   </div>
 
   <div class="lower">
     <section class="dsec">
-      <h2><i class="ri-database-2-line"></i><span data-i18n="d.servos">Servo boards</span></h2>
+      <h2><span data-i18n="d.servos">Servo boards</span></h2>
       <table class="kv dtable" id="servos"></table>
     </section>
     <section class="dsec">
-      <h2><i class="ri-terminal-box-line"></i><span data-i18n="d.programs">Programs</span></h2>
+      <h2><span data-i18n="d.programs">Programs</span></h2>
       <table class="kv dtable" id="programs"></table>
-      <h2 style="margin-top:18px"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span></h2>
+      <h2 style="margin-top:18px"><span data-i18n="sec.voice">Voice</span></h2>
       <p class="big-quote" id="voice">-</p>
     </section>
     <section class="dsec">
-      <h2><i class="ri-pulse-line"></i><span data-i18n="sec.log">Activity</span></h2>
+      <h2><span data-i18n="sec.log">Activity</span></h2>
       <ul id="log" class="log"></ul>
     </section>
   </div>

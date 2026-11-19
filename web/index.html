@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0a1020">
+<meta name="theme-color" content="#09090b">
 <title>HAEBOT Robot</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
@@ -87,12 +87,12 @@
       <!-- DRIVE -->
       <section class="panel" data-panel="drive">
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-steering-2-line"></i></span><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
+          <div class="row head"><h3><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
             <button id="base-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="base-err" class="err small" hidden></p>
         </div>
         <div class="card keys">
-          <div class="row head"><h3><span class="badge"><i class="ri-keyboard-line"></i></span><span data-i18n="k.title">Keyboard and gamepad</span></h3></div>
+          <div class="row head"><h3><span data-i18n="k.title">Keyboard and gamepad</span></h3></div>
           <div class="keyrow"><span class="caps"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span data-i18n="k.move">move</span></div>
           <div class="keyrow"><span class="caps"><kbd>Q</kbd><kbd>E</kbd></span><span data-i18n="k.turn">turn</span></div>
           <div class="keyrow"><span class="caps"><kbd><i class="ri-arrow-up-line"></i></kbd><kbd><i class="ri-arrow-down-line"></i></kbd><kbd><i class="ri-arrow-left-line"></i></kbd><kbd><i class="ri-arrow-right-line"></i></kbd></span><span data-i18n="k.arrows">drive and turn</span></div>
@@ -105,18 +105,18 @@
       <!-- ARMS -->
       <section class="panel" data-panel="arms">
         <div class="card">
-          <div class="row head"><h3><span class="badge emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
+          <div class="row head"><h3><span class="emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
           <p id="arms-err" class="err small" hidden></p>
         </div>
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-usb-line"></i></span><span data-i18n="leader.title">Leader arm</span></h3></div>
+          <div class="row head"><h3><span data-i18n="leader.title">Leader arm</span></h3></div>
           <button id="leader-btn" class="btn wide big" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
           <p id="leader-st" class="small mute"></p>
           <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
         </div>
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-brain-line"></i></span><span data-i18n="sec.skills">Skills</span></h3><span id="skill-st" class="st"></span></div>
+          <div class="row head"><h3><span data-i18n="sec.skills">Skills</span></h3><span id="skill-st" class="st"></span></div>
           <div id="skills"></div>
           <pre id="skill-tail" class="tail" hidden></pre>
         </div>
@@ -125,7 +125,7 @@
       <!-- VOICE -->
       <section class="panel" data-panel="voice">
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-mic-line"></i></span><span data-i18n="sec.voice">Voice</span></h3><span id="voice-st" class="st"></span><span class="grow"></span>
+          <div class="row head"><h3><span data-i18n="sec.voice">Voice</span></h3><span id="voice-st" class="st"></span><span class="grow"></span>
             <button id="voice-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="voice-note" class="small mute" hidden></p>
           <div id="voice-on" hidden>
@@ -143,7 +143,7 @@
       <!-- SYSTEM -->
       <section class="panel" data-panel="system">
         <div class="card">
-          <div class="row head"><h3><span class="badge"><i class="ri-cpu-line"></i></span><span data-i18n="sec.health">System</span></h3><span id="sys-sum" class="st"></span></div>
+          <div class="row head"><h3><span data-i18n="sec.health">System</span></h3><span id="sys-sum" class="st"></span></div>
           <table class="kv" id="health"></table>
           <div class="row" style="margin-top:12px">
             <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><i class="ri-restart-line"></i><span data-i18n="h.reboot">Restart</span></button>
@@ -153,7 +153,7 @@
         </div>
 
         <details class="card fold" id="sec-eng">
-          <summary class="row head"><h3><span class="badge"><i class="ri-tools-line"></i></span><span data-i18n="sec.eng">Engineer</span></h3><span id="eng-st" class="st"></span></summary>
+          <summary class="row head"><h3><span data-i18n="sec.eng">Engineer</span></h3><span id="eng-st" class="st"></span></summary>
           <form id="eng-box" class="row" autocomplete="off">
             <input id="eng-pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="eng.pin">
             <button class="btn" type="submit" data-op><i class="ri-lock-unlock-line"></i><span data-i18n="eng.unlock">Unlock</span></button>
