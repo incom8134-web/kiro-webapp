@@ -367,8 +367,19 @@ function renderLists() {
 }
 
 // ---------------------------------------------------------------- cameras
+const liveOpen = () => $("d-live").open;
 function renderCams() {
   const cams = (st.robot && st.robot.cams) || [];
+  if (!liveOpen()) {   // closed: stop every stream, so the cameras use no Wi-Fi
+    if (st.cam) { $("cam").removeAttribute("src"); st.cam = null; }
+    for (const v of document.querySelectorAll(".dwrists .view[data-cam]")) {
+      if (v.dataset.on) { v.querySelector("img").removeAttribute("src"); delete v.dataset.on; }
+    }
+    const n = cams.filter((c) => c.present).length;
+    $("live-hint").textContent = t("d.livehint", { n });
+    return;
+  }
+  $("live-hint").textContent = "";
   // main camera
   const cam = cams.find((c) => c.present && c.key === "top");
   const img = $("cam");
@@ -405,6 +416,7 @@ $("cam").addEventListener("error", () => { st.cam = null; $("cam").hidden = true
 
 // ----------------------------------------------------------------- lidar
 function drawLidar() {
+  if (!liveOpen()) return;
   const c = $("lidar");
   const dpr = window.devicePixelRatio || 1;
   const w = c.clientWidth, h = c.clientHeight;
@@ -449,6 +461,13 @@ function drawLidar() {
   g.restore();
 }
 window.addEventListener("resize", drawLidar);
+
+// The live view (cameras and lidar) opens and closes; the choice is remembered. Closed by default.
+try { $("d-live").open = localStorage.getItem("kiro-live") === "1"; } catch (e) { /* ignore */ }
+$("d-live").addEventListener("toggle", () => {
+  try { localStorage.setItem("kiro-live", $("d-live").open ? "1" : "0"); } catch (e) { /* ignore */ }
+  renderCams(); drawLidar();
+});
 
 buildTiles();
 buildCharts();

@@ -113,6 +113,7 @@ main { grid-row: 3; }
   box-shadow: 0 0 0 3px rgba(255, 59, 48, .22), 0 6px 18px rgba(255, 59, 48, .35);
 }
 .estop i { font-size: 18px; }
+.estop span { white-space: nowrap; }
 .estop:active { transform: scale(.97); }
 .estop.on { background: #fff; color: var(--stop); box-shadow: 0 0 0 3px var(--stop), 0 0 26px rgba(255, 59, 48, .6); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 3px var(--stop), 0 0 6px rgba(255, 59, 48, .3); } }
@@ -127,8 +128,13 @@ main { display: grid; grid-template-columns: 1fr var(--dock-w); min-height: 0; }
 .stage { display: flex; flex-direction: column; gap: 10px; padding: 10px; background: var(--bg); min-height: 0; overflow: hidden; container-type: size; }
 .view { position: relative; overflow: hidden; background: var(--view); min-height: 0; border-radius: var(--radius); }
 .view.main { flex: 1 1 auto; }
-.wrists { flex: none; height: min(calc((100cqw - 30px) * .375), 34cqh); display: grid; gap: 10px; justify-content: center;
-  grid-template-columns: repeat(2, minmax(0, calc(min(calc((100cqw - 30px) * .375), 34cqh) * 4 / 3))); }
+/* arm cameras inside the main camera: 4:3 tiles in the bottom corners, sized with the screen */
+.pips { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; pointer-events: none; }
+.view.pip { position: relative; flex: none; width: clamp(140px, 24cqw, 360px); aspect-ratio: 4 / 3; border-radius: 12px; pointer-events: auto;
+  border: 1px solid rgba(255, 255, 255, .18); box-shadow: 0 10px 28px rgba(0, 0, 0, .5); }
+.view.pip .empty { gap: 4px; font-size: 12px; }
+.view.pip .empty i { font-size: 22px; }
+.view.pip .tag { top: 8px; left: 8px; font-size: 10px; padding: 3px 8px; }
 .view img.cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .view .empty { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; color: #8b97ad; font-size: 13px; text-align: center; padding: 12px;
   background: radial-gradient(circle at 50% 40%, #131d33, #070b15 75%); }
@@ -136,6 +142,7 @@ main { display: grid; grid-template-columns: 1fr var(--dock-w); min-height: 0; }
 .view .tag { position: absolute; left: 10px; top: 10px; display: inline-flex; align-items: center; gap: 6px; color: #fff; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px; letter-spacing: .03em; background: rgba(5, 10, 22, .62); backdrop-filter: blur(8px); }
 .view .tag i { font-size: 13px; color: var(--accent); }
 .view.main > .tag { left: auto; right: 10px; }
+@container (max-height: 420px) { .view.pip { width: clamp(120px, 20cqw, 300px); } }
 
 .inset { position: absolute; top: 10px; left: 10px; width: 250px; border-radius: 12px; overflow: hidden; }
 .inset .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11px; font-weight: 650; }
@@ -303,11 +310,13 @@ details summary { cursor: pointer; color: var(--mute); }
   .toplink span { display: none; }
   .iconbtn, .toplink { padding: 0 9px; margin-right: 4px; }
   .lang { margin-right: 6px; }
-  .estop { min-width: 104px; height: 40px; padding: 0 14px; }
+  .estop { min-width: 96px; height: 40px; padding: 0 14px; font-size: 14px; }
+  .estop i { display: none; }
   main { grid-template-columns: 1fr; }
   .stage { height: auto; container-type: inline-size; padding: 8px; gap: 8px; }
-  .view.main { height: 56vw; min-height: 240px; flex: none; }
-  .wrists { height: calc((100cqw - 8px) * .375); gap: 8px; grid-template-columns: 1fr 1fr; }
+  .view.main { height: 72vw; min-height: 280px; flex: none; }
+  .pips { left: 8px; right: 8px; bottom: 8px; }
+  .view.pip { width: 34cqw; border-radius: 10px; }
   .inset { width: 118px; top: 8px; left: 8px; }
   .inset canvas { height: 90px; }
   .inset .head { padding: 4px 8px; }
@@ -329,14 +338,23 @@ details summary { cursor: pointer; color: var(--mute); }
 body.dash { overflow: auto; height: auto; min-height: 100%; display: block; }
 body.dash .bar { grid-template-columns: auto 1fr auto auto auto auto; height: var(--bar-h); position: sticky; top: 0; z-index: 5; }
 .dwrap { padding: 14px; display: grid; gap: 14px; }
+.liveview { background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.liveview > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; cursor: pointer; font-weight: 750; font-size: 13px; color: var(--ink); }
+.liveview > summary::-webkit-details-marker { display: none; }
+.liveview > summary > span:first-child { display: inline-flex; align-items: center; gap: 10px; }
+.liveview > summary i { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--grad); color: #fff; font-size: 15px; }
+.liveview > summary::after { content: "\ea4e"; font-family: remixicon; font-size: 20px; color: var(--mute); transition: transform .15s; }
+.liveview[open] > summary::after { transform: rotate(180deg); }
+.liveview > .dgrid { padding: 0 14px 14px; }
+.liveview .dview { box-shadow: none; }
 .dgrid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; }
 .dview, .dsec, .chart-card, .tile { background: var(--raise); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
 .dview { display: flex; flex-direction: column; overflow: hidden; }
 .dhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
 .dhead i { color: var(--accent); margin-right: 6px; font-size: 15px; vertical-align: -2px; }
 .dhead .mute { font-weight: 500; text-transform: none; letter-spacing: 0; }
-.dbody { position: relative; height: min(44vh, 460px); background: var(--view); }
-.dbody.light { background: transparent; flex: 1; height: auto; min-height: 320px; }
+.dbody { position: relative; height: min(32vh, 320px); background: var(--view); }
+.dbody.light { background: transparent; flex: 1; height: auto; min-height: 260px; }
 .dbody img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .dbody .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8b97ad; }
 .dbody canvas { display: block; width: 100%; height: 100%; }

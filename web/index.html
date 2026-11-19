@@ -30,20 +30,21 @@
     <div class="view main" data-cam="top">
       <img class="cam" alt="" hidden>
       <div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div>
-      <span class="tag"><i class="ri-camera-3-line"></i><span data-i18n="cam.top">Main camera</span></span>
+      <span class="tag"><i class="ri-camera-3-line"></i><span class="tagtext" data-i18n="cam.top">Main camera</span></span>
       <div class="inset glass">
         <div class="head"><span><i class="ri-radar-line"></i><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose" class="mute"></span></div>
         <canvas id="map"></canvas>
       </div>
-    </div>
-    <div class="wrists">
-      <div class="view wrist" data-cam="left_wrist">
-        <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
-        <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.left_wrist">Left hand</span></span>
-      </div>
-      <div class="view wrist" data-cam="right_wrist">
-        <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
-        <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.right_wrist">Right hand</span></span>
+      <!-- the arm cameras, picture-in-picture: left hand bottom-left, right hand bottom-right -->
+      <div class="pips">
+        <div class="view pip" data-cam="left_wrist">
+          <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
+          <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.left_wrist">Left hand</span></span>
+        </div>
+        <div class="view pip" data-cam="right_wrist">
+          <img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
+          <span class="tag"><i class="ri-webcam-line"></i><span class="tagtext" data-i18n="cam.right_wrist">Right hand</span></span>
+        </div>
       </div>
     </div>
     <div class="pad">

@@ -28,6 +28,8 @@
 <div id="banner" class="banner" hidden></div>
 
 <div class="dwrap">
+  <details class="liveview" id="d-live">
+  <summary><span><i class="ri-live-line"></i><span data-i18n="d.live">Live view: cameras and lidar</span></span><span class="mute small" id="live-hint"></span></summary>
   <div class="dgrid">
     <section class="dview">
       <div class="dhead"><span><i class="ri-camera-3-line"></i><span data-i18n="d.camera">Camera</span></span><span id="cam-name" class="mute"></span></div>
@@ -45,6 +47,7 @@
       <div class="dbody light"><canvas id="lidar"></canvas></div>
     </section>
   </div>
+  </details>
 
   <div class="tiles" id="tiles"></div>
 

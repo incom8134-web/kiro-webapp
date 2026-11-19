@@ -520,7 +520,7 @@ function renderCams() {
   for (const view of document.querySelectorAll(".view[data-cam]")) {
     const key = view.dataset.cam;
     const c = cams.find((x) => x.key === key);
-    const img = view.querySelector("img.cam"), empty = view.querySelector(".empty"), msg = view.querySelector(".msg");
+    const img = view.querySelector(":scope > img.cam"), empty = view.querySelector(":scope > .empty"), msg = view.querySelector(":scope > .empty .msg");
     const why = !c ? t("cam.notconfigured") : !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : "";
     if (why) {
       if (state.cams[key]) { img.removeAttribute("src"); state.cams[key] = false; }
@@ -547,7 +547,7 @@ function renderCams() {
       img.src = `/camera/${encodeURIComponent(key)}.mjpg?t=${Date.now()}`;
     }
     img.hidden = false; empty.hidden = true;
-    const tag = view.querySelector(".tagtext");
+    const tag = view.querySelector(":scope > .tag .tagtext");
     if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
   }
 }
