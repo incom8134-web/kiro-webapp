@@ -452,6 +452,8 @@ def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
     r = Robot(cfg, MockBase())
     try:
         assert r.base(True, "t")[0]
-        assert r.jobs.get("base").spec.env["TOUCH_DIST"] == "0.05"
+        env = r.jobs.get("base").spec.env
+        assert env["TOUCH_DIST"] == "0" and env["COVERED_RATIO"] == "0"     # the two strict rules are off
+        assert float(env["STOP_DIST"]) > 0                                   # the distance stop is not
     finally:
         r.close()
