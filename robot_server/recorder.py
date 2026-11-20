@@ -124,7 +124,7 @@ class Recorder:
         cfg = robot.cfg
         default = "~/.cache/kiro-webapp/mock_datasets" if robot.mock else os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")
         self.root = Path(cfg.datasets_dir or default).expanduser()
-        self.backups = Path(cfg.backups_dir).expanduser()
+        self.backups = Path(cfg.backups_dir or ("~/.cache/kiro-webapp/" + ("mock_" if robot.mock else "") + "dataset_backups")).expanduser()
         self.lock = threading.Lock()
         self.starting = False
         self.session: dict | None = None

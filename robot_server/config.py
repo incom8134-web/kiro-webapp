@@ -60,7 +60,7 @@ class Config:
     # Recorded datasets (Studio page). "" = the LeRobot folder (HF_LEROBOT_HOME, as the old recorder uses)
     # on the robot, and a separate pretend folder in mock mode, so mock recordings never mix with real ones.
     datasets_dir: str = ""
-    backups_dir: str = "~/.cache/kiro-webapp/dataset_backups"  # copy of a dataset before episodes are added
+    backups_dir: str = ""  # copy of a dataset before episodes are added ("" = ~/.cache/kiro-webapp/dataset_backups, mock_ in mock mode)
     skill_seconds: float = 20.0
     health_period: float = 3.0
     # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
