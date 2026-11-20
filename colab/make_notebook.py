@@ -30,7 +30,7 @@ You need the dataset package from the robot: **Studio > Training > Download** gi
 1. **Put both files in Google Drive**: drive.google.com > My Drive > folder `SO101` > folder `데이터셋_업로드` (make the folders if they are missing; putting the files straight into My Drive also works).
 2. **GPU**: menu **Runtime > Change runtime type > T4 GPU > Save**.
 3. **Run**: menu **Runtime > Run all** (Ctrl+F9). If Colab warns that the notebook is not from Google, press **Run anyway**. When Google asks to connect Google Drive, allow it.
-4. **Wait**: 20,000 steps take about 1 to 3 hours on a free T4. Keep this tab open. If Colab disconnects, press **Run all** again: training continues from the last checkpoint saved in Drive.
+4. **Wait**: 20,000 steps take about 3 to 4 hours on a free T4 (the first robot skill took 3.5 hours, with two disconnects). Keep this tab open. If Colab disconnects, press **Run all** again: training continues from the last checkpoint saved in Drive (one every 2,000 steps).
 5. **Model**: at the end the zip is in Drive: My Drive > `SO101` > `outputs` > `<name>_act_pretrained_model.zip`. Download it from drive.google.com (right click > Download).
 6. **Install**: connect to the robot's Wi-Fi again, open **Studio > Training > Upload a trained model**, and choose the zip. The skill then appears under **Autonomous skills** on the Arms tab.
 
@@ -45,7 +45,7 @@ You need the dataset package from the robot: **Studio > Training > Download** gi
 1. **Google Drive 에 두 파일 올리기**: drive.google.com > 내 드라이브 > `SO101` 폴더 > `데이터셋_업로드` 폴더 (없으면 만드세요. 내 드라이브 바로 아래에 두어도 됩니다).
 2. **GPU**: 메뉴 **런타임 > 런타임 유형 변경 > T4 GPU > 저장**.
 3. **실행**: 메뉴 **런타임 > 모두 실행** (Ctrl+F9). Google 이 만든 노트북이 아니라는 경고가 나오면 **무시하고 실행**. Google Drive 연결을 물으면 허용하세요.
-4. **기다리기**: 무료 T4 에서 20,000 스텝은 약 1~3 시간. 이 탭을 열어 두세요. 연결이 끊기면 **모두 실행** 을 다시 누르면 Drive 에 저장된 마지막 체크포인트부터 이어서 학습합니다.
+4. **기다리기**: 무료 T4 에서 20,000 스텝은 약 3~4 시간 (첫 스킬은 3.5 시간, 연결 끊김 2번). 이 탭을 열어 두세요. 연결이 끊기면 **모두 실행** 을 다시 누르면 Drive 에 저장된 마지막 체크포인트 (2,000 스텝마다) 부터 이어서 학습합니다.
 5. **모델**: 끝나면 zip 이 Drive 의 내 드라이브 > `SO101` > `outputs` > `<이름>_act_pretrained_model.zip` 에 있습니다. drive.google.com 에서 내려받으세요 (오른쪽 클릭 > 다운로드).
 6. **설치**: 로봇 Wi-Fi 에 다시 연결하고 **스튜디오 > 학습 > 학습된 모델 올리기** 에서 zip 을 고르세요. 팔 탭의 **자율 동작** 에 스킬이 나타납니다.
 
@@ -277,7 +277,7 @@ md(r"""
 - **Disconnected**: open the notebook again and Run all. Cell 4 takes the last checkpoint from Drive and continues. To start from zero, delete `SO101/outputs/<name>_<date>_act/` in Drive. / 연결 끊김: 다시 모두 실행. 처음부터 하려면 Drive 의 `SO101/outputs/<이름>_<날짜>_act/` 삭제.
 - **`cannot import name 'FqnToConfig'`** in cell 4: cell 3 removes torchao by itself; with an old copy of this notebook, run `pip uninstall -y torchao` in a new cell, then cell 4 again.
 - **pip errors**: LeRobot 0.6.1 installs on Python 3.12 and 3.13. If torch changed during the install, use Runtime > Restart session once and run from cell 3.
-- **Speed**: ACT with batch 8 runs about 0.2 to 0.6 s per step on a T4, so 20,000 steps take 1 to 3 hours. The dataset is unpacked on the local disk (/content), so Drive speed does not matter.
+- **Speed**: ACT with batch 8 runs about 0.5 to 0.6 s per step on a T4, so 20,000 steps take 3 to 4 hours (the first skill: 3.5 hours). Free GPU time is limited; if Colab gives no GPU, continue another day: Run all picks up the checkpoint in Drive. The dataset is unpacked on the local disk (/content), so Drive speed does not matter.
 - **Drive space**: Drive keeps only the newest checkpoint (about 0.6 GB) and the model zip (about 0.2 GB).
 - **The zip download from Colab breaks**: download it from drive.google.com instead (USE_DRIVE on). / Colab 에서 내려받기가 끊기면 drive.google.com 에서 받으세요.
 """)
