@@ -51,8 +51,10 @@ SIDES = ("right", "left", "both")
 ARM_ACTIONS = {"fold": "--tuck", "hold": "--hold", "release": "--release"}
 ROS_SETUP = "unset PYTHONPATH; source /opt/ros/jazzy/setup.bash; source \"$HOME/ros2_ws/install/setup.bash\"; "
 # Lidar guard distances (m), the two profiles of the old base panel. Passed to run_base_teleop.sh.
-GUARD_PROFILES = {"close": {"STOP_DIST": "0.12", "SLOW_DIST": "0.12", "SIDE_STOP": "0.15"},
-                  "safe": {"STOP_DIST": "0.20", "SLOW_DIST": "0.30", "SIDE_STOP": "0.32"}}
+# TOUCH_DIST: the old guard stops everything when any point is this close to the lidar ("contact").
+# 0.05 since 20 Nov 2026 (user's choice): in its new place the lidar sees a part of the robot 6 cm away.
+GUARD_PROFILES = {"close": {"STOP_DIST": "0.12", "SLOW_DIST": "0.12", "SIDE_STOP": "0.15", "TOUCH_DIST": "0.05"},
+                  "safe": {"STOP_DIST": "0.20", "SLOW_DIST": "0.30", "SIDE_STOP": "0.32", "TOUCH_DIST": "0.05"}}
 # Devices each check-wizard step opens (so it never shares a port or camera with a running job)
 WIZARD_USES = {
     "devices": set(), "servos": {"/dev/so101_right_follower", "/dev/so101_left_follower", "/dev/so101_right_leader",
