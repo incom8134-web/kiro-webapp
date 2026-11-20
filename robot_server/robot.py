@@ -485,6 +485,10 @@ class Robot:
         missing = self._missing([f"{s}_follower" for s in _sides(side)])
         if missing:
             return False, "Not connected: " + ", ".join(missing)
+        why = self._sync_goals([PORT[f"{s}_follower"] for s in _sides(side)])
+        if why:
+            log.warning("%s: %s", who, why)
+            return False, why
         if self.mock:
             cmd = self._mock_cmd(f"twin_bridge {side} ({mode})")
         else:
@@ -498,6 +502,34 @@ class Robot:
             self.bridge_side, self.bridge_mode = side, mode
             self.leader_rx, self.leader_last = 0, 0.0
         return ok, msg
+
+    def _sync_goals(self, ports: list[str]) -> str | None:
+        """Targets = current positions before the bridge switches the motors on (servo_sync.py): after a
+        power cut or a recalibration a stale target makes the arm flip. None = done, else why not to start."""
+        if self.mock:
+            return None
+        if not self.bus_lock.acquire(timeout=10):
+            return "Servo check is busy. Try again."
+        try:
+            r = subprocess.run([sys.executable, str(HERE / "servo_sync.py"), *ports], capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            return "The arm did not answer. Check its power and cables."
+        finally:
+            self.bus_lock.release()
+        try:
+            res = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return "Arm check failed: " + ((r.stderr.strip().splitlines() or ["no output"])[-1])[:160]
+        if res.get("ok"):
+            return None
+        bad = []
+        for port, motors in res.get("ports", {}).items():
+            arm = Path(port).name.replace("so101_", "").replace("_", " ")
+            if not isinstance(motors, dict):
+                bad.append(f"{arm}: {motors}")
+                continue
+            bad += [f"{arm} motor {i}: {why}" for i, why in motors.items() if not isinstance(why, int)]
+        return "Arm not ready (" + "; ".join(bad) + "). Check its power and cables."
 
     def _bridge_send(self, side: str, target: dict) -> None:
         self._seq += 1

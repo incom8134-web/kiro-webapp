@@ -360,3 +360,22 @@ def test_relay_stops_when_the_arm_program_ends(cfg):
         assert any("copy stopped" in e["text"] for e in r.events)
     finally:
         r.close()
+
+
+def test_servo_sync_sets_targets_to_positions_and_refuses_bad_readings():
+    from robot_server.servo_sync import ADDR_GOAL, ADDR_POS, ADDR_TORQUE, sync_motors
+    regs = {1: {ADDR_POS: 2020, ADDR_GOAL: 0, ADDR_TORQUE: 0},      # power-up: target 0, torque off
+            2: {ADDR_POS: 770, ADDR_GOAL: 770, ADDR_TORQUE: 1},     # already fine: untouched
+            3: None}                                                 # motor not answering
+    writes = []
+    def read(i, a):
+        return None if regs[i] is None else regs[i][a]
+    def write(i, a, v):
+        writes.append((i, a, v))
+        regs[i][a] = v
+    out = sync_motors(read, write, ids=[1, 2, 3])
+    assert out == {1: 2020, 2: 770, 3: "no answer"}
+    assert regs[1][ADDR_GOAL] == 2020 and regs[1][ADDR_TORQUE] == 0   # target = here, torque left off
+    assert all(i == 1 for i, _, _ in writes)                          # motor 2 was not written
+    noisy = iter([100, 100, 300, 100, 100])
+    assert sync_motors(lambda i, a: next(noisy) if a == ADDR_POS else 0, lambda *a: None, ids=[4]) == {4: "readings disagree"}
