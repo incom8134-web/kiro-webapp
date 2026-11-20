@@ -37,6 +37,8 @@ const STRINGS = {
     "banner.offline": "Not connected to the robot. Trying again...",
     "banner.estop": "E-STOP is on{by}. ", "banner.estop.by": " (pressed on {name})",
     "banner.estop.op": "Press RELEASE when it is safe.", "banner.estop.viewer": "Only the operator can release it.",
+    "banner.fold.pending": "The arms fold home in a moment. Press E-STOP again to keep them still.",
+    "banner.fold.running": "The arms are folding home. Press E-STOP to stop them.",
 
     "sec.control": "Control", "sec.base": "Base", "sec.arms": "Arms", "sec.skills": "Skills",
     "sec.voice": "Voice", "sec.health": "System", "sec.log": "Activity",
@@ -190,7 +192,8 @@ const STRINGS = {
     "rec.x.rec": "Next episode: ends this episode now; it is saved after the reset time. Record again: throws this episode away and records it once more. Stop and save: keeps this episode and finishes.",
     "rec.x.reset": "Start next episode now: skips the rest of the reset time. Record again: throws away the episode just recorded and records it once more. Stop and save: keeps it and finishes.",
     "rec.s3.wait": "Starts after the checks pass.", "rec.s3.end": "Finished: {n} episode(s) saved.", "rec.s4.wait": "Shown when the recording has ended.",
-    "rec.v.done": "Saved. The robot confirmed the dataset below.",
+    "rec.v.done": "Saved. The robot confirmed the dataset below.", "rec.p.estop": "E-STOP",
+    "rec.v.estop": "Stopped by E-STOP: the recorder was stopped at once and the arms were held, so the dataset could not be finished. Episodes of this recording may be missing; a dataset you added to has a copy from before (Engineer information, Folders).",
     "rec.v.stopped": "Stopped with Force stop. The episode that was being recorded was not saved; the others are.",
     "rec.v.failed": "The recording failed (exit {code}). {hint}", "rec.v.nods": "No dataset was saved.",
     "rec.hint.camlost": "A camera was disconnected (loose USB cable?). Plug it in again, fix the cable so the arm cannot pull it, and start again.",
@@ -282,6 +285,8 @@ const STRINGS = {
     "banner.offline": "로봇과 연결되지 않았습니다. 다시 연결하는 중...",
     "banner.estop": "비상정지 상태입니다{by}. ", "banner.estop.by": " ({name}에서 누름)",
     "banner.estop.op": "안전하면 해제를 누르세요.", "banner.estop.viewer": "조종자만 해제할 수 있습니다.",
+    "banner.fold.pending": "곧 두 팔이 접힘 자세로 돌아갑니다. 그대로 두려면 비상정지를 한 번 더 누르세요.",
+    "banner.fold.running": "두 팔이 접힘 자세로 돌아가는 중입니다. 멈추려면 비상정지를 누르세요.",
 
     "sec.control": "조종", "sec.base": "베이스", "sec.arms": "팔", "sec.skills": "스킬",
     "sec.voice": "음성", "sec.health": "시스템", "sec.log": "기록",
@@ -435,7 +440,8 @@ const STRINGS = {
     "rec.x.rec": "다음 에피소드: 이 에피소드를 지금 끝냅니다 (리셋 시간 뒤에 저장). 다시 기록: 이 에피소드를 버리고 한 번 더 기록합니다. 정지하고 저장: 이 에피소드를 저장하고 끝냅니다.",
     "rec.x.reset": "다음 에피소드 바로 시작: 남은 리셋 시간을 건너뜁니다. 다시 기록: 방금 기록한 에피소드를 버리고 한 번 더 기록합니다. 정지하고 저장: 저장하고 끝냅니다.",
     "rec.s3.wait": "점검을 통과하면 시작합니다.", "rec.s3.end": "끝남: 에피소드 {n}개 저장.", "rec.s4.wait": "기록이 끝나면 보입니다.",
-    "rec.v.done": "저장됐습니다. 로봇이 아래 데이터셋을 확인했습니다.",
+    "rec.v.done": "저장됐습니다. 로봇이 아래 데이터셋을 확인했습니다.", "rec.p.estop": "비상정지",
+    "rec.v.estop": "비상정지로 멈췄습니다: 기록 프로그램을 바로 멈추고 팔을 고정해서 데이터셋을 마무리하지 못했습니다. 이번 기록의 에피소드가 빠졌을 수 있습니다. 이어서 기록한 데이터셋은 그 전 사본이 있습니다 (엔지니어 정보, 폴더).
     "rec.v.stopped": "강제 정지로 멈췄습니다. 기록 중이던 에피소드는 저장되지 않았고 나머지는 저장됐습니다.",
     "rec.v.failed": "기록이 실패했습니다 (종료 코드 {code}). {hint}", "rec.v.nods": "저장된 데이터셋이 없습니다.",
     "rec.hint.camlost": "카메라 연결이 끊겼습니다 (USB 접촉 불량?). 다시 꽂고, 팔이 케이블을 당기지 않게 고정한 뒤 다시 시작하세요.",

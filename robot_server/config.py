@@ -66,6 +66,7 @@ class Config:
     # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
     # Motion of the left arm stays blocked until it is recalibrated and this is set to 1.
     left_arm_ok: bool = False
+    estop_fold_s: float = 2.0  # after E-STOP froze the arms, fold them home after this many seconds (0 = never)
 
     # Lidar mounting on the robot (same values the old obstacle guard uses).
     # laser_yaw None = read LASER_YAW from <so101_dir>/config/lidar.env, else the launch default 1.26 rad.
@@ -110,6 +111,7 @@ class Config:
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
             left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",
+            estop_fold_s=_f("KIRO_ESTOP_FOLD_S", d.estop_fold_s),
             laser_yaw=float(os.environ["KIRO_LASER_YAW"]) if os.environ.get("KIRO_LASER_YAW") else None,
             laser_x=_f("KIRO_LASER_X", d.laser_x),
         )

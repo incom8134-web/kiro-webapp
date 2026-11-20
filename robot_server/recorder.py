@@ -405,7 +405,8 @@ class Recorder:
         info = self.info(sess["settings"]["repo"])
         added = max(0, info.get("episodes", 0) - sess["base"]) if info["ok"] else 0
         hint = next((h for pat, h in HINTS if any(pat in e for e in sess["errors"])), "other")
-        state = "stopped" if (sess["forced"] or j.code in (130, -2)) else "done" if j.code == 0 else "failed"
+        # -9: E-STOP kills the recorder at once like teleop (robot.on_estop); it cannot finish the dataset then
+        state = "estop" if j.code == -9 else "stopped" if (sess["forced"] or j.code in (130, -2)) else "done" if j.code == 0 else "failed"
         sess["result"] = {"state": state, "code": j.code, "info": info, "added": added, "hint": hint if state == "failed" else "",
                           "ended": j.ended or time.time()}
         sess["phase"] = state

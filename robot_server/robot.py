@@ -65,7 +65,9 @@ WIZARD_USES = {
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
 ENGINEER_JOBS = ("record", "pack", "wizard")  # their output is shown only on the Studio page
-ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left")  # programs that move a follower arm by themselves (relay feeds the bridge)
+ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves (relay feeds the bridge)
+# Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
+TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
@@ -121,6 +123,9 @@ class Robot:
         self._wave_stop = threading.Event()
         self._wave_thread: threading.Thread | None = None
         self._estop_lock = threading.Lock()
+        self._fold_cancel = threading.Event()  # set = the pending fold-home after an E-STOP is cancelled
+        self._fold_thread: threading.Thread | None = None
+        self._fold_jobs: set[str] = set()
         self._cpu_prev: dict = {}
         self._net_prev: tuple | None = None
         self.guard_profile = "close"  # lidar guard distance of the base program; set by the engineer (Studio page)
@@ -679,32 +684,90 @@ class Robot:
 
     # --------------------------------------------------------------- E-STOP
     def on_estop(self, who: str) -> None:
-        """Stop everything that can move by itself. Runs on every E-STOP press; safe to repeat.
+        """Stop everything that can move. Runs on every E-STOP press; safe to repeat.
 
-        Arm programs are KILLED at once: their own clean-up would move the arm (the skill swings
-        back to its start pose and then lets go, the bridge removes its speed limit). Then each of
-        those arms is held where it is (arm_tuck --hold: goal = present position, torque on).
-        Voice, wizard and base get Ctrl+C at the same time, so the wheels stop (speed 0, torque off)
-        and the robot's own gamepad cannot keep driving. Teleop stays: a person holds the leader."""
+        Arm programs, teleop included, are KILLED at once: their own clean-up would move the arm
+        (the skill swings back, teleop lets the arm drop). Each of those arms is then held where it
+        is (arm_tuck --hold). Voice, wizard and base get Ctrl+C at the same time, so the wheels stop
+        and nothing can keep driving; then every wheel's speed is checked (wheel_stop.py).
+        The user's choice (20 Nov 2026): a moment later both arms fold home by themselves, slowly.
+        Pressing E-STOP again while they are about to fold or folding cancels it: they stay frozen."""
         with self._estop_lock:
             self._wave_stop.set()
+            refold = self._folding()
+            self._fold_cancel.set()
             if self.ros is not None and hasattr(self.ros, "publish_str") and self.jobs.running("voice"):
                 self.ros.publish_str("/voice/say", "stop" if self.voice_lang == "en" else "멈춰")
+            names = list(ARM_JOBS) + list(TELEOP_JOBS)
             sides = set()
-            for name in ARM_JOBS:
+            for name in names:
                 j = self.jobs.get(name)
                 if j and j.running:
                     sides |= {s for s in ("right", "left") if PORT[f"{s}_follower"] in j.spec.uses}
-            killed = self.jobs.kill(list(ARM_JOBS))
+            killed = self.jobs.kill(names)
             stopped: list[str] = []
             t = threading.Thread(target=lambda: stopped.extend(
                 self.jobs.stop_all(lambda j: j.name in ("voice", "wizard", "base"))), daemon=True)
             t.start()                       # wheels stop while the arms are being held
             held = self._hold_arms(sorted(sides)) if sides and not self.mock else ""
             t.join()
-            if killed or stopped:
-                self.event(who, "E-STOP: " + ", ".join([f"killed {k}" for k in killed] + [f"stopped {x}" for x in stopped])
-                           + (f"; {held}" if held else ""))
+            wheels = self._check_wheels()
+            fold = ""
+            if refold:
+                fold = "arm fold cancelled: arms stay still"
+            elif self.cfg.estop_fold_s > 0:
+                fold_sides = [s for s in ("right", "left") if not self._arm_ok(s) and not self._missing([f"{s}_follower"])]
+                if fold_sides:
+                    self._fold_cancel = threading.Event()
+                    self._fold_thread = threading.Thread(target=self._autofold, daemon=True,
+                                                         args=(fold_sides, who, self._fold_cancel, self.cfg.estop_fold_s))
+                    self._fold_thread.start()
+                    fold = f"arms fold home in {self.cfg.estop_fold_s:g} s (press E-STOP again to keep them still)"
+            parts = [f"killed {k}" for k in killed] + [f"stopped {x}" for x in stopped] + [p for p in (held, wheels, fold) if p]
+            if parts:
+                self.event(who, "E-STOP: " + "; ".join(parts))
+
+    def _folding(self) -> bool:
+        """A fold-home after an E-STOP is waiting or running."""
+        return bool((self._fold_thread and self._fold_thread.is_alive())
+                    or any(self.jobs.running(n) for n in self._fold_jobs))
+
+    def estop_fold_state(self) -> str | None:
+        if self._fold_thread and self._fold_thread.is_alive():
+            return "pending"
+        return "running" if any(self.jobs.running(n) for n in self._fold_jobs) else None
+
+    def _autofold(self, sides: list[str], who: str, cancel: threading.Event, delay: float) -> None:
+        if cancel.wait(delay):
+            return
+        with self._estop_lock:          # never while another E-STOP is being handled
+            if cancel.is_set():
+                return
+            arm = "both" if len(sides) == 2 else sides[0]
+            ok, msg = self.arm(arm, "fold", who)
+            if ok:
+                self._fold_jobs = {f"arm_{arm}"}
+        self.event(who, "E-STOP: folding the arms home" if ok else f"E-STOP: could not fold the arms ({msg})")
+
+    def _check_wheels(self) -> str:
+        """After the wheel program stopped: no wheel may still be turning (wheel_stop.py)."""
+        if self.mock or not os.path.exists(PORT["base"]):
+            return ""
+        if self.jobs.running("base"):
+            return "wheel check skipped: the wheel program is still stopping"
+        with self.bus_lock:
+            try:
+                r = subprocess.run([sys.executable, str(HERE / "wheel_stop.py"), PORT["base"]],
+                                   capture_output=True, text=True, timeout=10)
+            except subprocess.TimeoutExpired:
+                return "wheel check: the wheel board did not answer"
+        try:
+            res = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return "wheel check failed"
+        if res.get("turning"):
+            return "wheels " + ", ".join(map(str, res["turning"])) + " were still turning: switched off"
+        return "wheels checked: stopped" if res.get("ok") else "wheel check: " + res.get("msg", "some wheels did not answer")
 
     def _hold_arms(self, sides: list[str]) -> str:
         """Freeze follower arms where they are, with the old arm_tuck.py --hold."""
@@ -867,6 +930,7 @@ class Robot:
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
+            "estop_fold": self.estop_fold_state(),
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(),

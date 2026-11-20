@@ -272,6 +272,15 @@ def test_force_stop_keeps_the_saved_episodes(robot, fast):
     assert s["result"]["info"]["episodes"] == 1 and s["result"]["added"] == 1
 
 
+def test_estop_kills_a_recording_like_teleop(robot, fast):
+    assert robot.rec.start(settings(episode_s=5), "Laptop")[0]
+    phase(robot, "rec", 0)
+    robot.on_estop("Phone")                                               # anyone may press it
+    s = phase(robot, "estop")
+    assert s["result"]["state"] == "estop" and not robot.jobs.running("record")
+    assert any("killed record" in e["text"] for e in robot.events)
+
+
 def test_new_never_overwrites_and_add_keeps_a_copy(robot, fast, cfg):
     assert robot.rec.start(settings(episodes=1, episode_s=1), "Laptop")[0]
     phase(robot, "done")

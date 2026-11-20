@@ -506,7 +506,7 @@ function renderChecks(step) {
 
 const PHASE = { starting: ["rec.p.connect", "accent"], tuning: ["rec.p.tune", "accent"], connecting: ["rec.p.connect", "accent"],
   rec: ["rec.p.rec", "live"], reset: ["rec.p.reset", "warn"], saving: ["rec.p.save", "accent"],
-  done: ["rec.p.done", "live"], stopped: ["rec.p.stopped", "warn"], failed: ["rec.p.failed", "warn"] };
+  done: ["rec.p.done", "live"], stopped: ["rec.p.stopped", "warn"], failed: ["rec.p.failed", "warn"], estop: ["rec.p.estop", "warn"] };
 
 function renderRecord(step) {
   const s = sess();
@@ -572,7 +572,7 @@ function renderReview(step) {
   }
   const res = s.result, i = res.info || {};
   const msg = $("v-msg");
-  msg.textContent = t(res.state === "done" ? "rec.v.done" : res.state === "stopped" ? "rec.v.stopped" : "rec.v.failed",
+  msg.textContent = t({ done: "rec.v.done", stopped: "rec.v.stopped", estop: "rec.v.estop" }[res.state] || "rec.v.failed",
     { hint: t("rec.hint." + (res.hint || "other")), code: res.code });
   msg.className = "vmsg " + (res.state === "done" ? "ok" : "warn");
   const rows = [[t("rec.dataset"), `<b>${esc(s.settings.repo)}</b>`]];
