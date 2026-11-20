@@ -308,7 +308,7 @@ holdButton($("reboot"), () => send({ t: "system", action: "reboot" }));
 
 function showNote(text, isError) {
   if (!text) return;
-  const known = { "LEFT_BLOCKED": "arm.leftblocked" };
+  const known = { "LEFT_BLOCKED": "arm.leftblocked", "TWO_ARM": "fm.noplay.both", "LEFT_ARM": "fm.noplay.left", "NO_FIT": "fm.noplay.other" };
   const n = $("note");
   n.textContent = known[text] ? t(known[text]) : text;
   n.className = "note" + (isError ? " err" : "");
@@ -503,9 +503,12 @@ function renderRobot() {
   const sh = models.length ? models.map((m) => {
     const need = m.cams.length ? m.cams : ["top", "right_wrist"];
     const lacking = need.filter((k) => !camOk(k));
-    const blocked = !me || (!skillOn && (lacking.length > 0 || estop));
-    return `<div class="skill"><div class="skill-t"><b>${esc(m.name)}</b><span class="small mute">${esc(String(m.type).toUpperCase())} · ${esc(t("skill.arm"))} · ${esc(need.map((k) => t("cam." + k)).join(" + "))}</span>`
-      + (lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
+    const noplay = m.playable === false;   // trained on both arms or the left arm: the skill runner drives the black arm only
+    const blocked = !me || (!skillOn && (noplay || lacking.length > 0 || estop));
+    const armK = { both: "rec.arm.both", left: "rec.arm.left" }[m.arms];
+    return `<div class="skill"><div class="skill-t"><b>${esc(m.name)}</b><span class="small mute">${esc(String(m.type).toUpperCase())} · ${esc(armK ? t(armK) : t("skill.arm"))} · ${esc(need.map((k) => t("cam." + k)).join(" + "))}</span>`
+      + (noplay ? `<span class="small note err">${esc(t("fm.noplay." + m.arms))}</span>`
+        : lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
       + `</div><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
       + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button></div>`;
   }).join("") : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;

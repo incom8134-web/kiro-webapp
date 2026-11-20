@@ -37,6 +37,7 @@ from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 from .recorder import Recorder
+from .training import Training
 
 log = logging.getLogger("kiro.robot")
 HERE = Path(__file__).resolve().parent
@@ -51,8 +52,10 @@ SIDES = ("right", "left", "both")
 ARM_ACTIONS = {"fold": "--tuck", "hold": "--hold", "release": "--release"}
 ROS_SETUP = "unset PYTHONPATH; source /opt/ros/jazzy/setup.bash; source \"$HOME/ros2_ws/install/setup.bash\"; "
 # Lidar guard distances (m), the two profiles of the old base panel. Passed to run_base_teleop.sh.
-GUARD_PROFILES = {"close": {"STOP_DIST": "0.12", "SLOW_DIST": "0.12", "SIDE_STOP": "0.15"},
-                  "safe": {"STOP_DIST": "0.20", "SLOW_DIST": "0.30", "SIDE_STOP": "0.32"}}
+# TOUCH_DIST: the old guard stops everything when any point is this close to the lidar ("contact").
+# 0.05 since 20 Nov 2026 (user's choice): in its new place the lidar sees a part of the robot 6 cm away.
+GUARD_PROFILES = {"close": {"STOP_DIST": "0.12", "SLOW_DIST": "0.12", "SIDE_STOP": "0.15", "TOUCH_DIST": "0.05"},
+                  "safe": {"STOP_DIST": "0.20", "SLOW_DIST": "0.30", "SIDE_STOP": "0.32", "TOUCH_DIST": "0.05"}}
 # Devices each check-wizard step opens (so it never shares a port or camera with a running job)
 WIZARD_USES = {
     "devices": set(), "servos": {"/dev/so101_right_follower", "/dev/so101_left_follower", "/dev/so101_right_leader",
@@ -131,6 +134,7 @@ class Robot:
         self.guard_profile = "close"  # lidar guard distance of the base program; set by the engineer (Studio page)
         self.refresh_cameras()
         self.rec = Recorder(self)
+        self.train = Training(self)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -296,20 +300,8 @@ class Robot:
 
     # --------------------------------------------------------------- skills
     def models(self) -> list[dict]:
-        root = Path(self.cfg.policies_dir).expanduser()
-        out = []
-        for cfgf in sorted(root.glob("*/pretrained_model/config.json")):
-            d = cfgf.parent
-            if not (d / "model.safetensors").exists():
-                continue
-            try:
-                c = json.loads(cfgf.read_text())
-                cams = sorted(k.split(".")[-1] for k in c.get("input_features", {}) if k.startswith("observation.images."))
-                kind = c.get("type", "?")
-            except (OSError, ValueError):
-                cams, kind = [], "?"
-            out.append({"name": d.parent.name, "path": str(d), "type": kind, "cams": cams})
-        return out
+        """Trained models for the Autonomous skills card. arms: "right", "left", "both" or "?" (training.py)."""
+        return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable")} for m in self.train.models()]
 
     def skill(self, name: str, on: bool, who: str) -> tuple[bool, str]:
         if not on:
@@ -317,6 +309,8 @@ class Robot:
         m = next((m for m in self.models() if m["name"] == name), None)
         if m is None:
             return False, "Model not found."
+        if not m["playable"]:  # run_policy.sh drives the right arm only: a two-arm or left-arm model would go wrong
+            return False, {"both": "TWO_ARM", "left": "LEFT_ARM"}.get(m["arms"], "NO_FIT")
         missing = self._missing(["right_follower"])
         if missing:
             return False, "Not connected: right follower"
@@ -956,7 +950,8 @@ class Robot:
                   "obstacle_stop_env": self.obstacle_stop_on(),
                   "paths": {"so101": str(self.so101), "venv": str(self.venv), "datasets": str(self.rec.root),
                             "backups": str(self.rec.backups), "calibration": str(HF_CALIB),
-                            "policies": str(Path(self.cfg.policies_dir).expanduser())}})
+                            "policies": str(self.train.root), "packages": str(self.train.pkg_dir)}},
+            train=self.train.snapshot())
         return out
 
     def set_guard_profile(self, profile: str, who: str) -> tuple[bool, str]:

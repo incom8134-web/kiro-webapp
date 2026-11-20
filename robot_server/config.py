@@ -56,11 +56,14 @@ class Config:
     # The old robot code (scripts this server starts) and the trained models
     so101_dir: str = "~/so101"
     lerobot_venv: str = "~/lerobot-venv"
-    policies_dir: str = "~/policies"
+    policies_dir: str = ""   # "" = ~/policies on the robot, a pretend folder in mock mode (Studio can delete models)
     # Recorded datasets (Studio page). "" = the LeRobot folder (HF_LEROBOT_HOME, as the old recorder uses)
     # on the robot, and a separate pretend folder in mock mode, so mock recordings never mix with real ones.
     datasets_dir: str = ""
     backups_dir: str = ""  # copy of a dataset before episodes are added ("" = ~/.cache/kiro-webapp/dataset_backups, mock_ in mock mode)
+    packages_dir: str = ""  # dataset packages for Colab ("" = pack_dataset.sh's ~/Desktop/데이터셋_업로드, mock_uploads in mock mode)
+    # The training notebook, opened in Google Colab straight from the public GitHub repo
+    colab_url: str = "https://colab.research.google.com/github/incom8134-web/kiro-webapp/blob/main/colab/so101_train_colab.ipynb"
     skill_seconds: float = 20.0
     health_period: float = 3.0
     # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
@@ -108,6 +111,8 @@ class Config:
             policies_dir=os.environ.get("KIRO_POLICIES_DIR", d.policies_dir),
             datasets_dir=os.environ.get("KIRO_DATASETS_DIR", d.datasets_dir),
             backups_dir=os.environ.get("KIRO_BACKUPS_DIR", d.backups_dir),
+            packages_dir=os.environ.get("KIRO_PACKAGES_DIR", d.packages_dir),
+            colab_url=os.environ.get("KIRO_COLAB_URL", d.colab_url),
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
             left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",
