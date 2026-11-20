@@ -286,6 +286,13 @@ kbd.w { min-width: 46px; }
 .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .trio .btn { padding: 0 4px; }
 
+/* autonomous skills: one row per trained model, a big Play button */
+.skill { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.skill:first-child { border-top: 0; padding-top: 0; }
+.skill-t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.skill .btn.big { min-width: 104px; }
+.card h3 > i { font-size: 16px; color: var(--accent); }
+
 /* voice */
 .btn.talk { width: 100%; height: 64px; font-size: 15px; border-radius: var(--r); touch-action: none; user-select: none; -webkit-user-select: none; }
 .btn.talk i { font-size: 20px; }

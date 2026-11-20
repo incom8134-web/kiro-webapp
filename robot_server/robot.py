@@ -930,7 +930,7 @@ class Robot:
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
-            "estop_fold": self.estop_fold_state(),
+            "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(),

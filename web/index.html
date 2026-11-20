@@ -112,6 +112,12 @@
 
       <!-- ARMS -->
       <section class="panel" data-panel="arms">
+        <div class="card skills-card">
+          <div class="row head"><h3><i class="ri-robot-2-line"></i><span data-i18n="skills.title">Autonomous skills</span></h3><span id="skill-st" class="st"></span></div>
+          <div id="skills"></div>
+          <p class="small mute" id="skill-hint"></p>
+          <pre id="skill-tail" class="tail" hidden></pre>
+        </div>
         <div class="card">
           <div class="row head"><h3><span class="emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
@@ -124,11 +130,6 @@
           <button id="leader-btn" class="btn wide big" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
           <p id="leader-st" class="small mute"></p>
           <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
-        </div>
-        <div class="card">
-          <div class="row head"><h3><span data-i18n="sec.skills">Skills</span></h3><span id="skill-st" class="st"></span></div>
-          <div id="skills"></div>
-          <pre id="skill-tail" class="tail" hidden></pre>
         </div>
       </section>
 

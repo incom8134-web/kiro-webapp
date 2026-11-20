@@ -499,14 +499,22 @@ function renderRobot() {
   const sk = J.skill;
   const skillOn = jobRunning("skill");
   const models = r.models || [];
-  const sh = models.length ? models.map((m) => `<div class="row"><span class="grow"><b>${esc(m.name)}</b> <span class="small mute">${esc(m.cams.join(" + "))}</span></span>
-      <button class="btn${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${me ? "" : "disabled"}>${t(skillOn ? "btn.stop" : "skill.run")}</button></div>`).join("")
-    : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
+  const camOk = (k) => ((r.cams || []).find((c) => c.key === k) || {}).present;
+  const sh = models.length ? models.map((m) => {
+    const need = m.cams.length ? m.cams : ["top", "right_wrist"];
+    const lacking = need.filter((k) => !camOk(k));
+    const blocked = !me || (!skillOn && (lacking.length > 0 || estop));
+    return `<div class="skill"><div class="skill-t"><b>${esc(m.name)}</b><span class="small mute">${esc(String(m.type).toUpperCase())} · ${esc(t("skill.arm"))} · ${esc(need.map((k) => t("cam." + k)).join(" + "))}</span>`
+      + (lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
+      + `</div><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
+      + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button></div>`;
+  }).join("") : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
   const skills = $("skills");
   if (skills.dataset.html !== sh) {
     skills.innerHTML = sh; skills.dataset.html = sh;
     for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => send({ t: "skill", name: el.dataset.skill, on: !jobRunning("skill") }));
   }
+  $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(r.skill_s || 20) }) : t("skill.add");
   $("skill-st").textContent = skillOn ? t("st.on") : "";
   $("skill-st").className = "st" + (skillOn ? " live" : "");
   failTail($("skill-tail"), sk);
