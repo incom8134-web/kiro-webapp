@@ -76,7 +76,7 @@ LOCAL_ROOT = "/content/so101"   # local work folder for the dataset and the trai
 # SOURCE="robot": click "Connect to the robot" below; the robot sends the dataset and fetches the model itself.
 # SOURCE="drive": the .tar.gz waits in Google Drive (DRIVE_DIR), or upload it with the Files panel (USE_DRIVE off).
 # USE_DRIVE=True: checkpoints and the model zip are kept in Google Drive, so a cut session continues (Run all again).
-import hashlib, html, http.server, json, os, re, secrets, shutil, subprocess, sys, threading, time, urllib.parse, urllib.request
+import hashlib, html, http.server, json, os, queue, re, secrets, shutil, subprocess, sys, threading, time, urllib.parse, urllib.request
 if not USE_DRIVE:
     DRIVE_DIR = "/content"
     OUT_ROOT = "/content/so101/outputs_keep"
@@ -84,6 +84,8 @@ assert SOURCE in ("robot", "drive"), "SOURCE is robot or drive"
 assert STEPS >= 20000, "STEPS must be 20000 or more (the first robot skill used 20000) / STEPS 는 20000 이상이어야 합니다"
 os.makedirs(LOCAL_ROOT, exist_ok=True)
 LINK = globals().get("LINK") if SOURCE == "robot" else None
+if LINK is not None and not LINK.url:
+    LINK = None                                   # the last try got no address: start again
 
 def fail(msg):
     # stop here, and tell the robot why (it shows it on the Studio page)
@@ -97,9 +99,12 @@ def _report(shell, etype, evalue, tb, tb_offset=None):
     shell.showtraceback((etype, evalue, tb), tb_offset=tb_offset)
 
 try:
-    get_ipython().set_custom_exc((Exception,), _report)   # any error in any cell also reaches the robot
+    get_ipython().set_custom_exc((Exception, KeyboardInterrupt), _report)   # any error (or Interrupt) in any cell also reaches the robot
 except NameError:
     pass
+if LINK is not None and LINK.st["state"] == "failed":   # Run all again after an error: ready for the robot again
+    _have = LINK.st.get("have")
+    LINK.set(state="received" if _have and os.path.exists(os.path.join(LINK.dir, _have)) else "waiting", error=None)
 if USE_DRIVE:
     try:
         from google.colab import drive
@@ -140,7 +145,7 @@ class LinkHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def allowed(self):
-        if secrets.compare_digest(self.headers.get("X-Kiro-Key", ""), self.link.key):
+        if secrets.compare_digest(self.headers.get("X-Kiro-Key", "").encode("utf-8", "replace"), self.link.key.encode()):
             return True
         self.out(403, {"error": "wrong key"})
         return False
@@ -165,13 +170,47 @@ class LinkHandler(http.server.BaseHTTPRequestHandler):
             return
         self.out(404, {"error": "no such thing"})
 
+    def body(self):
+        # the request body in pieces: with a Content-Length, or chunked (a proxy may send either)
+        n = self.headers.get("Content-Length")
+        if n is not None:
+            left = int(n)
+            if not 0 <= left <= PIECE_MAX:
+                raise ValueError("piece too big")
+            while left:
+                b = self.rfile.read(min(left, 1 << 20))
+                if not b:
+                    raise ValueError("cut short")
+                left -= len(b)
+                yield b
+        elif "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            total = 0
+            while True:
+                size = int(self.rfile.readline(100).split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline(1000) not in (b"\r\n", b"\n", b""):
+                        pass
+                    return
+                total += size
+                if total > PIECE_MAX:
+                    raise ValueError("piece too big")
+                left = size
+                while left:
+                    b = self.rfile.read(min(left, 1 << 20))
+                    if not b:
+                        raise ValueError("cut short")
+                    left -= len(b)
+                    yield b
+                self.rfile.readline(10)
+        else:
+            raise ValueError("no length")
+
     def do_PUT(self):
         if not self.allowed():
             return
         L = self.link
         m = re.fullmatch(r"/dataset/([A-Za-z0-9][A-Za-z0-9._-]*_\d{8}_\d{4}\.tar\.gz)\?part=(\d+)&parts=(\d+)", self.path)
-        n = int(self.headers.get("Content-Length") or -1)
-        if not m or not 0 <= n <= PIECE_MAX:
+        if not m:
             return self.out(400, {"error": "bad piece"})
         name, i, parts = m.group(1), int(m.group(2)), int(m.group(3))
         with L.lock:
@@ -180,14 +219,17 @@ class LinkHandler(http.server.BaseHTTPRequestHandler):
                 L.st.update(state="receiving", have=None)
             if not L.part or L.part[0] != name or L.part[1] != i or i >= parts:
                 return self.out(409, {"error": f"expected piece {L.part[1] if L.part else 0}"})
-        with open(os.path.join(L.dir, name + ".part"), "wb" if i == 0 else "ab") as f:
-            left = n
-            while left:
-                b = self.rfile.read(min(left, 1 << 20))
-                if not b:
-                    return self.out(400, {"error": "cut short"})
-                f.write(b)
-                left -= len(b)
+            start = L.part[2]
+        n = 0
+        try:     # a piece sent again overwrites what a cut try left behind
+            with open(os.path.join(L.dir, name + ".part"), "wb" if i == 0 else "r+b") as f:
+                f.seek(start)
+                f.truncate()
+                for b in self.body():
+                    f.write(b)
+                    n += len(b)
+        except (ValueError, OSError) as e:
+            return self.out(400, {"error": str(e)[:100]})
         with L.lock:
             L.part[1] += 1
             L.part[2] += n
@@ -213,7 +255,7 @@ class LinkHandler(http.server.BaseHTTPRequestHandler):
                 L.set(state="waiting", have=None)
                 return self.out(400, {"error": "SHA-256 does not match"})
             os.replace(part, os.path.join(L.dir, name))
-            L.set(state="received", have=name)
+            L.set(have=name, **({} if L.st["state"] == "failed" else {"state": "received"}))   # a failure stays visible
             return self.out(200, {"ok": True})
         if self.path == "/fetched":
             L.set(state="fetched")
@@ -234,15 +276,21 @@ def start_tunnel(port):
         os.chmod(exe, 0o755)
     p = subprocess.Popen([exe, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    url = None
-    for line in p.stdout:
-        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+    lines = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(x) for x in p.stdout], daemon=True).start()   # keeps reading its output
+    url, end = None, time.time() + 90
+    while url is None and time.time() < end and p.poll() is None:
+        try:
+            line = lines.get(timeout=1)
+        except queue.Empty:
+            continue
+        m = re.search(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com", line)   # not Cloudflare's own api. address
         if m:
             url = m.group(0)
-            break
-    threading.Thread(target=lambda: [None for _ in p.stdout], daemon=True).start()   # keep reading its output
     if not url:
-        fail("Cloudflare gave no address: run this cell again / 주소를 받지 못했습니다: 이 셀을 다시 실행하세요")
+        p.terminate()
+        fail("Cloudflare gave no address (busy? try again in a minute): run this cell again "
+             "/ 주소를 받지 못했습니다 (잠시 뒤): 이 셀을 다시 실행하세요")
     return url
 
 if SOURCE == "robot" and LINK is None:

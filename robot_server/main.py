@@ -79,7 +79,9 @@ class NoStalePages:
         async def send_no_cache(msg):
             if msg["type"] == "http.response.start":
                 headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache")]}
+                # no other site may show these pages inside its own (a hidden frame could trick a click on Send)
+                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache"), (b"x-frame-options", b"DENY"),
+                                                    (b"content-security-policy", b"frame-ancestors 'none'")]}
             await send(msg)
         await self.app(scope, receive, send_no_cache)
 

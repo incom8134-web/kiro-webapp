@@ -4,6 +4,7 @@ a zip that the Studio page installs."""
 import ast
 import io
 import json
+import os
 import re
 import sys
 import tarfile
@@ -318,3 +319,65 @@ def test_a_wrong_key_gets_nothing_from_the_notebook(tmp_path, monkeypatch):
             urllib.request.urlopen(req, timeout=5)
         assert e.value.code == 403
     assert link.st["state"] == "waiting"
+
+
+def robot_link(tmp_path, monkeypatch, g=None):
+    monkeypatch.setenv("KIRO_NO_TUNNEL", "1")
+    _, code = cells()
+    g = g if g is not None else {"__name__": "__main__"}
+    run(cell1(code[0], LOCAL_ROOT=str(tmp_path / "colab"), USE_DRIVE=False), g)
+    return g, code
+
+
+def test_running_cell_1_again_after_an_error_is_ready_for_the_robot_again(tmp_path, monkeypatch):
+    g, code = robot_link(tmp_path, monkeypatch)
+    link = g["LINK"]
+    link.set(state="failed", error="RuntimeError: CUDA out of memory")
+    run(cell1(code[0], LOCAL_ROOT=str(tmp_path / "colab"), USE_DRIVE=False), g)
+    assert g["LINK"] is link and link.st["state"] == "waiting" and link.st["error"] is None
+    link.url = None                                                       # the last try got no address
+    run(cell1(code[0], LOCAL_ROOT=str(tmp_path / "colab"), USE_DRIVE=False), g)
+    assert g["LINK"] is not link and g["LINK"].url
+
+
+def test_a_piece_cut_short_is_overwritten_when_sent_again_and_chunked_pieces_work(tmp_path, monkeypatch):
+    import hashlib
+    import http.client
+    import socket
+    import urllib.parse
+    g, _ = robot_link(tmp_path, monkeypatch)
+    link = g["LINK"]
+    u = urllib.parse.urlsplit(link.url)
+    name = "pick_20261120_1405.tar.gz"
+    a, b = os.urandom(300), os.urandom(200)
+
+    def put(i, body, chunked=False):
+        c = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
+        c.request("PUT", f"/dataset/{name}?part={i}&parts=2", body=iter([body[:50], body[50:]]) if chunked else body,
+                  headers={"X-Kiro-Key": link.key}, encode_chunked=chunked)
+        return c.getresponse().status
+    assert put(0, a) == 200
+    s = socket.create_connection((u.hostname, u.port))                   # piece 1, cut after 50 of 200 bytes
+    s.sendall(f"PUT /dataset/{name}?part=1&parts=2 HTTP/1.1\r\nHost: x\r\nX-Kiro-Key: {link.key}\r\nContent-Length: 200\r\n\r\n".encode() + b[:50])
+    s.shutdown(socket.SHUT_WR)
+    assert b"400" in s.recv(200)
+    s.close()
+    assert put(1, b, chunked=True) == 200                                # sent again (chunked, as a proxy may)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=5)
+    c.request("POST", f"/dataset/{name}/done?sha256={hashlib.sha256(a + b).hexdigest()}", body=b"", headers={"X-Kiro-Key": link.key})
+    assert c.getresponse().status == 200 and link.st["state"] == "received"
+
+
+def test_the_tunnel_address_is_never_cloudflares_own_api_address(tmp_path, monkeypatch):
+    import os
+    import sys
+    _, code = cells()
+    g = {"__name__": "__main__"}
+    run(cell1(code[0], SOURCE="drive", LOCAL_ROOT=str(tmp_path / "colab"), USE_DRIVE=False), g)
+    fake = tmp_path / "colab" / "cloudflared"
+    fake.write_text(f"#!{sys.executable}\nimport time\n"
+                    "print('ERR failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": EOF', flush=True)\n"
+                    "print('INF |  https://quiet-river-1234.trycloudflare.com  |', flush=True)\ntime.sleep(30)\n")
+    fake.chmod(0o755)
+    monkeypatch.delenv("KIRO_NO_TUNNEL", raising=False)
+    assert g["start_tunnel"](8123) == "https://quiet-river-1234.trycloudflare.com"

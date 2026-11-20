@@ -17,7 +17,7 @@ const HOLD_MS = 2000;
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
 
 const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
-  pendingStart: false, token: null, dismissed: null, offer: null, colabAct: null };
+  pendingStart: false, token: null, dismissed: null, offer: null, colabAct: null, pendingAck: null };
 const isOperator = () => !!st.server && st.server.you.role === "operator";
 const isEngineer = () => !!st.server && !!st.server.you.engineer;
 const sess = () => (st.studio && st.studio.session) || null;
@@ -110,7 +110,7 @@ function toast(text, isError) {
 const CODES = { CHECKS_FAILED: "rec.n.checks", TOO_SOON: "rec.n.soon", NOT_NOW: "rec.n.notnow", STOPPING: "rec.n.stopping",
   FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked",
   NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse", COLAB_BUSY: "col.e.COLAB_BUSY", COLAB_ADDR: "col.e.COLAB_ADDR",
-  COLAB_NORUN: "col.e.COLAB_NORUN" };
+  COLAB_NORUN: "col.e.COLAB_NORUN", COLAB_MIDWAY: "col.e.COLAB_MIDWAY" };
 function onNote(m) {
   const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
   if (m.about === "take" || m.about === "engineer") {
@@ -125,6 +125,7 @@ function onNote(m) {
     else if (m.ok && m.cmd === "pack") toast(t("rec.n.packing"));
     else if (m.ok && m.cmd === "delete") toast(t("fm.deleted"));
     else if (m.cmd === "colab") {
+      if (st.pendingAck && st.colabAct === "connect" && bc) { bc.postMessage({ t: "ack", id: st.pendingAck, ok: m.ok, msg: text }); st.pendingAck = null; }
       if (st.offer && st.offer.state === "sending" && st.colabAct === "connect") {
         st.offer.state = m.ok ? "sent" : "error"; st.offer.err = m.ok ? "" : text; renderOffer();
       }
@@ -850,7 +851,7 @@ function renderColab() {
   $("c-bar").hidden = frac == null;
   $("c-bar").classList.toggle("ok", c.state === "training" || c.state === "installed");
   $("c-bar").querySelector("i").style.width = `${Math.round(Math.min(1, frac || 0) * 100)}%`;
-  const detail = c.state === "lost" && c.detail ? c.detail : "";
+  const detail = c.state === "lost" && c.detail ? c.detail : c.quiet_s ? t("col.quiet", { min: Math.round(c.quiet_s / 60) }) : "";
   $("c-detail").hidden = !detail;
   $("c-detail").textContent = detail;
   setBtn($("c-stop"), t(active ? "col.stop" : "col.clear"));
@@ -870,7 +871,9 @@ function renderOffer() {
   const o = st.offer;
   $("offer").hidden = !o;
   if (!o) return;
-  $("offer-t").textContent = t("col.offer.t", { host: o.url.replace(/^https?:\/\//, "") });
+  const host = o.url.replace(/^https?:\/\//, ""), c = isEngineer() ? colab() : null;
+  $("offer-t").textContent = t("col.offer.t", { host })
+    + (c && c.host && c.host !== host && COLAB_ACTIVE.includes(c.state) ? " " + t("col.offer.replaces", { host: c.host }) : "");
   $("offer-send").disabled = o.state === "sending" || o.state === "sent";
   const msg = $("offer-msg");
   const text = o.state === "sent" ? t("col.offer.sent") : o.state === "unlock" ? t("col.offer.unlock") : o.state === "error" ? o.err : "";
@@ -894,10 +897,11 @@ $("offer-no").addEventListener("click", () => { st.offer = null; renderOffer(); 
 if (bc) bc.onmessage = (ev) => {
   const m = ev.data || {};
   if (m.t === "connect" && isEngineer()) {
+    st.pendingAck = m.id;                             // answered once the robot has said yes or no
     colabSend("connect", { url: String(m.url || ""), key: String(m.key || "") });
-    bc.postMessage({ t: "ack", id: m.id });
   } else if (m.t === "ack" && st.offer && st.offer.id === m.id) {
-    st.offer.state = "sent";
+    st.offer.state = m.ok ? "sent" : "error";
+    st.offer.err = m.ok ? "" : String(m.msg || "");
     renderOffer();
   }
 };
