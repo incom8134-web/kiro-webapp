@@ -299,6 +299,11 @@ kbd.w { min-width: 46px; }
 .btn.talk i { font-size: 20px; }
 .btn.talk.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .heard { margin: 12px 0; }
+.vlog { list-style: none; margin: -4px 0 12px; padding: 0; max-height: 168px; overflow-y: auto; font-size: 12px; line-height: 1.5; }
+.vlog li { display: flex; gap: 8px; border-top: 1px solid var(--line); padding: 3px 0; }
+.vlog time { color: var(--mute); font-variant-numeric: tabular-nums; flex: none; }
+.vlog .go { color: var(--ok); }
+.vlog .no { color: var(--warn); }
 .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
 .quick .btn { height: 38px; padding: 0 6px; }
 .quick .btn.stopq { background: var(--ink); color: var(--panel); border-color: var(--ink); }

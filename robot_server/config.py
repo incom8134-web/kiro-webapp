@@ -64,6 +64,9 @@ class Config:
     packages_dir: str = ""  # dataset packages for Colab ("" = pack_dataset.sh's ~/Desktop/데이터셋_업로드, mock_uploads in mock mode)
     # The training notebook, opened in Google Colab straight from the public GitHub repo
     colab_url: str = "https://colab.research.google.com/github/incom8134-web/kiro-webapp/blob/main/colab/so101_train_colab.ipynb"
+    # Each program the page starts also writes its output, every line with its time, to web_<job>_<time>.log
+    # here ("" = <so101_dir>/logs next to the old launchers' logs on the robot, no files in mock mode)
+    log_dir: str = ""
     skill_seconds: float = 20.0
     health_period: float = 3.0
     # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
@@ -113,6 +116,7 @@ class Config:
             backups_dir=os.environ.get("KIRO_BACKUPS_DIR", d.backups_dir),
             packages_dir=os.environ.get("KIRO_PACKAGES_DIR", d.packages_dir),
             colab_url=os.environ.get("KIRO_COLAB_URL", d.colab_url),
+            log_dir=os.environ.get("KIRO_LOG_DIR", d.log_dir),
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
             left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",

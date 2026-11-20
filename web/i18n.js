@@ -121,6 +121,14 @@ const STRINGS = {
     "base.start": "Start base", "base.stop": "Stop base", "base.guard": "Lidar guard",
     "base.lidar.yes": "Lidar connected", "base.lidar.no": "No lidar: guard lets all commands pass",
     "base.exited": "Wheel node ended (code {code}). Is the 12 V wheel power on?",
+    "base.rates": "Wheel odometry {odom} Hz · lidar {scan} Hz", "base.noodom": "No wheel odometry for {s} s",
+    "base.nolidar": "The lidar /dev/rplidar is not plugged in, and the obstacle stop is on (config/lidar.env). Plug it in, wait 5 s, then start the base again.",
+    "base.pass": "The base runs without the lidar: the robot's own obstacle stop is off (pass mode).",
+    "guard.lost": "Lidar lost: everything stopped", "guard.lostnote": "The lidar stopped sending. Plug it back in and restart the base, or switch the obstacle stop off to drive on.",
+    "guard.robot": "Robot guard: {st}",
+    "why.USB_LOST": "{name} stopped: its USB board was lost or stopped answering. Check the cable and power, then start it again.",
+    "why.KILLED": "{name} ended unexpectedly. An arm keeps holding its last pose (torque on): release it or start again.",
+    "why.ERROR": "{name} ended with an error:",
 
     "arm.right": "Right", "arm.left": "Left", "arm.both": "Both",
     "arm.fold": "Fold", "arm.hold": "Hold", "arm.release": "Release",
@@ -140,6 +148,7 @@ const STRINGS = {
 
     "voice.start": "Start voice", "voice.stop": "Stop voice", "voice.talk": "Hold to talk",
     "voice.off": "Voice is off", "voice.ready": "Listening when the button is held",
+    "voice.nomic": "No USB microphone: voice runs for typed and quick commands only.",
     "voice.heard": "Heard", "voice.lang": "Speech language", "voice.koonly": "The English speech model is not installed yet (vosk-model-small-en-us-0.15).",
 
     "h.jetson": "Jetson", "h.cpu": "CPU", "h.temp": "Temp", "h.mem": "Memory", "h.disk": "Disk",
@@ -440,6 +449,14 @@ const STRINGS = {
     "base.start": "베이스 시작", "base.stop": "베이스 끄기", "base.guard": "라이다 보호",
     "base.lidar.yes": "라이다 연결됨", "base.lidar.no": "라이다 없음: 보호 기능이 명령을 그대로 통과",
     "base.exited": "바퀴 노드 종료 (코드 {code}). 12 V 바퀴 전원이 켜져 있나요?",
+    "base.rates": "바퀴 오도메트리 {odom} Hz · 라이다 {scan} Hz", "base.noodom": "바퀴 오도메트리가 {s}초째 없음",
+    "base.nolidar": "라이다(/dev/rplidar)가 꽂혀 있지 않은데 장애물 정지가 켜져 있습니다(config/lidar.env). 라이다를 꽂고 5초 기다린 뒤 베이스를 다시 켜세요.",
+    "base.pass": "베이스가 라이다 없이 돌고 있습니다: 로봇 자체의 장애물 정지가 꺼져 있습니다(통과 모드).",
+    "guard.lost": "라이다 끊김: 모두 정지", "guard.lostnote": "라이다 데이터가 끊겼습니다. 다시 꽂고 베이스를 다시 켜거나, 장애물 정지를 끄고 주행하세요.",
+    "guard.robot": "로봇 가드: {st}",
+    "why.USB_LOST": "{name} 멈춤: USB 보드가 빠졌거나 응답이 없습니다. 케이블과 전원을 확인하고 다시 시작하세요.",
+    "why.KILLED": "{name} 이(가) 예기치 않게 끝났습니다. 팔은 마지막 자세를 유지합니다(토크 켜짐): 풀거나 다시 시작하세요.",
+    "why.ERROR": "{name} 오류로 종료:",
 
     "arm.right": "오른팔", "arm.left": "왼팔", "arm.both": "양팔",
     "arm.fold": "접기", "arm.hold": "힘 주기", "arm.release": "힘 빼기",
@@ -459,6 +476,7 @@ const STRINGS = {
 
     "voice.start": "음성 켜기", "voice.stop": "음성 끄기", "voice.talk": "누르고 말하기",
     "voice.off": "음성 꺼짐", "voice.ready": "버튼을 누르는 동안 듣습니다",
+    "voice.nomic": "USB 마이크가 없습니다: 음성은 입력 명령과 빠른 명령만 받습니다.",
     "voice.heard": "인식", "voice.lang": "음성 언어", "voice.koonly": "영어 음성 모델이 아직 설치되지 않았습니다 (vosk-model-small-en-us-0.15).",
 
     "h.jetson": "젯슨", "h.cpu": "CPU", "h.temp": "온도", "h.mem": "메모리", "h.disk": "디스크",

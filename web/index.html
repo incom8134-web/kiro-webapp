@@ -93,6 +93,7 @@
           <div class="row head"><h3><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
             <button id="base-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
           <p id="base-err" class="err small" hidden></p>
+          <p id="base-rates" class="small mute" hidden></p>
           <div class="row guardrow">
             <label class="switch"><input type="checkbox" id="guard-sw" data-op><span class="track"></span><span data-i18n="guard.sw">Obstacle stop</span></label>
             <span id="guard-st" class="st grow"></span>
@@ -142,6 +143,7 @@
           <div id="voice-on" hidden>
             <button id="talk" class="btn talk" type="button"><i class="ri-mic-fill"></i><span data-i18n="voice.talk">Hold to talk</span></button>
             <p class="heard"><span class="mute small" data-i18n="voice.heard">Heard</span> <b id="voice-text">-</b></p>
+            <ol id="voice-log" class="vlog" aria-live="polite"></ol>
             <div class="quick" id="quick"></div>
             <form id="say-box" class="row" autocomplete="off">
               <input id="say-text" class="grow" type="text" data-i18n-ph="base.typed">

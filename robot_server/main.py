@@ -94,7 +94,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     # Obstacle stop: on unless KIRO_GUARD=0; the operator can switch it on the Drive tab.
     gcfg = guard.GuardCfg(half_len=cfg.robot_len / 2, half_wid=cfg.robot_wid / 2, stop=cfg.guard_stop,
                           slow=max(cfg.guard_slow, cfg.guard_stop))
-    state["guard"] = {"on": cfg.guard, "lidar": False, "block": []}
+    # seen = when the last lidar scan arrived (None = no lidar since the base started: drive without it)
+    state["guard"] = {"on": cfg.guard, "lidar": False, "lost": False, "block": [], "seen": None}
 
     async def send(cid: str, msg: dict) -> None:
         """Never lets one device stall the server: a page that stops reading (left the Wi-Fi,
@@ -118,11 +119,11 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     def snapshot(cid: str) -> dict:
         b = state["base"]
         s = ctrl.snapshot(cid)
-        s.update(t="state", backend=b.name, odom=b.odom(), version=__version__,
+        s.update(t="state", backend=b.name, odom=b.odom(), rates=b.rates() if hasattr(b, "rates") else None, version=__version__,
                  default_pin=cfg.pin_is_default and b.name == "mock",
                  mock_engineer_pin=b.name == "mock" and ctrl.engineer_pin == MOCK_ENGINEER_PIN,
                  odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]),
-                 guard={**state["guard"], "stop_m": gcfg.stop})
+                 guard={**{k: v for k, v in state["guard"].items() if k != "seen"}, "stop_m": gcfg.stop})
         return s
 
     def who(cid: str) -> str:
@@ -149,17 +150,23 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         dt, st["last"] = now - st["last"], now
         cmd = ctrl.tick()
         b = state["base"]
-        vx, vy = cmd.vx, cmd.vy
+        vx, vy, wz = cmd.vx, cmd.vy, cmd.wz
         g = state["guard"]
         sc = b.scan(cfg.scan_points) if g["on"] and hasattr(b, "scan") else None
         g["lidar"] = bool(sc)
-        if sc:  # obstacle stop: an obstacle close in the way stops that direction; turning stays free
+        if sc:
+            g["seen"] = sc.get("at", now)  # when the scan really arrived (the map may show one up to 1 s old)
+        g["lost"] = guard.lidar_lost(g["on"], g["seen"], now)
+        if g["lost"]:  # the lidar was working and its scans stopped: nothing may move, turning included
+            g["block"] = ["lidar"] if cmd.publish and (vx or vy or wz) else []
+            vx = vy = wz = 0.0
+        elif sc:  # obstacle stop: an obstacle close in the way stops that direction; turning stays free
             lim = guard.limits(sc["xy"], gcfg)
             g["block"] = guard.blocked(vx, vy, lim) if cmd.publish else []
             vx, vy = guard.apply(vx, vy, lim)
         else:
             g["block"] = []
-        b.apply(vx, vy, cmd.wz, cmd.publish, dt)
+        b.apply(vx, vy, wz, cmd.publish, dt)
         st["n"] += 1
         n = st["n"]
         o = b.odom()
@@ -173,7 +180,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             b.set_estop(ctrl.estop)
             sc = b.scan(cfg.scan_points) if hasattr(b, "scan") else None
             if sc and sockets:
-                msg = {"t": "scan", **sc}
+                msg = {"t": "scan", "xy": sc["xy"], "src": sc.get("src")}
                 await asyncio.gather(*(send(cid, msg) for cid in list(sockets)))
             new = logs.since(st["log_n"]) if log_subs else []
             st["log_n"] = new[-1]["n"] if new else (st["log_n"] if log_subs else logs.n)
@@ -271,6 +278,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         except Exception as e:  # noqa: BLE001
             log.exception("action %s failed", t)
             ok, text = False, f"Error: {e}"
+        if t == "base" and ok:  # a new base run: the lidar has to show itself again before its loss stops the robot
+            state["guard"]["seen"] = None
         if starting and ctrl.estop:  # E-STOP was pressed while this was starting: stop it now
             await asyncio.to_thread(r.on_estop, ctrl.estop_by or name)
         await send(cid, {"t": "note", "ok": ok, "msg": text, "about": t, "cmd": msg.get("cmd")})

@@ -37,6 +37,7 @@ from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 from .recorder import Recorder
+from .stopmeter import StopMeter, csv_lines
 from .training import Training
 
 log = logging.getLogger("kiro.robot")
@@ -74,6 +75,7 @@ ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # 
 # Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
 TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
+JOINTS_ADDR = ("127.0.0.1", 5005)  # twin_bridge sends the arms' measured joint angles here, 30 times a second
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
 
@@ -92,8 +94,32 @@ def cpu_percent(prev: dict[str, list[int]], cur: dict[str, list[int]]) -> dict[s
 
 SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
-VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p device:=auto -p output_topic:=/cmd_vel_raw "
+# Tagged lines of the voice node worth showing on the page (heard, executed, done, stopped, ignored...)
+VOICE_TAG = re.compile(r"\[(들림|실행|완료|정지|중단|무시|취소|비슷한 문구|주의|오류|이어붙임)\].*")
+VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p output_topic:=/cmd_vel_raw "
               "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0")
+
+
+# Lines of a program that lost its USB serial board (LeRobot / Feetech / pyserial messages)
+USB_LOST = re.compile(r"could not open port|No such file or directory: '/dev/(so101|tty)|Input/output error|SerialException"
+                      r"|device reports readiness to read but returned no data|There is no status packet|Failed to (sync )?(read|write)"
+                      r"|ConnectionError|응답 없는 서보", re.I)
+
+
+def end_reason(info: dict, lines: list[str]) -> str | None:
+    """Why a program ended, for the page: None (running, or ended normally), STOPPED (the server stopped it),
+    USB_LOST (its board went away or stopped answering), KILLED (a signal from outside, e.g. SIGKILL:
+    an arm keeps its torque and last pose) or ERROR (it failed; its last lines tell why)."""
+    if info.get("running") or info.get("code") is None:
+        return None
+    if info.get("asked"):
+        return "STOPPED"
+    if any(USB_LOST.search(line) for line in lines[-30:]):
+        return "USB_LOST"
+    code = info["code"]
+    if code < 0:
+        return "KILLED"
+    return "ERROR" if code > 0 else None
 
 
 def _sides(side: str) -> list[str]:
@@ -107,7 +133,8 @@ class Robot:
         self.ros = ros
         self.so101 = Path(cfg.so101_dir).expanduser()
         self.venv = Path(cfg.lerobot_venv).expanduser()
-        self.jobs = Jobs()
+        log_dir = Path(cfg.log_dir).expanduser() if cfg.log_dir else None if self.mock else self.so101 / "logs"
+        self.jobs = Jobs(log_dir=log_dir)
         self.events: deque[dict] = deque(maxlen=60)
         self.health: dict = {"jetson": {}, "boards": {}, "t": 0}
         self.bus_lock = threading.Lock()  # the servo probe and arm jobs never open a port at the same time
@@ -115,6 +142,7 @@ class Robot:
         self.cam_info: list[dict] = []
         self._stop = threading.Event()
         self.voice_lang = "ko"
+        self.voice_log: deque[dict] = deque(maxlen=12)  # the voice node's last tagged lines, with their time
         self.servo_scan: dict | None = None
         self._wizard_steps: list[dict] | None = None
         self._wizard_running: str | None = None
@@ -134,6 +162,13 @@ class Robot:
         self._cpu_prev: dict = {}
         self._net_prev: tuple | None = None
         self.guard_profile = "close"  # lidar guard distance of the base program; set by the engineer (Studio page)
+        # Stop meter for the test reports: the base (cm) and the arms driven through the bridge (degrees)
+        self.base_meter = StopMeter("base")
+        self.arm_meter = StopMeter("arm", unit_scale=1.0, still_speed=2.0, move_speed=5.0, norm="max")
+        self.joints: tuple[float, tuple] | None = None  # (time, measured joint angles) from the bridge
+        self._joints_csv = None
+        self._link_flowing = False
+        threading.Thread(target=self._joints_loop, name="joints", daemon=True).start()
         self.refresh_cameras()
         self.rec = Recorder(self)
         self.train = Training(self)
@@ -198,6 +233,16 @@ class Robot:
             self.event(who, f"started {spec.label or name}")
         return ok, msg
 
+    def _timed_stop(self, name: str, who: str) -> tuple[bool, str]:
+        """Stop a program and note how long it took to end (tests E3 and E6: within 2 s)."""
+        running = self.jobs.running(name)
+        t0 = time.monotonic()
+        ok, msg = self._stop_job(name, who)
+        if running and ok:
+            meter = self.base_meter if name == "base" else self.arm_meter
+            meter.add_done("base_stop" if name == "base" else "teleop_stop", f"{name} ended after Stop", time.monotonic() - t0)
+        return ok, msg
+
     def _stop_job(self, name: str, who: str) -> tuple[bool, str]:
         ok, msg = self.jobs.stop(name)
         if ok:
@@ -218,6 +263,30 @@ class Robot:
             elif "베이스 준비" in line:
                 state = "ok"
         return state
+
+    def base_guard(self) -> str | None:
+        """From the base log: 'on' = the old lidar guard runs with the lidar, 'pass' = it started without the
+        lidar (no obstacle stop at all: OBSTACLE_STOP=0 or the lidar was missing), None if unknown."""
+        j = self.jobs.get("base")
+        if not j or not j.running:
+            return None
+        state = None
+        for line in j.output():
+            if "라이다 감지" in line:
+                state = "on"
+            elif "라이다 없음" in line:
+                state = "pass"
+        return state
+
+    @staticmethod
+    def _wait_for(path: str, seconds: float) -> bool:
+        """A USB device that is being re-plugged comes back after a moment."""
+        end = time.monotonic() + seconds
+        while not os.path.exists(path):
+            if time.monotonic() > end:
+                return False
+            time.sleep(0.2)
+        return True
 
     @staticmethod
     def usb_mic(cards: str = "/proc/asound/cards") -> bool:
@@ -240,9 +309,13 @@ class Robot:
 
     def base(self, on: bool, who: str, profile: str = "close") -> tuple[bool, str]:
         if not on:
-            return self._stop_job("base", who)
+            self.base_meter.trigger(time.monotonic(), "base_stop", f"base stopped by {who}")  # test E3
+            return self._timed_stop("base", who)
         if self._missing(["base"]):
             return False, "Wheel board /dev/so101_base not found. Check USB and 12 V power."
+        if not self.mock and self.obstacle_stop_on() and not self._wait_for("/dev/rplidar", 5.0):
+            # Without it the launcher silently starts the guard in pass mode: no obstacle stop at all (test R3)
+            return False, "LIDAR_MISSING"
         uses = frozenset({PORT["base"], "/dev/rplidar"})
         if self.mock:
             cmd = self._mock_cmd("wheel node + guard")
@@ -258,7 +331,7 @@ class Robot:
             return False, "Unknown arm."
         name = f"teleop_{side}"
         if not on:
-            return self._stop_job(name, who)
+            return self._timed_stop(name, who)
         why = self._arm_ok(side)
         if why:
             return False, why
@@ -277,6 +350,15 @@ class Robot:
                     "--teleop.type=so101_leader", f"--teleop.port={PORT[side + '_leader']}", f"--teleop.id={side}_leader"]
         cmd = self._mock_cmd(f"teleop {side}") if self.mock else [bin_, *args]
         uses = frozenset(PORT[k] for k in keys)
+        busy = self.jobs.busy(uses)
+        if busy:
+            return False, f"{busy} is using the same device. Stop it first."
+        # LeRobot switches torque on with whatever target the motor still holds: after a killed program or a
+        # Release that is the old pose, and the arm would snap back to it at full speed (tests R1 and R8)
+        why = self._sync_goals([PORT[f"{s}_follower"] for s in _sides(side)])
+        if why:
+            log.warning("%s: %s", who, why)
+            return False, why
         return self._start(name, JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
                                          env=self._venv_env(), label=f"teleop {side}", stop_wait=8.0), who)
 
@@ -332,13 +414,24 @@ class Robot:
         model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
         if not self.mock and not model.is_dir():
             return False, f"Speech model not installed: {model}"
+        # No USB microphone: start without one, so typed and quick commands still work (they use the node too)
+        device = "auto" if self.mock or self.usb_mic() else "none"
         if self.mock:
             cmd = self._mock_cmd(f"voice ({lang}, push-to-talk)")
         else:
             cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} "
-                                             f"-p lang:={lang} -p model_path:={model}"]
+                                             f"-p lang:={lang} -p model_path:={model} -p device:={device}"]
         self.voice_lang = lang
-        return self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}"), who)
+        self.voice_log.clear()
+        ok, msg = self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}", on_line=self._voice_line), who)
+        return ok, ("NO_MIC" if ok and device == "none" else msg)
+
+    def _voice_line(self, line: str) -> None:
+        m = VOICE_TAG.search(ANSI.sub("", line))
+        if m:
+            self.voice_log.append({"ts": time.time(), "text": m.group(0)[:160]})
+            if m.group(1) == "정지" or (m.group(1) == "들림" and m.group(0).rstrip().endswith("-> 정지")):
+                self.base_meter.trigger(time.monotonic(), "voice", m.group(0))  # test E2 / voice stop
 
     def talk(self, on: bool) -> tuple[bool, str]:
         if not self.jobs.running("voice"):
@@ -350,8 +443,8 @@ class Robot:
     def voice_text(self) -> dict:
         if self.ros is not None and hasattr(self.ros, "latest_str"):
             return {"text": self.ros.latest_str("/voice/text"), "status": self.ros.latest_str("/voice/status"),
-                    "guard": self.ros.latest_str("/obstacle_guard/status")}
-        return {}
+                    "guard": self.ros.latest_str("/obstacle_guard/status"), "log": list(self.voice_log)}
+        return {"log": list(self.voice_log)}
 
     def voice_models(self) -> list[str]:
         root = Path("~/models/vosk").expanduser()
@@ -499,7 +592,7 @@ class Robot:
         else:
             cmd = [str(self.venv / "bin" / "python"), str(self.so101 / "twin_bridge.py"), "--arms", ",".join(_sides(side)),
                    "--to", "127.0.0.1:5005", "--listen", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}", "--allow-from", "127.0.0.1",
-                   "--ramp", "90", "--deadman", "0.5", "--status-json", "--quiet"]
+                   "--ramp", "40", "--deadman", "0.5", "--status-json", "--quiet"]
         uses = frozenset(PORT[f"{s}_follower"] for s in _sides(side))
         ok, msg = self._start("bridge", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None, env=self._venv_env(),
                                                 label=f"{mode} both arms" if side == "both" else f"{mode} {side} arm", stop_wait=8.0), who)
@@ -678,6 +771,97 @@ class Robot:
             if self.bridge_mode == "wave":
                 self.jobs.stop("bridge")  # torque stays on: the arm holds where it is
 
+    # ----------------------------------------------------------- stop meter
+    def _joints_loop(self) -> None:
+        """The bridge's 30 Hz packets of measured joint angles: for the arm stop meter, and saved as
+        web_joints_<time>.csv in the log folder while the bridge runs (test E5: the joint-angle log)."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(JOINTS_ADDR)
+            sock.settimeout(1.0)
+        except OSError as e:
+            log.warning("joint angles: cannot listen on %s:%s (%s)", *JOINTS_ADDR, e)
+            return
+        names: list[str] = []
+        try:
+            self._joints_read(sock, names)
+        finally:
+            sock.close()
+            self._close_joints_csv()
+
+    def _joints_read(self, sock: socket.socket, names: list[str]) -> None:
+        while not self._stop.is_set():
+            try:
+                data = sock.recv(65536)
+            except socket.timeout:
+                self._close_joints_csv()  # the bridge stopped: the next run gets its own file
+                continue
+            except OSError:
+                return
+            try:
+                pkt = json.loads(data)
+                joints = (pkt.get("payload") or {}).get("joints") or {}
+                keys = sorted(k for k in joints if "_" in k.split(".")[0] and k.split("_")[0] in ("right", "left"))
+                vals = tuple(float(joints[k]) for k in keys)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            now = time.monotonic()
+            self.joints = (now, vals)
+            if keys != names or self._joints_csv is None:
+                names = keys
+                self._open_joints_csv(names)
+            if self._joints_csv:
+                try:
+                    gap = f"{now - self.leader_last:.3f}" if self.leader_last else ""
+                    self._joints_csv.write(f"{time.time():.3f},{gap},"
+                                           + ",".join(f"{v:.2f}" for v in vals) + "\n")
+                except (OSError, ValueError):
+                    self._joints_csv = None
+
+    def _open_joints_csv(self, names: list[str]) -> None:
+        self._close_joints_csv()
+        if self.jobs.log_dir is None:
+            return
+        try:
+            self.jobs.log_dir.mkdir(parents=True, exist_ok=True)
+            f = open(self.jobs.log_dir / f"web_joints_{time.strftime('%Y%m%d_%H%M%S')}.csv", "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+            f.write("unix_time,s_since_last_leader_packet," + ",".join(n.replace(".pos", "") for n in names) + "\n")
+            self._joints_csv = f
+        except OSError:
+            self._joints_csv = None
+
+    def _close_joints_csv(self) -> None:
+        f, self._joints_csv = self._joints_csv, None
+        if f:
+            try:
+                f.close()
+            except OSError:
+                pass
+
+    def meter_tick(self, now: float) -> None:
+        """20 times a second from the server loop: the arm's joint angles and its leader link."""
+        j = self.joints
+        pos = j[1] if j and now - j[0] < 0.3 else None
+        flowing = self.bridge_mode == "leader" and self.jobs.running("bridge") and bool(self.leader_last) \
+            and now - self.leader_last < 0.15
+        if self._link_flowing and not flowing and self.leader_last:  # test E5: the laptop stopped sending
+            self.arm_meter.trigger(now, "arm_link", "leader arm packets stopped", at=self.leader_last)
+        self._link_flowing = flowing
+        self.arm_meter.sample(now, pos, flowing)
+
+    def stops(self) -> list[dict]:
+        rows = [{"meter": "base", **r} for r in self.base_meter.rows()] + [{"meter": "arm", **r} for r in self.arm_meter.rows()]
+        return sorted(rows, key=lambda r: r["ts"])[-12:]
+
+    def stops_csv(self) -> str:
+        return "\n".join(csv_lines([self.base_meter, self.arm_meter])) + "\n"
+
+    def stops_clear(self, who: str) -> tuple[bool, str]:
+        self.base_meter.clear()
+        self.arm_meter.clear()
+        self.event(who, "stop measurements cleared")
+        return True, ""
+
     # --------------------------------------------------------------- E-STOP
     def on_estop(self, who: str) -> None:
         """Stop everything that can move. Runs on every E-STOP press; safe to repeat.
@@ -688,6 +872,9 @@ class Robot:
         and nothing can keep driving; then every wheel's speed is checked (wheel_stop.py).
         The user's choice (20 Nov 2026): a moment later both arms fold home by themselves, slowly.
         Pressing E-STOP again while they are about to fold or folding cancels it: they stay frozen."""
+        now = time.monotonic()
+        self.base_meter.trigger(now, "estop", f"E-STOP by {who}")
+        self.arm_meter.trigger(now, "estop", f"E-STOP by {who}")
         with self._estop_lock:
             self._wave_stop.set()
             refold = self._folding()
@@ -904,6 +1091,8 @@ class Robot:
     def _jobs_view(self, n: int) -> dict:
         jobs = {}
         for name, info in self.jobs.info().items():
+            j = self.jobs.get(name)
+            info["why"] = end_reason(info, j.output() if j else [])
             info["tail"] = [ANSI.sub("", s).strip() for s in info["tail"] if ANSI.sub("", s).strip()][-n:]
             jobs[name] = info
         return jobs
@@ -929,7 +1118,8 @@ class Robot:
             "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
-            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(),
+            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(), "base_guard": self.base_guard(),
+            "stops": self.stops(),
             "bridge": {"running": self.jobs.running("bridge"), "side": self.bridge_side, "mode": self.bridge_mode,
                        "state": (self._bridge_status() or {}).get("state"), "rx": self.leader_rx,
                        "fresh": time.monotonic() - self.leader_last < 0.5 if self.leader_last else False},

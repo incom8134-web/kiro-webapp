@@ -8,12 +8,14 @@ camera fight and fail.
 from __future__ import annotations
 
 import collections
+import datetime
 import os
 import signal
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 
@@ -30,14 +32,31 @@ class JobSpec:
     on_line: Callable[[str], None] | None = None  # called with every output line, as it arrives
 
 
+def _stamp(t: float | None = None) -> str:
+    """Wall-clock time with milliseconds, for log files the test reports read response times from."""
+    return datetime.datetime.fromtimestamp(time.time() if t is None else t).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
 class Job:
-    def __init__(self, name: str, spec: JobSpec, on_exit: Callable[["Job"], None] | None = None):
+    def __init__(self, name: str, spec: JobSpec, on_exit: Callable[["Job"], None] | None = None,
+                 log_dir: Path | None = None):
         self.name, self.spec = name, spec
         self.lines: collections.deque[str] = collections.deque(maxlen=200)
         self.started = time.time()
         self.ended: float | None = None
         self.code: int | None = None
+        self.asked = False  # the server stopped it (button, E-STOP), so its end is no surprise
         self._on_exit = on_exit
+        self.log_path: Path | None = None
+        self._log = None
+        if log_dir is not None:  # every line with its time, kept after the job ends (test records)
+            try:
+                log_dir.mkdir(parents=True, exist_ok=True)
+                self.log_path = log_dir / f"web_{name}_{time.strftime('%Y%m%d_%H%M%S')}.log"
+                self._log = open(self.log_path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - closed when the job ends
+                self._log.write(f"{_stamp(self.started)} [server] start {spec.label or name}: {' '.join(spec.cmd)[:400]}\n")
+            except OSError:
+                self._log = None
         env = {**os.environ, "PYTHONUNBUFFERED": "1", **spec.env}
         env = {k: v for k, v in env.items() if v is not None}
         self.proc = subprocess.Popen(spec.cmd, cwd=spec.cwd, env=env, stdin=subprocess.PIPE if spec.stdin else subprocess.DEVNULL,
@@ -51,6 +70,7 @@ class Job:
             line = line.rstrip()
             if line:
                 self.lines.append(line[:300])
+                self._write(line)
                 if self.spec.on_line:
                     try:
                         self.spec.on_line(line)
@@ -58,8 +78,26 @@ class Job:
                         pass
         self.code = self.proc.wait()
         self.ended = time.time()
+        self._write(f"[server] ended, exit code {self.code}")
+        if self._log:
+            try:
+                self._log.close()
+            except OSError:
+                pass
+            self._log = None
         if self._on_exit:
             self._on_exit(self)
+
+    def _write(self, line: str) -> None:
+        if self._log:
+            try:
+                self._log.write(f"{_stamp()} {line}\n")
+            except (OSError, ValueError):
+                pass
+
+    def note(self, text: str) -> None:
+        """A server line in this job's log file (signals sent, E-STOP), not shown as program output."""
+        self._write(f"[server] {text}")
 
     @property
     def running(self) -> bool:
@@ -77,6 +115,7 @@ class Job:
             return False
 
     def _signal(self, sig: int) -> None:
+        self.note(f"signal {signal.Signals(sig).name}")
         try:
             os.killpg(self.proc.pid, sig)
         except (ProcessLookupError, PermissionError):
@@ -84,6 +123,7 @@ class Job:
 
     def stop(self, first_sent: bool = False) -> None:
         """Ask nicely, then harder. Blocks up to about stop_wait + 5 seconds."""
+        self.asked = True
         for i, (sig, wait) in enumerate(((self.spec.stop_signal, self.spec.stop_wait), (signal.SIGTERM, 3.0), (signal.SIGKILL, 2.0))):
             if not self.running:
                 return
@@ -97,6 +137,7 @@ class Job:
     def kill(self) -> None:
         """Stop at once, with no clean-up code in the program (E-STOP for arm programs:
         their clean-up moves the arm). The servos keep their torque and last goal."""
+        self.asked = True
         if self.running:
             self._signal(signal.SIGKILL)
             try:
@@ -106,7 +147,7 @@ class Job:
 
     def info(self) -> dict:
         return {"name": self.name, "label": self.spec.label or self.name, "running": self.running,
-                "code": self.code, "started": self.started, "ended": self.ended,
+                "code": self.code, "asked": self.asked, "started": self.started, "ended": self.ended,
                 "uses": sorted(self.spec.uses), "tail": list(self.lines)[-12:]}
 
     def output(self) -> list[str]:
@@ -115,9 +156,11 @@ class Job:
 
 
 class Jobs:
-    """All jobs started from the page. Thread-safe."""
+    """All jobs started from the page. Thread-safe. log_dir: each job's output also goes to
+    web_<job>_<time>.log there, every line with its time (None = no files)."""
 
-    def __init__(self) -> None:
+    def __init__(self, log_dir: Path | None = None) -> None:
+        self.log_dir = log_dir
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         # device -> (let go, take back) callbacks. The camera preview lets go while a job uses the camera.
@@ -142,7 +185,7 @@ class Jobs:
                 if dev in self.holders:
                     self.holders[dev][0]()
             try:
-                self._jobs[name] = Job(name, spec, on_exit=self._ended)
+                self._jobs[name] = Job(name, spec, on_exit=self._ended, log_dir=self.log_dir)
             except OSError as e:
                 self._ended_uses(spec.uses)
                 return False, f"Could not start {name}: {e}"
@@ -167,6 +210,7 @@ class Jobs:
         """Signal every matching job at once, then wait for each (one slow job does not delay the rest)."""
         todo = [j for j in list(self._jobs.values()) if j.running and only(j)]
         for j in todo:
+            j.asked = True
             j._signal(j.spec.stop_signal)
         threads = [threading.Thread(target=j.stop, kwargs={"first_sent": True}) for j in todo]
         for t in threads:

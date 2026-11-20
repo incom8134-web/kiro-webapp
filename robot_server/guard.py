@@ -15,6 +15,14 @@ from dataclasses import dataclass
 
 DIRS = ("front", "back", "left", "right")
 FREE = {d: 1.0 for d in DIRS}
+LOST_S = 0.5  # s without a lidar scan, after it was working, before everything stops (test E4': stop within 1 s)
+
+
+def lidar_lost(on: bool, seen: float | None, now: float, lost_s: float = LOST_S) -> bool:
+    """True = stop everything: the obstacle stop is on and the lidar worked (seen = arrival time of its
+    last scan), but no scan came for lost_s. A robot that had no lidar since the base started drives
+    without it (the old guard's pass mode); the operator can switch the obstacle stop off to drive on."""
+    return on and seen is not None and now - seen > lost_s
 
 
 @dataclass(frozen=True)

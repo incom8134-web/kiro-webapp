@@ -1,6 +1,7 @@
 import pytest
 
 from robot_server.base import MockBase
+from robot_server import guard
 from robot_server.guard import GuardCfg, apply, blocked, limits
 
 G = GuardCfg()  # robot 0.45 x 0.35 m, stop at 0.20 m, slow from 0.45 m
@@ -90,3 +91,10 @@ def test_mock_robot_without_guard_would_hit_the_wall():
     for _ in range(int(60 / 0.05)):
         b.apply(0.3, 0.0, 0.0, True, 0.05)
     assert b.x > 3.5                              # this is the behaviour the guard prevents
+
+
+def test_lidar_lost_only_after_it_worked():
+    assert not guard.lidar_lost(True, None, 100.0)            # no lidar since the base started: drive without it
+    assert not guard.lidar_lost(True, 99.6, 100.0)            # last scan 0.4 s ago
+    assert guard.lidar_lost(True, 99.4, 100.0)                # 0.6 s without a scan: stop
+    assert not guard.lidar_lost(False, 90.0, 100.0)           # the operator switched the obstacle stop off

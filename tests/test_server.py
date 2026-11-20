@@ -120,3 +120,39 @@ def test_obstacle_stop_can_start_switched_off():
     with TestClient(create_app(Config(pin="4321", guard=False), MockBase())) as client:
         with client.websocket_connect("/ws?name=Laptop") as op:
             assert read_until(op, lambda m: m["t"] == "state")["guard"]["on"] is False
+
+
+class LosingLidar(MockBase):
+    """A pretend robot whose lidar stops sending scans when told to (USB pulled, driver died)."""
+    lost = False
+
+    def scan(self, n_out=360):
+        return None if self.lost else super().scan(n_out)
+
+
+def test_lidar_lost_stops_everything_turning_included():
+    b = LosingLidar()
+    with TestClient(create_app(Config(pin="4321"), b)) as client:
+        with client.websocket_connect("/ws?name=Laptop") as op:
+            op.send_json({"t": "take", "pin": "4321"})
+            assert read_until(op, lambda m: m["t"] == "note")["ok"] is True
+            op.send_json({"t": "drive", "x": 0, "y": 0, "z": 0, "en": False})
+
+            def drive(seconds):
+                end = time.time() + seconds
+                while time.time() < end:
+                    op.send_json({"t": "drive", "x": 0.5, "y": 0, "z": 1, "en": True, "src": "test"})
+                    time.sleep(0.05)
+
+            drive(0.6)
+            assert b.v[0] > 0 and b.v[2] > 0
+            b.lost = True
+            t0 = time.time()
+            while time.time() - t0 < 2.0 and (b.v[0] or b.v[2]):
+                drive(0.05)
+            assert b.v == (0.0, 0.0, 0.0) and time.time() - t0 < 1.0      # test E4': stopped within 1 s
+            s = read_until(op, lambda m: m["t"] == "state" and m["guard"]["lost"])
+            assert "lidar" in s["guard"]["block"] and "seen" not in s["guard"]
+            b.lost = False                                                # scans back: driving works again
+            drive(0.6)
+            assert b.v[0] > 0

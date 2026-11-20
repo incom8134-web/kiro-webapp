@@ -79,6 +79,7 @@ class Controller:
         self._last_drive = -math.inf
         self._last_tick: float | None = None
         self._need_neutral = True  # dead-man must be let go once before motion
+        self._held = False  # the operator holds the dead-man now: only then does the server drive
         self._was_active = False
         self._zero_left = 0
         self.engineer_pin = cfg.engineer_pin  # the server sets the mock default in mock mode
@@ -188,6 +189,7 @@ class Controller:
         self._src = "none"
         self._last_drive = -math.inf
         self._need_neutral = True
+        self._held = False
 
     # ---- E-STOP ------------------------------------------------------
     def set_estop(self, cid: str, on: bool) -> tuple[bool, str]:
@@ -220,6 +222,7 @@ class Controller:
         if cid != self.operator:
             return False
         self._last_drive = now  # this message is also the heartbeat
+        self._held = bool(en)
         if not en:
             self._need_neutral = False
             self._target = ZERO
@@ -252,7 +255,9 @@ class Controller:
             self._set_operator(None)
 
         fresh = self.operator is not None and (now - self._last_drive) <= self.cfg.heartbeat_timeout
-        if not fresh or self.estop:
+        # Dead-man let go: a few zeros, then silence. The page keeps sending its heartbeat while nobody
+        # drives; publishing those zeros would fight the voice node and the robot's gamepad on the same topic.
+        if not fresh or self.estop or not self._held:
             if self._was_active:
                 self._zero_left = ZERO_TICKS
             self._was_active = False
