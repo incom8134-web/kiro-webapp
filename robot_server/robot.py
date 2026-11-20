@@ -32,7 +32,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .camera import Camera, find_cameras
+from .camera import Camera, find_cameras, repair_top
 from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
@@ -196,6 +196,17 @@ class Robot:
                 self.cams[key] = cam
             self.jobs.holders[f"cam:{key}"] = (lambda k=key: self.cams[k].pause("job"),
                                                lambda k=key: self.cams[k].resume())
+
+    def cam_repair(self, who: str) -> tuple[bool, str]:
+        """Studio "Repair top camera" (test R6): the top camera's colour node is re-plugged in software through
+        the root helper (deploy/README.md 6b). Reply "<CODE>: <detail>"; the page shows a text per code."""
+        if self.mock:  # the pretend robot never re-plugs a real USB device
+            return True, "OK_ALREADY"
+        ok, code, detail = repair_top(self.so101)
+        self.event(who, f"camera repair: {code} {detail}".strip())
+        if ok:
+            self.refresh_cameras()  # the camera's video devices are new after a re-plug
+        return ok, code if ok or not detail else f"{code}: {detail}"
 
     # -------------------------------------------------------------- helpers
     def _venv_env(self) -> dict[str, str]:
@@ -1133,7 +1144,7 @@ class Robot:
         for c in self.cam_info:
             cam = self.cams.get(c["key"])
             cams.append({**{k: c.get(k) for k in ("key", "label", "device", "present", "reason", "auto", "width", "height", "fps")},
-                         **({k: v for k, v in cam.info().items() if k in ("live", "viewers", "paused_by", "error")} if cam else {})})
+                         **({k: v for k, v in cam.info().items() if k in ("live", "viewers", "paused_by", "error", "fps_real")} if cam else {})})
         out.update(
             cams=cams, guard_profile=self.guard_profile, servo_scan=self.servo_scan, wizard=self.wizard_results,
             ports=[] if self.mock else self.serial_ports(),

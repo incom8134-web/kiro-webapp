@@ -106,6 +106,10 @@
       <div class="stephead"><b class="num">2</b><h2 data-i18n="rec.s2.t">Cameras and checks</h2><span id="s2-st" class="st"></span></div>
       <div class="stepbody">
         <div class="camgrid" id="camgrid"></div>
+        <div class="row camrepair">
+          <button id="cam-repair" class="btn" type="button"><i class="ri-tools-line"></i><span data-i18n="cam.rep">Repair top camera</span></button>
+          <span id="cam-repair-msg" class="small mute grow" role="status"></span>
+        </div>
         <details class="adv" id="adv">
           <summary data-i18n="rec.adv">Advanced: frame rate and video encoding</summary>
           <div class="nums">
@@ -124,6 +128,7 @@
           <button id="start" class="btn hold" type="button"><span class="fill"></span><i class="ri-record-circle-line"></i><span data-i18n="rec.start">Hold to start recording</span></button>
         </div>
         <p class="small mute" id="start-hint" data-i18n="rec.starthint">When recording starts, the follower arm moves at once to the leader arm's pose. Hold the leader arm first.</p>
+        <p class="small note err" id="verify-hint" data-i18n="rec.n.verifying" hidden>The last recording is still being checked. Wait a few seconds.</p>
       </div>
       <p class="stepsum small mute" id="s2-sum"></p>
     </section>
@@ -162,6 +167,8 @@
       <div class="stephead"><b class="num">4</b><h2 data-i18n="rec.s4.t">Review</h2><span id="s4-st" class="st"></span></div>
       <div class="stepbody">
         <p id="v-msg" class="vmsg"></p>
+        <p id="v-verify" class="vmsg" hidden></p>
+        <pre id="v-verify-why" class="tail" hidden></pre>
         <table class="kv" id="v-table"></table>
         <pre id="v-err" class="tail" hidden></pre>
         <div class="stepfoot">

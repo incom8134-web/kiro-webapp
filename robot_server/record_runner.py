@@ -12,6 +12,12 @@ server went away) that counts as stop: the current episode is saved and the data
   record_runner.py check  '<json>'   facts for the page's checks, from the old helpers (one JSON line)
   record_runner.py record '<json>'   tune the cameras, then lerobot-record (needs the LeRobot venv)
   record_runner.py mock   '<json>'   pretend recorder for mock mode and tests: same lines, same commands
+  record_runner.py verify '<json>'   reads a finished dataset back with LeRobot (needs the LeRobot venv), one JSON line
+
+files_check() (pure Python, used by recorder.py) looks at a dataset folder the way LeRobot v3 leaves it. A
+parquet file only gets its end marker, and an mp4 only its index (moov), when LeRobot finalizes the dataset:
+after Ctrl+C that happens, after a kill -9 (E-STOP) it does not, and the dataset is broken. The pretend
+recorder keeps the same habits, so a force stop and an E-STOP can be tried without a robot.
 
 Progress lines: @REC {json}. "say" is LeRobot's own announcement ("Recording episode 3",
 "Reset the environment", "Re-record episode", "Stop recording", "Exiting").
@@ -19,6 +25,7 @@ Progress lines: @REC {json}. "say" is LeRobot's own announcement ("Recording epi
 import json
 import os
 import shlex
+import struct
 import subprocess
 import sys
 import threading
@@ -198,6 +205,155 @@ def record(cfg: dict) -> int:
     return 0
 
 
+# ------------------------------------------------------ dataset files: layout and read check
+PAR1 = b"PAR1"   # a parquet file starts and ends with it; LeRobot writes the end only when it finalizes
+
+
+def fake_mp4(payload: int, finished: bool) -> bytes:
+    """Boxes of an mp4 for the pretend recorder: ftyp, mdat, and the moov index only once finished."""
+    ftyp = struct.pack(">I4s", 24, b"ftyp") + b"isom" + b"\0\0\2\0" + b"isom" + b"mp41"
+    mdat = struct.pack(">I4s", 8 + payload, b"mdat") + b"\0" * payload
+    return ftyp + mdat + (struct.pack(">I4s", 8, b"moov") if finished else b"")
+
+
+def parquet_problem(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+        if size < 12:
+            return "too small to be a parquet file"
+        with open(path, "rb") as fh:
+            head = fh.read(4)
+            fh.seek(-4, 2)
+            tail = fh.read(4)
+    except OSError as e:
+        return f"cannot be read ({e.strerror})"
+    if head != PAR1:
+        return "is not a parquet file"
+    if tail != PAR1:
+        return "cut off: no end marker (the recorder was stopped before it finished the file)"
+    return ""
+
+
+def mp4_problem(path: Path) -> str:
+    """Walks the top-level boxes: a video needs ftyp and moov, and no box may run past the end of the file."""
+    seen = set()
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as fh:
+            pos = 0
+            while pos < size:
+                fh.seek(pos)
+                head = fh.read(8)
+                if len(head) < 8:
+                    return "cut off in the middle of a box"
+                n, kind = struct.unpack(">I4s", head)
+                if n == 1:
+                    n = struct.unpack(">Q", fh.read(8))[0]
+                elif n == 0:
+                    n = size - pos
+                if n < 8 or pos + n > size:
+                    return "cut off: the video data ends early"
+                seen.add(kind)
+                pos += n
+    except (OSError, struct.error) as e:
+        return f"cannot be read ({e})"
+    if b"ftyp" not in seen:
+        return "is not an mp4 video"
+    if b"moov" not in seen:
+        return "cut off: no index (the encoder was stopped before it finished the file)"
+    return ""
+
+
+def files_check(root: Path | str) -> dict:
+    """Pure-Python read check of a LeRobot v3 dataset folder: {ok, episodes, frames, problems}. Looks at
+    meta/info.json, the data and episode tables (parquet start and end), the tasks and stats files and one
+    mp4 per camera (the end of each). Not a full read: the LeRobot read (verify) does that."""
+    root = Path(root)
+    out = {"ok": False, "episodes": 0, "frames": 0, "problems": []}
+    bad = out["problems"]
+    try:
+        info = json.loads((root / "meta" / "info.json").read_text(encoding="utf-8"))
+    except OSError:
+        bad.append("meta/info.json is missing")
+        return out
+    except ValueError:
+        bad.append("meta/info.json is not valid JSON")
+        return out
+    n, f = (info.get("total_episodes") if isinstance(info, dict) else None), (info.get("total_frames") if isinstance(info, dict) else None)
+    if not (isinstance(n, int) and isinstance(f, int) and n >= 0 and f >= 0):
+        bad.append("meta/info.json has no episode and frame count")
+        return out
+    out.update(episodes=n, frames=f)
+    if n > 0:
+        if f == 0:
+            bad.append("meta/info.json counts episodes but no frames")
+        for what, pattern in (("data", "data/**/*.parquet"), ("episode table", "meta/episodes/**/*.parquet")):
+            files = sorted(root.glob(pattern))
+            if not files:
+                bad.append(f"no {what} files ({pattern})")
+            for p in files:
+                why = parquet_problem(p)
+                if why:
+                    bad.append(f"{p.relative_to(root)}: {why}")
+        tasks = root / "meta" / "tasks.parquet"
+        why = parquet_problem(tasks) if tasks.exists() else "is missing"
+        if why:
+            bad.append(f"meta/tasks.parquet: {why}")
+        try:
+            json.loads((root / "meta" / "stats.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            bad.append("meta/stats.json is missing or not valid JSON")
+        for key, v in (info.get("features") or {}).items():
+            if not (key.startswith("observation.images.") and isinstance(v, dict) and v.get("dtype") == "video"):
+                continue
+            videos = sorted((root / "videos" / key).glob("**/*.mp4"))
+            if not videos:
+                bad.append(f"no video files for {key.split('.')[-1]}")
+            for p in videos:
+                why = mp4_problem(p)
+                if why:
+                    bad.append(f"{p.relative_to(root)}: {why}")
+    out["ok"] = not bad
+    return out
+
+
+class MockDataset:
+    """The pretend recorder's dataset, with LeRobot v3's habits: meta/info.json is written when the dataset is
+    created and after every saved episode; the data file, the episode table and the videos only get their end
+    in finalize(). LeRobot runs that after Ctrl+C (Force stop) but never after a kill -9 (E-STOP)."""
+
+    def __init__(self, root: Path, info: dict):
+        self.root, self.info, self.opened = root, info, False
+
+    def write_info(self) -> None:
+        (self.root / "meta").mkdir(parents=True, exist_ok=True)
+        (self.root / "meta" / "info.json").write_text(json.dumps(self.info))
+
+    def _files(self, finished: bool) -> None:
+        n, end = self.info["total_episodes"], PAR1 if finished else b""
+        parts = {"data/chunk-000/file-000.parquet": PAR1 + b"d" * 1000 * n + end,
+                 "meta/episodes/chunk-000/file-000.parquet": PAR1 + b"e" * 200 * n + end,
+                 "meta/tasks.parquet": PAR1 + b"t" * 50 + PAR1, "meta/stats.json": b"{}"}
+        for key, v in self.info["features"].items():
+            if key.startswith("observation.images.") and v.get("dtype") == "video":
+                parts[f"videos/{key}/chunk-000/file-000.mp4"] = fake_mp4(2000 * n, finished)
+        for rel, data in parts.items():
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_bytes(data)
+
+    def save_episode(self, frames: int) -> None:
+        self.info["total_episodes"] += 1
+        self.info["total_frames"] += frames
+        self._files(finished=False)    # the files are open for writing from the first saved episode on
+        self.opened = True
+        self.write_info()
+
+    def finalize(self) -> None:
+        if self.opened:
+            self._files(finished=True)
+            self.opened = False
+
+
 # ----------------------------------------------------------- pretend recorder
 def mock(cfg: dict) -> int:
     """Mock mode: the control flow of lerobot_record.record() with a clock instead of a robot."""
@@ -214,13 +370,10 @@ def mock(cfg: dict) -> int:
                 "total_episodes": 0, "total_frames": 0, "fps": fps,
                 "features": {"action": {"dtype": "float32"}, "observation.state": {"dtype": "float32"},
                              **{f"observation.images.{k}": {"dtype": "video"} for k in cfg["cams"]}}}
+    ds = MockDataset(root, info)
+    if not cfg.get("resume"):
+        ds.write_info()   # LeRobotDataset.create(): the folder exists before the robot connects
     mark(cmd=f"lerobot-record (mock) --dataset.repo_id={cfg['repo']} --dataset.root={root}")
-
-    def save():
-        (root / "meta").mkdir(parents=True, exist_ok=True)
-        (root / "data").mkdir(exist_ok=True)
-        (root / "data" / "mock.txt").write_text("x" * (1000 * info["total_episodes"]))
-        meta.write_text(json.dumps(info))
 
     events = {"stop_recording": False}
 
@@ -249,23 +402,54 @@ def mock(cfg: dict) -> int:
                 mark(say="Re-record episode")
                 events["rerecord_episode"] = events["exit_early"] = False
                 continue
-            info["total_episodes"] += 1
-            info["total_frames"] += frames
-            save()
+            ds.save_episode(frames)
             recorded += 1
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:   # the episode being recorded is dropped, the saved ones are finished (finally)
         mark(phase="forced")
         return 130
     finally:
         mark(say="Stop recording")
-        save()
+        ds.finalize()
         mark(say="Exiting")
     return 0
+
+
+# ----------------------------------------------------------- read check (LeRobot venv)
+def verify(cfg: dict) -> None:
+    """Loads the dataset the way training does (like pack_dataset.sh: first and last frame decoded) and prints
+    one JSON line: {"ok": true, episodes, frames}, {"ok": false, "error"} when the dataset cannot be read, or
+    {"ok": null, "error"} when LeRobot itself could not be loaded (not a problem of the dataset)."""
+    try:
+        import warnings
+        warnings.filterwarnings("ignore")
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"ok": None, "error": f"LeRobot could not be loaded: {type(e).__name__}: {e}"[:300]}))
+        return
+    try:
+        info = json.loads((Path(cfg["root"]) / "meta" / "info.json").read_text())
+        ds = LeRobotDataset(cfg["repo"], root=cfg["root"], video_backend="pyav")
+        rows, episodes = len(ds.hf_dataset), ds.meta.total_episodes      # what the data files really hold
+        in_data = len(set(ds.hf_dataset.unique("episode_index")))
+        if rows != info.get("total_frames") or in_data != info.get("total_episodes"):
+            raise ValueError(f"data files hold {in_data} episodes and {rows} frames, meta/info.json says "
+                             f"{info.get('total_episodes')} and {info.get('total_frames')}")
+        if rows:
+            ds[0], ds[rows - 1]   # decodes a video frame at each end
+        frames = rows
+        print(json.dumps({"ok": True, "episodes": episodes, "frames": frames}))
+    except Exception as e:  # noqa: BLE001 - whatever is wrong, the dataset cannot be read
+        why = f"{type(e).__name__}: {e}"
+        if e.__cause__ is not None:   # LeRobot wraps the real reason ("error while generating the dataset")
+            why += f" ({type(e.__cause__).__name__}: {e.__cause__})"
+        print(json.dumps({"ok": False, "error": why[:300]}))
 
 
 if __name__ == "__main__":
     what, cfg = sys.argv[1], json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
     if what == "check":
         check(cfg)
+    elif what == "verify":
+        verify(cfg)
     else:
         sys.exit(record(cfg) if what == "record" else mock(cfg))

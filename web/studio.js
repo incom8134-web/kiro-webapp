@@ -17,7 +17,7 @@ const HOLD_MS = 2000;
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
 
 const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
-  pendingStart: false, token: null, dismissed: null };
+  pendingStart: false, token: null, dismissed: null, camRepair: null };
 const isOperator = () => !!st.server && st.server.you.role === "operator";
 const isEngineer = () => !!st.server && !!st.server.you.engineer;
 const sess = () => (st.studio && st.studio.session) || null;
@@ -85,7 +85,7 @@ setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 
 /* Locked again (Lock button, another operator, connection lost): forget every Studio value. */
 function relock() {
-  st.studio = null; st.token = null; st.steps = null; st.pendingStart = false;
+  st.studio = null; st.token = null; st.steps = null; st.pendingStart = false; st.camRepair = null;
   resetPreviews();
   if (tr.xhr) tr.xhr.abort();   // the server stops taking it anyway
   tr.confirm = null;
@@ -94,7 +94,7 @@ function relock() {
     const el = $(id);
     el.innerHTML = ""; delete el.dataset.html; delete el.dataset.keys;
   }
-  for (const id of ["r-log", "wz-tail", "v-err"]) $(id).textContent = "";
+  for (const id of ["r-log", "wz-tail", "v-err", "v-verify-why"]) $(id).textContent = "";
 }
 
 // ---------------------------------------------------------------- notes
@@ -109,7 +109,22 @@ function toast(text, isError) {
 }
 const CODES = { CHECKS_FAILED: "rec.n.checks", TOO_SOON: "rec.n.soon", NOT_NOW: "rec.n.notnow", STOPPING: "rec.n.stopping",
   FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked",
-  NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse" };
+  NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse", VERIFYING: "rec.n.verifying" };
+/* "Repair top camera": the server answers with the code (and after a colon its technical detail) as the note's text */
+const CAM_REPAIR_CODES = ["OK_ALREADY", "REPAIRED", "NOT_CONNECTED", "ORBBEC_RUNNING", "NO_HELPER", "FAILED"];
+function onCamRepair(m) {
+  const [head, ...rest] = String(m.msg || "").split(":");
+  const code = head.trim(), detail = rest.join(":").trim();
+  const known = CAM_REPAIR_CODES.includes(code);
+  st.camRepair = { busy: false, ok: !!m.ok, code: known ? code : "", detail: known ? detail : String(m.msg || "") };
+  if (!known) toast(String(m.msg || ""), true);
+  else toast(camRepairText(), !m.ok);
+}
+const camRepairText = () => {
+  const r = st.camRepair;
+  if (!r || r.busy) return "";
+  return r.code ? t("cam.rep." + r.code) + (r.code === "FAILED" && r.detail ? ` (${r.detail})` : "") : r.detail;
+};
 function onNote(m) {
   const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
   if (m.about === "take" || m.about === "engineer") {
@@ -118,6 +133,7 @@ function onNote(m) {
     return;
   }
   if (m.about === "studio") {
+    if (m.cmd === "cam_repair") { onCamRepair(m); renderStudio(); return; }
     if (m.cmd === "start") st.pendingStart = false;
     if (m.msg === "STALE" || (m.ok && m.cmd === "check")) { renderStudio(); return; }   // a late double click: nothing to say
     if (m.ok && m.cmd === "start") toast(t("rec.n.started"));
@@ -309,6 +325,12 @@ function holdButton(el, action) {
   for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(n, reset);
   el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
+$("cam-repair").addEventListener("click", () => {
+  if ($("cam-repair").disabled) return;
+  st.camRepair = { busy: true, at: performance.now() };   // the server answers when the colour node is back (up to about 15 s)
+  send({ t: "studio", cmd: "cam_repair" });
+  renderStudio();
+});
 holdButton($("start"), () => {
   if ($("start").disabled) return;
   st.pendingStart = true;   // no second start until the server answered (double click, slow Wi-Fi)
@@ -351,6 +373,8 @@ function stepNow() {
 }
 const ACTIVE = ["starting", "tuning", "connecting", "rec", "reset", "saving"];
 const running = () => { const s = sess(); return !!s && !s.result; };
+/* The read check of the recording that just ended (its dataset must not be added to while it reads it) */
+const verifying = () => { const s = sess(); return !!(s && s.result && s.result.verify && s.result.verify.state === "checking"); };
 
 function fmtDur(s) {
   s = Math.max(0, Math.round(s));
@@ -443,6 +467,19 @@ function renderSetup(step) {
   $("s1-st").className = "st" + (step > 1 ? " live" : "");
 }
 
+/* The old code's reasons for a missing camera (cams_config.py, so101_mode_panel.py) -> our texts. Unknown: shown as they are. */
+const CAM_WHY = [["Orbbec ROS", "orbbec"], ["Gemini 335 가 USB 에 없음", "nousb"], ["UVC 노드가 없음", "nouvc"], ["컬러(MJPG", "nocolor"],
+  ["그 포트엔 Gemini", "geminiport"], ["경로 없음", "nopath"], ["cannot open", "open"], ["no frames", "frames"]];
+function camWhy(c) {
+  const raw = c.present ? (c.auto ? "" : c.error || "") : (c.reason && c.reason !== "정상" ? c.reason : "");
+  if (!raw) return "";
+  const hit = CAM_WHY.find(([needle]) => raw.includes(needle));
+  if (!hit) return t("cam.why.other", { reason: raw });
+  const ports = hit[1] === "nopath" ? (raw.split("지금 웹캠이 있는 포트:")[1] || "").trim() : "";
+  return t(ports ? "cam.why.nopath.other" : "cam.why." + hit[1], { ports });
+}
+const fpsText = (c) => (c.fps_real != null ? ` · ${Number(c.fps_real).toFixed(1)} fps` : "");
+
 const PARTS = { right_follower: ["arm.right", "arm.follower"], left_follower: ["arm.left", "arm.follower"],
   right_leader: ["arm.right", "arm.leader"], left_leader: ["arm.left", "arm.leader"] };
 const camName = (k) => (STRINGS.en["cam." + k] ? t("cam." + k) : k);
@@ -471,6 +508,7 @@ function renderChecks(step) {
     grid.innerHTML = cams.map((x) => `<div class="camtile" data-cam="${esc(x.key)}">
       <div class="qbody"><img alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
       <div class="camfoot"><label class="check"><input type="checkbox" data-pick="${esc(x.key)}"><span class="cname"></span></label><span class="cst"></span></div>
+      <p class="small warn camwhy" style="margin:0;padding:0 10px 8px" hidden></p>
     </div>`).join("") || `<p class="mute small">${esc(t("rec.nocams"))}</p>`;
     grid.dataset.keys = keys;
     for (const cb of grid.querySelectorAll("[data-pick]")) cb.addEventListener("change", () => {
@@ -485,13 +523,21 @@ function renderChecks(step) {
     const ok = x.present && !x.auto;
     tile.querySelector(".cname").textContent = camName(x.key);
     const cst = tile.querySelector(".cst");
-    cst.textContent = ok ? t("rec.cam.ok") : x.present && x.auto ? t("rec.cam.auto", { port: x.auto }) : t("cam.notconnected");
+    cst.textContent = ok ? t("rec.cam.ok") + fpsText(x) : x.present && x.auto ? t("rec.cam.auto", { port: x.auto }) : t("cam.notconnected");
     cst.className = "cst " + (ok ? "ok" : "warn");
+    const why = tile.querySelector(".camwhy"), whyText = camWhy(x);   // visible text, not only a tooltip
+    why.textContent = whyText; why.hidden = !whyText;
     const cb = tile.querySelector("[data-pick]");
     cb.checked = sel.includes(x.key);
     cb.disabled = run || form.mode === "add";
     tile.classList.toggle("off", !sel.includes(x.key));
   }
+  const rep = st.camRepair, repBusy = !!rep && rep.busy && performance.now() - rep.at < 60000;
+  $("cam-repair").disabled = run || repBusy;
+  setBtn($("cam-repair"), t(repBusy ? "cam.rep.busy" : "cam.rep"));
+  const repMsg = $("cam-repair-msg"), repText = repBusy ? t("cam.rep.busy.t") : camRepairText();
+  repMsg.textContent = repText || t("cam.rep.hint");
+  repMsg.className = "small grow " + (!repText ? "mute" : repBusy ? "accent" : rep.ok ? "accent" : "warn");
   // check results
   const rows = c ? c.rows : [];
   const list = $("cklist");
@@ -505,7 +551,8 @@ function renderChecks(step) {
   sum.textContent = !c ? t("rec.ck.none") : !fresh ? t("rec.ck.stale") : nbad ? t("rec.ck.bad", { n: nbad }) : t("rec.ck.ok");
   sum.dataset.st = !c ? "" : !fresh || nbad ? "warn" : "ok";
   const estop = !!(st.server && st.server.estop);
-  const canStart = fresh && c.ok && !run && !estop && !st.pendingStart && !s.starting;
+  const canStart = fresh && c.ok && !run && !estop && !st.pendingStart && !s.starting && !verifying();
+  $("verify-hint").hidden = !verifying();
   $("start").disabled = !canStart;
   $("start").classList.toggle("primary", canStart);
   $("recheck").classList.toggle("primary", !!c && fresh && !c.ok && step <= 2);
@@ -592,12 +639,22 @@ function renderReview(step) {
     rows.push([t("rec.eps"), `<b>${esc(i.episodes)}</b> <span class="mute">(${esc(t("rec.added", { n: res.added }))})</span>`],
       [t("rec.frames"), esc((i.frames || 0).toLocaleString())], [t("rec.fps"), esc(i.fps)],
       [t("rec.cams"), esc((i.cams || []).map(camName).join(", ") || "-")], [t("rec.size"), `${esc(i.mb ?? "-")} MB`]);
-  } else rows.push([t("rec.eps"), `<span class="mute">${esc(t("rec.v.nods"))}</span>`]);
+  } else if (!res.verify) rows.push([t("rec.eps"), `<span class="mute">${esc(t("rec.v.nods"))}</span>`]);
   rows.push([t("rec.where"), `<code>${esc(i.path || "")}</code>`]);
   if (s.backup) rows.push([t("rec.backup"), `<code>${esc(s.backup)}</code>`]);
   const html = rows.map(([a, b]) => `<tr><th>${esc(a)}</th><td>${b}</td></tr>`).join("");
   const tb = $("v-table");
   if (tb.dataset.html !== html) { tb.innerHTML = html; tb.dataset.html = html; }
+  // can the dataset be read back? (after a force stop or E-STOP it may not be)
+  const v = res.verify, vm = $("v-verify"), vw = $("v-verify-why");
+  vm.hidden = !v;
+  if (v) {
+    vm.textContent = t({ checking: "rec.v.dscheck", ok: "rec.v.dsok", broken: s.backup ? "rec.v.dsbroken" : "rec.v.dsbroken.nocopy",
+      unchecked: "rec.v.dsunknown" }[v.state] || "rec.v.dsunknown", { n: v.episodes ?? 0, f: (v.frames || 0).toLocaleString(), path: s.backup || "" });
+    vm.className = "vmsg " + (v.state === "ok" ? "ok" : v.state === "checking" ? "" : "warn");
+  }
+  const why = v && v.state !== "ok" && v.state !== "checking" ? (v.problems || []).join("\n") : "";
+  vw.hidden = !why; vw.textContent = why;
   const err = $("v-err");
   err.hidden = res.state !== "failed" || !(s.errors || []).length;
   err.textContent = (s.errors || []).join("\n");
@@ -991,7 +1048,7 @@ function renderInfo() {
     esc(b.n != null ? `${b.n}/${b.of}` : "-"), esc(b.vmin ?? "-"), esc(b.tmax ?? "-"), esc(b.alarm ? "ALARM" : b.msg || "-")]))]);
   parts.push([t("inf.ports"), table(t("inf.ports.cols").split("|"), (s.ports || []).map((p) => [code(p.dev), code(p.real), esc(yes(p.arm))]))]);
   parts.push([t("inf.cams"), table(t("inf.cams.cols").split("|"), (s.cams || []).map((c) => [esc(camName(c.key)), code(c.device || "-"),
-    esc(yes(c.present)), esc(c.auto || "-"), esc(c.live ? t("inf.yes") : "-"), esc(c.paused_by || "-"), esc(c.error || c.reason || "-")]))]);
+    esc(yes(c.present)), esc(c.auto || "-"), esc(c.live ? t("inf.yes") + fpsText(c) : "-"), esc(c.paused_by || "-"), esc(c.error || c.reason || "-")]))]);
   const now = serverNow();
   parts.push([t("inf.jobs"), table(t("inf.jobs.cols").split("|"), Object.values(i.jobs || {}).map((j) => [esc(j.label),
     esc(j.running ? t("d.running") + " · " + fmtDur(now - j.started) : t("d.stopped") + (j.code != null ? ` (${j.code})` : "")),

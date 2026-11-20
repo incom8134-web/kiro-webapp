@@ -241,6 +241,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
             elif cmd == "delete":   # a dataset, package or model, for good (the page asks first)
                 call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
+            elif cmd == "cam_repair":  # re-plugs the top camera's USB in software; never moves anything
+                call = lambda: r.cam_repair(name)  # noqa: E731
             elif cmd == "hello":
                 call = lambda: (True, "")  # noqa: E731
             else:

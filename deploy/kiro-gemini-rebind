@@ -1,0 +1,59 @@
+#!/bin/bash
+# kiro-gemini-rebind: re-plugs the top camera (Orbbec Gemini 335) in software, without a password window.
+#
+# Why: after the Orbbec ROS node was used, the camera's colour UVC node (USB interface 1.4) can disappear.
+# Unbinding and binding the USB device brings it back (same as unplugging and plugging the cable).
+# The old fix, ~/so101/gemini_uvc_fix.sh, does this through pkexec, which needs a desktop password
+# window and so fails when the web server asks for it.
+#
+# Install: deploy/README.md step 6b. The file must be owned by root and not writable by anyone else:
+# the web server runs it with "sudo -n" (deploy/kiro-camera.sudoers) and nothing else.
+#
+# It takes NO arguments. It finds the device itself (USB vendor 2bc5) and refuses anything else.
+# Exit codes (robot_server/camera.py repair_top() reads them):
+#   0 rebound   1 bind failed   2 camera not on USB   3 Orbbec ROS node running   4 refused
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+refuse() { echo "REFUSED: $*"; exit 4; }
+
+[ "$#" -eq 0 ] || refuse "this helper takes no arguments"
+[ "$(id -u)" -eq 0 ] || refuse "must run as root (through sudo)"
+
+# One run at a time
+exec 9>/run/kiro-gemini-rebind.lock || refuse "cannot take the lock"
+flock -n 9 || refuse "another rebind is running"
+
+# The Orbbec ROS node holds the camera: rebinding under it would only break it
+if pgrep -x component_conta >/dev/null; then
+  echo "Orbbec ROS node (component_container) is running: stop it first"
+  exit 3
+fi
+
+# The one USB device with vendor 2bc5. Real devices only (names like 2-1.1), never root hubs or interfaces.
+found=()
+for d in /sys/bus/usb/devices/*; do
+  [ -f "$d/idVendor" ] || continue
+  [ "$(cat "$d/idVendor" 2>/dev/null)" = "2bc5" ] || continue
+  found+=("$(basename "$d")")
+done
+if [ "${#found[@]}" -eq 0 ]; then
+  echo "Gemini 335 (vendor 2bc5) is not on USB: check the cable and the USB 3 port"
+  exit 2
+fi
+[ "${#found[@]}" -eq 1 ] || refuse "${#found[@]} USB devices with vendor 2bc5 (${found[*]}), expected exactly 1"
+dev="${found[0]}"
+[[ "$dev" =~ ^[0-9]+-[0-9]+(\.[0-9]+)*$ ]] || refuse "unexpected device name '$dev'"
+[ -d "/sys/bus/usb/drivers/usb" ] || refuse "no USB driver folder in sysfs"
+
+echo "rebinding $dev"
+# Unbind may fail when the device is already unbound (an earlier try stopped halfway): then just bind.
+echo "$dev" > /sys/bus/usb/drivers/usb/unbind 2>/dev/null || echo "note: $dev was not bound"
+sleep 2
+if ! echo "$dev" > /sys/bus/usb/drivers/usb/bind 2>/dev/null; then
+  echo "bind failed for $dev"
+  exit 1
+fi
+echo "OK $dev interfaces=$(ls /sys/bus/usb/devices/ | grep -c "^$dev:1\.")"
+exit 0
