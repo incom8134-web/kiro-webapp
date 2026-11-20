@@ -14,7 +14,7 @@ const SEND_MS = 50;      // 20 messages per second
 const DEADZONE = 0.12;   // ignore tiny gamepad stick noise
 const PX_PER_M = 36;     // map scale: about 3.5 m each way in the inset
 const HOLD_MS = 2000;    // hold-to-confirm for dangerous buttons
-const css = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;   // the page colours live on <body> (console.css)
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const ACCENT = css("--accent", "#34d07f");
 let ACC = ACCENT;
 let C = {};
@@ -372,7 +372,7 @@ function render() {
   const held = gd.block && gd.block.length ? t("guard.held", { where: gd.block.map((d) => t("dir." + d)).join(", ") }) : "";
   $("guard-sw").checked = !!gd.on;
   $("guard-st").textContent = !s ? "" : !gd.on ? t("guard.off") : !gd.lidar ? t("guard.nolidar") : held || t("guard.on", { cm: Math.round((gd.stop_m || 0) * 100) });
-  $("guard-st").className = "st grow" + (s && gd.on && gd.lidar && !held ? " live" : "");
+  $("guard-st").className = "st grow" + (!s ? "" : gd.on && gd.lidar && !held ? " live" : " warn");
   $("guard-note").textContent = !s ? "" : !gd.on ? t("guard.offnote") : !gd.lidar ? t("guard.nolidarnote") : "";
 
   const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
@@ -381,6 +381,7 @@ function render() {
     : state.robot && state.robot.wheels === "off" ? t("st.nowheels") : "";
   $("hint").textContent = hint;
   $("hint").hidden = !hint;
+  $("hint").classList.toggle("warn", !!hint && me);
   $("stick-move").classList.toggle("off", !me);
   $("stick-turn").classList.toggle("off", !me);
   for (const el of document.querySelectorAll("[data-op]")) el.disabled = !me;
@@ -558,7 +559,7 @@ function renderCams() {
     }
     img.hidden = false; empty.hidden = true;
     const tag = view.querySelector(":scope > .tag .tagtext");
-    if (tag) tag.textContent = t("cam." + key) + (c.auto ? ` · ${t("cam.auto")} ${c.auto}` : "");
+    if (tag) { tag.textContent = t("cam." + key); tag.title = c.auto ? `${t("cam.auto")} ${c.auto}` : ""; }
   }
 }
 

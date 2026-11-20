@@ -3,20 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="#09090b">
 <title>HAEBOT Robot · Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
 <script src="theme.js"></script>
 <link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="dashboard.css">
 </head>
 <body class="dash">
 <header class="bar">
   <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
-  <div class="pills">
-    <span class="pill" id="p-robot"><i class="dot" aria-hidden="true"></i><span data-i18n="top.robot">Robot</span> <b id="backend">...</b></span>
-    <span class="pill" id="p-op"><span data-i18n="top.operator">Operator</span> <b id="opstat">...</b></span>
+  <div class="cells">
+    <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
+    <div class="cell"><span class="k" data-i18n="d.uptime">Uptime</span><b id="uptime">...</b></div>
+    <div class="cell"><span class="k" data-i18n="d.devices">Devices</span><b id="devices">...</b></div>
   </div>
   <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
   <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
@@ -26,200 +28,67 @@
 
 <div id="banner" class="banner" hidden></div>
 
-<main class="dwrap">
-
-  <!-- Cameras, lidar and driving: the big camera with its readouts, panels beside and below it -->
-  <div class="cams" id="cams">
-    <div class="cams-l">
-      <section class="t cam cam-main" id="cam-main" data-cam="top">
-        <img class="cam-img" alt="" hidden>
-        <div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div>
-        <div class="hud-btns">
-          <button id="cams-toggle" class="hud-btn" type="button"><i class="ri-pause-line"></i></button>
-          <button id="cam-full" class="hud-btn" type="button" data-i18n-title="b.full"><i class="ri-fullscreen-line"></i></button>
-        </div>
-        <dl class="hud">
-          <div><dt data-i18n="d.uptime">Uptime</dt><dd id="uptime">-</dd></div>
-          <div><dt data-i18n="top.link">Link</dt><dd><span class="sig" id="sig" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span id="link">...</span></dd></div>
-        </dl>
-        <div class="cam-tag"><i class="ri-camera-line" aria-hidden="true"></i><span data-i18n="cam.top">Main camera</span><span class="qauto"></span></div>
-      </section>
-
-      <section class="t drive">
-        <header class="t-h"><h2 data-i18n="d.speed">Speed</h2><span class="chip" id="drive-chip"><i class="dot" aria-hidden="true"></i><span id="drive-who">...</span></span></header>
-        <p class="num num-xl"><b id="v-speed">-</b><i>m/s</i></p>
-        <div class="meter" id="speed-meter" role="meter" aria-valuemin="0" aria-valuemax="0.3" aria-valuenow="0"></div>
-        <div class="meter-x">
-          <span><span data-i18n="speed.fwd">Forward m/s</span> <b id="v-vx">-</b></span>
-          <span><span data-i18n="speed.side">Sideways m/s</span> <b id="v-vy">-</b></span>
-          <span><span data-i18n="speed.turn">Turn rad/s</span> <b id="v-wz">-</b></span>
-          <span class="end">0.30 m/s</span>
-        </div>
-      </section>
-    </div>
-
-    <div class="cams-r">
-      <section class="t lidar">
-        <header class="t-h"><h2 data-i18n="d.lidarview">Lidar</h2><span class="chip" id="guard-chip"><i class="dot" aria-hidden="true"></i><span id="guard-txt">...</span></span></header>
-        <div class="lidar-top">
-          <div>
-            <p class="num num-xl"><b id="v-nearest">-</b><i>m</i></p>
-            <p class="cap"><span data-i18n="d.nearest">Nearest object</span> <span id="s-nearest"></span> <span id="scan-src"></span></p>
-          </div>
-          <dl class="stats" id="sides"></dl>
-        </div>
-        <div class="lidar-box"><canvas id="lidar"></canvas></div>
-      </section>
-
-      <div class="hands">
-        <section class="t cam hand" data-cam="left_wrist">
-          <img class="cam-img" alt="" hidden>
-          <div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
-          <span class="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-          <div class="cam-tag"><span data-i18n="cam.left_wrist">Left hand</span><span class="qauto"></span></div>
-        </section>
-        <section class="t cam hand" data-cam="right_wrist">
-          <img class="cam-img" alt="" hidden>
-          <div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div>
-          <span class="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-          <div class="cam-tag"><span data-i18n="cam.right_wrist">Right hand</span><span class="qauto"></span></div>
-        </section>
-      </div>
-    </div>
-  </div>
-
-  <!-- The numbers: rounded tiles -->
-  <div class="bento">
-    <section class="t hero">
-      <div class="hero-top">
-        <div class="hero-say">
-          <h1 id="hero-line">HAEBOT</h1>
-          <p class="sub" data-i18n="b.herosub">Live numbers from the robot. History covers the last 5 minutes.</p>
-        </div>
-        <div class="hero-num">
-          <p class="lbl" data-i18n="d.dist">Distance driven</p>
-          <p class="num num-hero"><b id="v-dist">-</b><i>m</i></p>
-          <p class="cap" data-i18n="d.since">since the server started</p>
-        </div>
-      </div>
-      <div class="strip strip-lg" id="st-speed" role="img"></div>
-      <div class="strip-x"><span data-i18n="b.ago5">5 min ago</span><span class="mid" id="st-speed-x"></span><span data-i18n="b.now">now</span></div>
+<div class="dwrap">
+  <details class="liveview" id="d-live">
+  <summary><span><span data-i18n="d.live">Live view: cameras, lidar and server log</span></span><span class="mute small" id="live-hint"></span></summary>
+  <div class="livegrid">
+  <div class="quad">
+    <section class="qbox" data-cam="top">
+      <div class="qhead"><span><span data-i18n="cam.top">Main camera</span></span><button id="cam-pause" class="qbtn" type="button" aria-pressed="false"><i class="ri-pause-fill"></i><span data-i18n="cam.pause">Pause cameras</span></button></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
     </section>
-
-    <section class="t gauge-t">
-      <header class="t-h"><h2 data-i18n="b.load">Jetson load</h2><span class="unit" id="load-live"></span></header>
-      <div class="gauge-mid">
-        <svg class="gauge" viewBox="0 0 150 86" aria-hidden="true">
-          <path class="g-track" d="M 13 78 A 62 62 0 0 1 137 78"/>
-          <path class="g-fill" id="g-fill" d="M 13 78 A 62 62 0 0 1 137 78"/>
-          <g class="g-needle" id="g-needle"><line x1="75" y1="78" x2="75" y2="30"/></g>
-          <circle class="g-hub" cx="75" cy="78" r="5"/>
-        </svg>
-        <p class="num num-lg"><b id="v-load">-</b><i>%</i></p>
-        <p class="cap" id="s-load"></p>
-      </div>
-      <div class="pick" id="load-pick" role="radiogroup" data-i18n-aria="b.metric">
-        <button type="button" role="radio" data-v="cpu">CPU</button>
-        <button type="button" role="radio" data-v="gpu">GPU</button>
-        <button type="button" role="radio" data-v="mem" data-i18n="b.mem">Memory</button>
-      </div>
+    <section class="qbox">
+      <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
+      <div class="qbody light"><canvas id="lidar"></canvas></div>
     </section>
-
-    <section class="t temps-t">
-      <header class="t-h"><h2 data-i18n="c.temps">Temperatures</h2><span class="unit">°C</span></header>
-      <p class="num num-md"><b id="v-t_cpu">-</b><i>°C</i></p>
-      <p class="cap" id="s-temps"></p>
-      <div class="chart-box sm"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div>
-      <ul class="legend" id="lg-temps"></ul>
+    <section class="qbox" data-cam="left_wrist">
+      <div class="qhead"><span><span data-i18n="cam.left_wrist">Left hand</span></span></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
-
-    <section class="t chart-t">
-      <header class="t-h"><h2 data-i18n="c.cpugpu">CPU and GPU</h2>
-        <div class="pick" id="range-pick" role="radiogroup" data-i18n-aria="b.range">
-          <button type="button" role="radio" data-v="60" data-i18n="b.r1">1 min</button>
-          <button type="button" role="radio" data-v="300" data-i18n="b.r5">5 min</button>
-        </div>
-      </header>
-      <div class="pair">
-        <div><p class="key"><i class="k-line" aria-hidden="true"></i>CPU</p><p class="num num-md"><b id="v-cpu">-</b><i>%</i></p></div>
-        <div><p class="key"><i class="k-dash" aria-hidden="true"></i>GPU</p><p class="num num-md dim"><b id="v-gpu">-</b><i>%</i></p></div>
-      </div>
-      <div class="chart-box grow"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div>
-      <div class="cores">
-        <p class="cap" data-i18n="c.cores">CPU per core</p>
-        <div class="core-bars" id="cores" role="img"></div>
-      </div>
-    </section>
-
-    <section class="t power-t">
-      <header class="t-h"><h2 data-i18n="c.power">Power</h2><span class="unit">W</span></header>
-      <p class="num num-md"><b id="v-p_in">-</b><i>W</i></p>
-      <div class="alloc" id="alloc" aria-hidden="true"></div>
-      <ul class="legend two" id="lg-power"></ul>
-      <div class="strip strip-sm" id="st-power" role="img"></div>
-      <p class="cap" data-i18n="d.last5">last 5 min</p>
-    </section>
-
-    <section class="t net-t">
-      <header class="t-h"><h2 data-i18n="c.net">Wi-Fi traffic</h2><span class="unit">KB/s</span></header>
-      <p class="num num-md"><b id="v-net">-</b><i>KB/s</i></p>
-      <div class="strip strip-sm" id="st-net" role="img"></div>
-      <ul class="legend two" id="lg-net"></ul>
-    </section>
-
-    <section class="t link-t" id="link-t">
-      <header class="t-h"><h2 data-i18n="top.link">Link</h2><span class="chip" id="link-chip"><i class="dot" aria-hidden="true"></i><span id="link-state">...</span></span></header>
-      <p class="num num-huge"><b id="v-rtt">-</b><i>ms</i></p>
-      <p class="cap" data-i18n="d.thisdevice">this device</p>
-      <dl class="rows">
-        <div><dt data-i18n="top.robot">Robot</dt><dd id="lk-robot">-</dd></div>
-        <div><dt data-i18n="d.devices">Devices</dt><dd id="devices">-</dd></div>
-        <div><dt data-i18n="d.uptime">Uptime</dt><dd id="lk-up">-</dd></div>
-      </dl>
-      <div class="link-foot">
-        <div class="strip strip-sm" id="st-rtt" role="img"></div>
-        <p class="cap" data-i18n="b.pings">Recent pings</p>
-        <a class="cta" href="./"><i class="ri-steering-2-line" aria-hidden="true"></i><span data-i18n="b.opencontrol">Open control</span></a>
-      </div>
-    </section>
-
-    <section class="t servos-t">
-      <header class="t-h"><h2 data-i18n="d.servos">Servo boards</h2></header>
-      <div class="scroll-x"><table class="tbl" id="servos"></table></div>
-    </section>
-
-    <section class="t svolt-t">
-      <header class="t-h"><h2 data-i18n="c.svolt">Servo voltage per board</h2><span class="unit">V</span></header>
-      <div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div>
-    </section>
-
-    <section class="t stemp-t">
-      <header class="t-h"><h2 data-i18n="c.stemp">Servo temperature per joint</h2><span class="unit">°C</span></header>
-      <div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div>
-    </section>
-
-    <section class="t act-t">
-      <header class="t-h"><h2 data-i18n="sec.log">Activity</h2></header>
-      <ul id="log" class="act"></ul>
-    </section>
-
-    <section class="t progs-t">
-      <header class="t-h"><h2 data-i18n="d.programs">Programs</h2></header>
-      <ul class="progs" id="programs"></ul>
-    </section>
-
-    <section class="t voice-t">
-      <header class="t-h"><h2 data-i18n="sec.voice">Voice</h2><i class="ri-mic-line unit" aria-hidden="true"></i></header>
-      <p class="quote" id="voice">-</p>
-    </section>
-
-    <!-- the server log, live: the same lines the server prints in its own terminal -->
-    <section class="t term">
-      <header class="t-h"><h2><span data-i18n="d.term">server log</span></h2><span class="chip" id="term-live"><i class="dot" aria-hidden="true"></i><span id="term-live-txt"></span></span></header>
-      <div class="term-wrap"><div id="term" class="term-body" role="log" tabindex="0"><div class="tl prompt" id="term-prompt"><span class="ps">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
+    <section class="qbox" data-cam="right_wrist">
+      <div class="qhead"><span><span data-i18n="cam.right_wrist">Right hand</span></span></div>
+      <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
   </div>
-</main>
+  <!-- the server log, live, in a terminal window -->
+  <section class="term">
+    <div class="term-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">haebot — <span data-i18n="d.term">server log</span></span><span id="term-live" class="term-live"></span></div>
+    <div class="term-wrap"><div id="term" class="term-body" role="log"><div class="tl prompt" id="term-prompt"><span class="ps">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
+  </section>
+  </div>
+  </details>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="charts">
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cores">CPU per core</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cores"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.speed">Robot speed</span></span><span class="mute">m/s</span></div><div class="chart-box"><canvas id="ch-speed"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.net">Wi-Fi traffic</span></span><span class="mute">KB/s</span></div><div class="chart-box"><canvas id="ch-net"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.sides">Nearest object by side</span></span><span class="mute">m</span></div><div class="chart-box"><canvas id="ch-sides"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.svolt">Servo voltage per board</span></span><span class="mute">V</span></div><div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div></section>
+    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.stemp">Servo temperature per joint</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div></section>
+  </div>
+
+  <div class="lower">
+    <section class="dsec">
+      <h2><span data-i18n="d.servos">Servo boards</span></h2>
+      <table class="kv dtable" id="servos"></table>
+    </section>
+    <section class="dsec">
+      <h2><span data-i18n="d.programs">Programs</span></h2>
+      <table class="kv dtable" id="programs"></table>
+      <h2 style="margin-top:18px"><span data-i18n="sec.voice">Voice</span></h2>
+      <p class="big-quote" id="voice">-</p>
+    </section>
+    <section class="dsec">
+      <h2><span data-i18n="sec.log">Activity</span></h2>
+      <ul id="log" class="log"></ul>
+    </section>
+  </div>
+</div>
 <div class="foot" id="ver"></div>
 <script src="vendor/chartjs/chart.umd.min.js"></script>
 <script src="i18n.js"></script>
