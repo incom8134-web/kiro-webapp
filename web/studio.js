@@ -7,8 +7,9 @@
  * Studio commands. Camera previews use a token the server gives to the engineer connection only.
  *
  * Recording a dataset, top to bottom: 1 dataset, 2 cameras and checks, 3 record, 4 review.
- * Below that: the engineer tools (guard distance, servo tester, check wizard) and the read-only
- * engineer information.
+ * Then training a skill: package and download a dataset, Google Colab, upload the trained model, and
+ * the training files (datasets, packages, models: download, delete). Below that: the engineer tools
+ * (guard distance, servo tester, check wizard) and the read-only engineer information.
  */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -86,7 +87,10 @@ setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 function relock() {
   st.studio = null; st.token = null; st.steps = null; st.pendingStart = false;
   resetPreviews();
-  for (const id of ["camgrid", "cklist", "info", "v-table", "ds-info", "repo-pick", "sv-table", "wz-steps", "wz-detail"]) {
+  if (tr.xhr) tr.xhr.abort();   // the server stops taking it anyway
+  tr.confirm = null;
+  for (const id of ["camgrid", "cklist", "info", "v-table", "ds-info", "repo-pick", "sv-table", "wz-steps", "wz-detail",
+    "t-ds", "t-pkg", "fm-ds", "fm-pkg", "fm-models"]) {
     const el = $(id);
     el.innerHTML = ""; delete el.dataset.html; delete el.dataset.keys;
   }
@@ -104,7 +108,8 @@ function toast(text, isError) {
   toastTimer = setTimeout(() => { n.hidden = true; }, 5000);
 }
 const CODES = { CHECKS_FAILED: "rec.n.checks", TOO_SOON: "rec.n.soon", NOT_NOW: "rec.n.notnow", STOPPING: "rec.n.stopping",
-  FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked" };
+  FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked",
+  NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse" };
 function onNote(m) {
   const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
   if (m.about === "take" || m.about === "engineer") {
@@ -117,6 +122,7 @@ function onNote(m) {
     if (m.msg === "STALE" || (m.ok && m.cmd === "check")) { renderStudio(); return; }   // a late double click: nothing to say
     if (m.ok && m.cmd === "start") toast(t("rec.n.started"));
     else if (m.ok && m.cmd === "pack") toast(t("rec.n.packing"));
+    else if (m.ok && m.cmd === "delete") toast(t("fm.deleted"));
     else if (!m.ok) toast(text, true);
     renderStudio();
     return;
@@ -366,6 +372,7 @@ function renderStudio() {
   renderChecks(step);
   renderRecord(step);
   renderReview(step);
+  renderTrain();
   renderTools();
   renderInfo();
   updatePreviews();
@@ -630,8 +637,206 @@ function updatePreviews() {
 }
 document.addEventListener("visibilitychange", updatePreviews);
 
+// -------------------------------------------------------- train a skill
+/* Dataset package -> Google Colab -> model zip -> Autonomous skills. Downloads carry this connection's
+   token in the address (it stops working when the Studio locks); the upload sends it in a header. */
+const tr = { ds: "", file: null, name: "", nameTouched: false, xhr: null, pct: 0, checking: false, msg: null, confirm: null };
+try { tr.ds = localStorage.getItem("kiro-studio-train-ds") || ""; } catch (e) { /* ignore */ }
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;   // same rule as the server
+const UP_CODES = ["NAME", "EXISTS", "TOO_BIG", "BUSY", "DISK", "NOT_ZIP", "BAD_PATH", "ENCRYPTED", "TOO_MANY", "NO_MODEL", "MANY_MODELS",
+  "EXTRA_FILES", "BAD_FILE", "BAD_CONFIG", "BAD_WEIGHTS", "MISSING", "LOCKED", "INCOMPLETE", "NETWORK", "ABORTED"];
+const train = () => (st.studio && st.studio.train) || { models: [], packages: [] };
+const qtok = () => encodeURIComponent(st.token || "");
+const pkgUrl = (f) => `/api/studio/packages/${encodeURIComponent(f)}?token=${qtok()}`;
+const modelUrl = (n) => `/api/studio/models/${encodeURIComponent(n)}.zip?token=${qtok()}`;
+const fmtMB = (mb) => (mb == null ? "-" : mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`);
+const fmtDate = (sec) => (sec ? new Date(sec * 1000).toLocaleString(LANG === "ko" ? "ko-KR" : "en-GB",
+  { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-");
+const pkgsOf = (repo) => train().packages.filter((p) => p.name === repo.split("/")[1]);   // newest first
+const armText = (a) => ({ right: t("rec.arm.right"), left: t("rec.arm.left"), both: t("rec.arm.both"), other: t("fm.arm.other") }[a] || "");
+const jobOn = (name) => !!(st.robot && st.robot.jobs && st.robot.jobs[name] && st.robot.jobs[name].running);
+const packing = () => !!(st.studio && st.studio.pack && st.studio.pack.running);
+
+$("t-ds").addEventListener("change", () => {
+  tr.ds = $("t-ds").value;
+  try { localStorage.setItem("kiro-studio-train-ds", tr.ds); } catch (e) { /* ignore */ }
+  renderTrain();
+});
+
+function renderTrain() {
+  const T = train(), ds = datasets(), s = sess();
+  if (!dsOf(tr.ds)) tr.ds = (s && dsOf(s.settings.repo) ? s.settings.repo : (ds[0] || {}).repo) || "";
+  const opts = ds.map((d) => `<option value="${esc(d.repo)}">${esc(d.repo)} · ${esc(t("rec.nep", { n: d.episodes }))}</option>`).join("")
+    || `<option value="" disabled>${esc(t("rec.nods"))}</option>`;
+  const sel = $("t-ds");
+  if (sel.dataset.html !== opts) { sel.innerHTML = opts; sel.dataset.html = opts; }
+  sel.value = tr.ds;
+  sel.disabled = !ds.length;
+
+  // 1. the newest package of the chosen dataset
+  const d = dsOf(tr.ds), pk = st.studio.pack, mine = !!(pk && pk.repo === tr.ds);
+  const p = d ? pkgsOf(d.repo)[0] : null, stale = !!(p && d.changed && p.mtime < d.changed);
+  const busy = packing() || running();
+  let html;
+  if (!d) html = `<p class="small mute">${esc(t("tr.nods"))}</p>`;
+  else if (mine && pk.running) html = `<p class="small accent">${esc(t("tr.packing"))}</p>`;
+  else {
+    html = "";
+    if (mine && !pk.ok && pk.code != null) html += `<p class="small note err">${esc(t("tr.packfail", { code: pk.code }))}</p><pre class="tail">${esc((pk.tail || []).join("\n"))}</pre>`;
+    if (p) {
+      html += `<div class="pkgline"><i class="ri-archive-line"></i><div class="grow"><b class="mono">${esc(p.file)}</b>`
+        + `<span class="small mute">${esc(fmtMB(p.mb))} · ${esc(fmtDate(p.mtime))}</span>${stale ? `<span class="small warn">${esc(t("tr.stale"))}</span>` : ""}</div></div>`
+        + `<div class="stepfoot"><a class="btn${stale ? "" : " primary"}" href="${pkgUrl(p.file)}" download><i class="ri-download-2-line"></i><span>${esc(t("tr.dl"))}</span></a>`
+        + (p.sha ? `<a class="btn" href="${pkgUrl(p.sha)}" download><i class="ri-shield-check-line"></i><span>${esc(t("tr.dlsha"))}</span></a>` : "")
+        + `<button class="btn${stale ? " primary" : ""}" type="button" data-pack ${busy ? "disabled" : ""}><i class="ri-archive-line"></i><span>${esc(t("tr.repack"))}</span></button></div>`;
+    } else {
+      html += `<p class="small mute">${esc(t("tr.nopkg"))}</p><div class="stepfoot"><button class="btn primary" type="button" data-pack ${busy ? "disabled" : ""}>`
+        + `<i class="ri-archive-line"></i><span>${esc(t("tr.pack"))}</span></button></div>`;
+    }
+  }
+  const box = $("t-pkg");
+  if (box.dataset.html !== html) {
+    box.innerHTML = html; box.dataset.html = html;
+    const b = box.querySelector("[data-pack]");
+    if (b) b.addEventListener("click", () => send({ t: "studio", cmd: "pack", repo: tr.ds }));
+  }
+  // 3. Colab
+  $("t-colab").href = T.colab || "https://colab.research.google.com/";
+  $("t-nb").hidden = !T.notebook;
+  if (T.notebook) $("t-nb").href = `/api/studio/notebook.ipynb?token=${qtok()}`;
+  renderUpload();
+  renderFiles();
+}
+
+// 6. upload the model zip
+function suggestName(fileName) {
+  let n = fileName.replace(/\.zip$/i, "").replace(/\s*\(\d+\)$/, "").replace(/_pretrained_model$/, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[^A-Za-z0-9]+/, "").slice(0, 72) || "skill";
+  const taken = new Set(train().models.map((m) => m.name));
+  if (taken.has(n)) { let i = 2; while (taken.has(`${n}_${i}`)) i++; n = `${n}_${i}`; }
+  return n;
+}
+function uploadProblem() {
+  const f = tr.file;
+  if (!f) return "";
+  if (!/\.zip$/i.test(f.name)) return t("up.e.NOT_ZIP");
+  if (f.size > (train().zip_max_mb || 3000) * 1e6) return t("up.e.TOO_BIG", { detail: fmtMB(f.size / 1e6) });
+  if (!MODEL_RE.test(tr.name)) return t("up.e.NAME");
+  if (train().models.some((m) => m.name === tr.name)) return t("up.e.EXISTS", { detail: tr.name });
+  return "";
+}
+$("t-file").addEventListener("change", () => {
+  tr.file = $("t-file").files[0] || null; tr.msg = null;
+  if (tr.file && !tr.nameTouched) { tr.name = suggestName(tr.file.name); $("t-name").value = tr.name; }
+  renderUpload();
+});
+$("t-name").addEventListener("input", () => { tr.name = $("t-name").value.trim(); tr.nameTouched = !!tr.name; tr.msg = null; renderUpload(); });
+$("t-up").addEventListener("click", () => {
+  if (tr.xhr || !tr.file || uploadProblem() || !st.token) return;
+  const xhr = new XMLHttpRequest();
+  tr.xhr = xhr; tr.pct = 0; tr.checking = false; tr.msg = null;
+  xhr.open("POST", `/api/studio/models?name=${encodeURIComponent(tr.name)}`);
+  xhr.setRequestHeader("X-Studio-Token", st.token);
+  xhr.setRequestHeader("Content-Type", "application/zip");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) { tr.pct = e.loaded / e.total; renderUpload(); } };
+  xhr.upload.onload = () => { tr.checking = true; renderUpload(); };
+  xhr.onload = () => { let r = {}; try { r = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ } uploaded(r, xhr.status); };
+  xhr.onerror = () => uploaded({ code: "NETWORK" }, 0);
+  xhr.onabort = () => uploaded({ code: "ABORTED" }, 0);
+  xhr.send(tr.file);
+  renderUpload();
+});
+function uploaded(r, status) {
+  tr.xhr = null; tr.checking = false;
+  if (r.ok && r.model) {
+    const m = r.model;
+    tr.msg = { ok: true, text: t("up.ok", { name: m.name }) + (m.playable ? "" : " " + t("fm.noplay." + m.arms)) };
+    tr.file = null; tr.name = ""; tr.nameTouched = false; $("t-file").value = ""; $("t-name").value = "";
+    toast(t("up.okshort", { name: m.name }));
+  } else {
+    const code = status === 403 ? "LOCKED" : UP_CODES.includes(r.code) ? r.code : "OTHER";
+    tr.msg = { ok: false, text: t("up.e." + code, { detail: r.detail || r.code || status }) };
+  }
+  renderUpload();
+}
+window.addEventListener("beforeunload", (e) => { if (tr.xhr) { e.preventDefault(); e.returnValue = ""; } });
+
+function renderUpload() {
+  const problem = uploadProblem(), sending = !!tr.xhr;
+  const other = train().uploading && !sending ? train().uploading : null;
+  const can = !!tr.file && !problem && !sending && !other && !!st.token;
+  $("t-up").disabled = !can;
+  $("t-up").classList.toggle("primary", can);
+  $("t-file").disabled = sending;
+  $("t-name").disabled = sending;
+  setBtn($("t-up"), t(sending ? "up.busy" : "tr.upload"));
+  $("t-up-bar").hidden = !sending;
+  $("t-up-bar").querySelector("i").style.width = `${Math.round((tr.checking ? 1 : tr.pct) * 100)}%`;
+  const f = tr.file;
+  $("t-up-pct").textContent = sending ? (tr.checking ? t("up.checking")
+    : t("up.sending", { p: Math.round(tr.pct * 100), a: fmtMB(tr.pct * f.size / 1e6), b: fmtMB(f.size / 1e6) })) : f ? fmtMB(f.size / 1e6) : "";
+  const msg = $("t-up-msg");
+  const text = sending ? "" : problem || (other ? t("up.e.BUSY", { detail: other.by }) : tr.msg ? tr.msg.text : "");
+  msg.hidden = !text;
+  msg.textContent = text;
+  msg.className = "small " + (!problem && tr.msg && tr.msg.ok ? "accent" : "note err");
+}
+
+// ------------------------------------------------------- training files
+/* Datasets, packages and trained models on the robot: download, package, delete (hold to confirm). */
+function fitem(kind, name, title, meta, actions, warn, canDelete) {
+  const key = `${kind}:${name}`, asking = tr.confirm === key;
+  return `<div class="fitem${asking ? " asking" : ""}" data-key="${esc(key)}"><div class="fmain">${title}`
+    + `<span class="small mute">${meta.filter(Boolean).map(esc).join(" · ")}</span>${warn ? `<span class="small warn">${esc(warn)}</span>` : ""}</div>`
+    + `<div class="facts">${actions}<button class="btn" type="button" data-act="ask" ${canDelete && !asking ? "" : "disabled"}><i class="ri-delete-bin-line"></i><span>${esc(t("fm.del"))}</span></button></div>`
+    + (asking ? `<div class="fconfirm"><p>${esc(t("fm.sure." + kind, { name }))}</p><div class="stepfoot">`
+      + `<button class="btn hold" type="button" data-act="really"><span class="fill"></span><i class="ri-delete-bin-line"></i><span>${esc(t("fm.hold"))}</span></button>`
+      + `<button class="btn" type="button" data-act="cancel">${esc(t("fm.cancel"))}</button></div></div>` : "")
+    + `</div>`;
+}
+const none = (k) => `<p class="small mute">${esc(t(k))}</p>`;
+
+function renderFiles() {
+  const T = train(), recBusy = running() || packing() || !!(st.studio && st.studio.starting);
+  const dsH = datasets().map((d) => fitem("dataset", d.repo, `<b>${esc(d.repo)}</b>`,
+    [t("rec.nep", { n: d.episodes }), t("rec.nframes", { n: (d.frames || 0).toLocaleString() }), fmtMB(d.mb), fmtDate(d.changed || d.mtime),
+      (d.cams || []).map(camName).join(" + ")],
+    `<button class="btn" type="button" data-act="pack" ${recBusy ? "disabled" : ""}><i class="ri-archive-line"></i><span>${esc(t("tr.pack"))}</span></button>`,
+    "", !recBusy)).join("") || none("rec.nods");
+  const pkH = T.packages.map((p) => fitem("package", p.file, `<b class="mono">${esc(p.file)}</b>`, [fmtMB(p.mb), fmtDate(p.mtime)],
+    `<a class="btn" href="${pkgUrl(p.file)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dl"))}</span></a>`
+    + (p.sha ? `<a class="btn" href="${pkgUrl(p.sha)}" download><span>.sha256</span></a>` : ""), "", !packing())).join("") || none("fm.none.pkg");
+  const skillOn = jobOn("skill");
+  const mH = T.models.map((m) => fitem("model", m.name, `<b>${esc(m.name)}</b>`,
+    [String(m.type).toUpperCase(), armText(m.arms), m.steps ? t("fm.steps", { n: m.steps.toLocaleString() }) : "", m.dataset,
+      (m.cams || []).map(camName).join(" + "), fmtMB(m.mb), fmtDate(m.mtime)],
+    `<a class="btn" href="${modelUrl(m.name)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dl"))}</span></a>`,
+    m.playable ? "" : t("fm.noplay." + m.arms), !skillOn)).join("") || none("fm.none.models");
+  for (const [id, html] of [["fm-ds", dsH], ["fm-pkg", pkH], ["fm-models", mH]]) {
+    const el = $(id);
+    if (el.dataset.html === html) continue;
+    el.innerHTML = html; el.dataset.html = html;
+    const really = el.querySelector("[data-act=really]");
+    if (really) holdButton(really, () => {
+      const [kind, ...rest] = tr.confirm.split(":");
+      send({ t: "studio", cmd: "delete", kind, name: rest.join(":") });
+      tr.confirm = null; renderFiles();
+    });
+  }
+}
+for (const id of ["fm-ds", "fm-pkg", "fm-models"]) $(id).addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]"), item = e.target.closest(".fitem");
+  if (!b || !item || b.disabled) return;
+  const act = b.dataset.act, key = item.dataset.key;
+  if (act === "ask") tr.confirm = key;
+  else if (act === "cancel") tr.confirm = null;
+  else if (act === "pack") send({ t: "studio", cmd: "pack", repo: key.slice("dataset:".length) });
+  else return;
+  renderFiles();
+});
+
 // ----------------------------------------------------------- engineer tools
-const eng = { sel: 0, servo: null, prep: {}, secs: 20 };
+const eng ={ sel: 0, servo: null, prep: {}, secs: 20 };
 const MOTION_STEPS = new Set(["teleop_left", "teleop_right", "teleop_both", "wheels", "mecanum_floor", "ros_base"]);
 $("guard-profile").addEventListener("change", () => send({ t: "guard_profile", profile: $("guard-profile").value }));
 const svPort = () => $("sv-port").value;
@@ -772,7 +977,7 @@ function renderInfo() {
   ])]);
   const P = i.paths || {};
   parts.push([t("inf.paths"), table(null, [["so101", P.so101], ["venv", P.venv], ["datasets", P.datasets], ["backups", P.backups],
-    ["calibration", P.calibration], ["policies", P.policies]].map(([k, v]) => [esc(t("inf.p." + k)), code(v || "-")]))]);
+    ["calibration", P.calibration], ["policies", P.policies], ["packages", P.packages]].map(([k, v]) => [esc(t("inf.p." + k)), code(v || "-")]))]);
   const B = i.boards || {};
   parts.push([t("inf.boards"), table(t("inf.boards.cols").split("|"), Object.entries(B).filter(([k]) => !k.startsWith("_")).map(([k, b]) => [
     esc((PARTS[k] || [k === "base" ? "sec.base" : k]).map((x) => t(x)).join(" ")), esc(b.state === "busy" ? `${b.state} (${b.by})` : b.state || "-"),

@@ -246,6 +246,7 @@ details.fold[open] > summary { margin-bottom: 12px; }
 .btn.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
 .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
 .btn.wide { width: 100%; }
+a.btn { text-decoration: none; }
 .btn.big { height: 42px; font-size: 14px; }
 .btn.hold { position: relative; overflow: hidden; }
 .btn.hold .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent-soft); pointer-events: none; }
@@ -599,6 +600,51 @@ details.logfold > summary { font-size: 12.5px; }
 .vmsg.warn { background: var(--warn-soft); color: var(--warn); }
 #v-table th { width: 30%; }
 #v-pack-st { margin-top: -6px; overflow-wrap: anywhere; }
+
+/* Train a skill: a numbered guide, then the training files (datasets, packages, models) */
+.sect { margin: 28px 0 0; }
+.sect h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+.sect p { margin: 2px 0 0; }
+.tsteps { list-style: none; margin: 0; padding: 0; display: grid; }
+.tsteps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding: 14px 2px; border-top: 1px solid var(--line); }
+.tsteps > li:first-child { border-top: 0; padding-top: 2px; }
+.tsteps > li:last-child { padding-bottom: 2px; }
+.tsteps .num { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--raise-2); font-size: 12px; font-weight: 600; }
+.tbody { display: grid; gap: 10px; min-width: 0; }
+.tbody h3 { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; }
+.tbody p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.55; overflow-wrap: anywhere; }
+.tbody p.small { font-size: 12px; color: var(--mute); }
+.tbody p.accent { color: var(--accent); }
+.tbody p.note.err { color: var(--warn); }
+.tpkg { display: grid; gap: 10px; min-width: 0; }
+.tpkg:empty { display: none; }
+.tpkg .tail { margin: 0; }
+.pkgline { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--raise-2); min-width: 0; }
+.pkgline > i { font-size: 18px; color: var(--mute); margin-top: 1px; }
+.pkgline .grow { display: grid; gap: 2px; }
+.pkgline b { font-size: 12px; overflow-wrap: anywhere; }
+input[type=file] { width: 100%; max-width: 100%; font: inherit; font-size: 13px; color: var(--ink-2); padding: 6px; border: 1px dashed var(--line-2); border-radius: var(--r-sm); background: var(--raise-2); min-width: 0; }
+input[type=file]::file-selector-button { font: inherit; font-size: 12.5px; font-weight: 500; margin-right: 10px; padding: 5px 12px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--raise); color: var(--ink); cursor: pointer; }
+input[type=file]:disabled { opacity: .5; }
+#t-up-bar i { background: var(--accent); }
+#t-up-msg { margin: 0; overflow-wrap: anywhere; }
+#t-up-pct { font-variant-numeric: tabular-nums; }
+#files h4.sub:first-of-type { margin-top: 4px; }
+.flist { display: grid; min-width: 0; }
+.flist > p { margin: 0 0 4px; }
+.fitem { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.fitem:first-child { border-top: 0; }
+.fmain { display: grid; gap: 2px; min-width: 0; }
+.fmain b { font-size: 13px; overflow-wrap: anywhere; }
+.fmain b.mono { font-size: 12px; }
+.facts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.facts .btn { height: 32px; padding: 0 10px; font-size: 12.5px; }
+.fconfirm { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--warn-soft); }
+.fconfirm p { margin: 0; font-size: 13px; color: var(--warn); font-weight: 500; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .fitem { grid-template-columns: minmax(0, 1fr); }
+  .facts { justify-content: flex-start; }
+}
 
 details.fold > summary h3 i { font-size: 15px; color: var(--mute); }
 details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: ellipsis; }

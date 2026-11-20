@@ -171,7 +171,8 @@ class Recorder:
         cams = sorted(k.split(".")[-1] for k, v in i.get("features", {}).items()
                       if k.startswith("observation.images.") and v.get("dtype") in ("video", "image"))
         out.update(ok=True, episodes=i.get("total_episodes", 0), frames=i.get("total_frames", 0), fps=i.get("fps"),
-                   robot_type=i.get("robot_type"), cams=cams, mtime=p.stat().st_mtime)
+                   robot_type=i.get("robot_type"), cams=cams, mtime=p.stat().st_mtime,
+                   changed=(p / "meta" / "info.json").stat().st_mtime)   # a package older than this misses episodes
         if size:
             out["mb"] = round(dir_size(p) / 1e6, 1)
         return out

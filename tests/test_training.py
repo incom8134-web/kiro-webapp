@@ -105,6 +105,8 @@ def test_two_arm_and_left_arm_models_cannot_be_played_yet(robot, cfg):
     assert not ms["left_act"]["playable"] and ms["left_act"]["arms"] == "left"
     assert robot.skill("both_act", True, "Laptop") == (False, "TWO_ARM")
     assert robot.skill("left_act", True, "Laptop") == (False, "LEFT_ARM")
+    put_model(root, "odd_act", dim=7)
+    assert robot.skill("odd_act", True, "Laptop") == (False, "NO_FIT")
     assert not robot.jobs.running("skill")
     assert robot.skill("right_act", True, "Laptop")[0]                      # one-arm playback unchanged
     assert robot.jobs.running("skill")

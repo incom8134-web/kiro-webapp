@@ -308,7 +308,7 @@ class Robot:
         if m is None:
             return False, "Model not found."
         if not m["playable"]:  # run_policy.sh drives the right arm only: a two-arm or left-arm model would go wrong
-            return False, "TWO_ARM" if m["arms"] == "both" else "LEFT_ARM"
+            return False, {"both": "TWO_ARM", "left": "LEFT_ARM"}.get(m["arms"], "NO_FIT")
         missing = self._missing(["right_follower"])
         if missing:
             return False, "Not connected: right follower"
