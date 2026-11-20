@@ -176,10 +176,10 @@ class Recorder:
             out["mb"] = round(dir_size(p) / 1e6, 1)
         return out
 
-    def datasets(self) -> list[dict]:
+    def datasets(self, fresh: bool = False) -> list[dict]:
         """Every dataset in the folder, newest first (cached for a few seconds)."""
         t, cached = self._ds_cache
-        if time.monotonic() - t < 3.0:
+        if not fresh and time.monotonic() - t < 3.0:
             return cached
         out = []
         if self.root.is_dir():
@@ -191,6 +191,10 @@ class Recorder:
         out.sort(key=lambda x: x.get("mtime", 0), reverse=True)
         self._ds_cache = (time.monotonic(), out)
         return out
+
+    def forget(self) -> None:
+        """The dataset list changed (deleted): read it again on the next snapshot."""
+        self._ds_cache = (0.0, [])
 
     # --------------------------------------------------------------- facts
     def facts(self) -> dict:
@@ -470,20 +474,24 @@ class Recorder:
 
     # ------------------------------------------------------------------ pack
     def pack(self, repo: str, who: str) -> tuple[bool, str]:
-        """The old 'package for upload' button: pack_dataset.sh <name> -> ~/Desktop/데이터셋_업로드/."""
+        """The old 'package for upload' button: pack_dataset.sh <name> <folder> (its own default folder
+        ~/Desktop/데이터셋_업로드 on the robot) -> <name>_<date>.tar.gz + .sha256, listed for download."""
         if self.r.jobs.running("record") or self.r.jobs.running("pack"):
             return False, "RUNNING"
         i = self.info(repo, size=False)
         if not i["ok"]:
             return False, "NO_DATASET"
-        if self.r.mock:
-            out = self.root.parent / "mock_uploads" / (repo.split("/")[1] + "_mock.tar.gz")
-            code = ("import sys,tarfile,os,time;src,out=sys.argv[1],sys.argv[2];os.makedirs(os.path.dirname(out),exist_ok=True);"
+        out_dir = self.r.train.pkg_dir
+        if self.r.mock:   # the same file names as pack_dataset.sh, without the LeRobot read check
+            out = out_dir / f"{repo.split('/')[1]}_{time.strftime('%Y%m%d_%H%M')}.tar.gz"
+            code = ("import sys,tarfile,os,time,hashlib;src,out=sys.argv[1],sys.argv[2];os.makedirs(os.path.dirname(out),exist_ok=True);"
                     "print('묶는 중: '+out,flush=True);time.sleep(1);"
-                    "t=tarfile.open(out,'w:gz');t.add(src,arcname=os.path.basename(src));t.close();print('완료:',flush=True)")
+                    "t=tarfile.open(out,'w:gz');t.add(src,arcname=os.path.basename(src));t.close();"
+                    "h=hashlib.sha256(open(out,'rb').read()).hexdigest();"
+                    "open(out[:-7]+'.sha256','w').write(h+'  '+os.path.basename(out)+chr(10));print('완료:',flush=True)")
             cmd = [sys.executable, "-c", code, i["path"], str(out)]
         else:
-            cmd = ["bash", str(self.r.so101 / "pack_dataset.sh"), repo]
+            cmd = ["bash", str(self.r.so101 / "pack_dataset.sh"), repo, str(out_dir)]
         env = {**self.r._venv_env(), "HF_LEROBOT_HOME": str(self.root), "LEROBOT_VENV": str(self.r.venv)}
         ok, msg = self.r._start("pack", JobSpec(cmd, frozenset(), cwd=str(self.r.so101) if not self.r.mock else None,
                                                 env=env, label="package dataset", stop_wait=10.0), who)

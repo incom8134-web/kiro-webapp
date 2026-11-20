@@ -9,9 +9,10 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import ClientDisconnect
 
 from . import __version__
 from . import guard
@@ -20,6 +21,7 @@ from .config import MOCK_ENGINEER_PIN, Config
 from .control import Controller
 from .logbuf import install as install_log
 from .robot import Robot
+from .training import ZIP_MAX, Refused
 
 log = logging.getLogger("kiro")
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -199,6 +201,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.rec.control(cmd, msg.get("ep"), msg.get("phase"), name)  # noqa: E731
             elif cmd == "pack":
                 call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
+            elif cmd == "delete":   # a dataset, package or model, for good (the page asks first)
+                call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
             elif cmd == "hello":
                 call = lambda: (True, "")  # noqa: E731
             else:
@@ -319,6 +323,87 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
 
         return StreamingResponse(stream(), media_type="multipart/x-mixed-replace; boundary=frame",
                                  headers={"Cache-Control": "no-store"})
+
+    # ------------------------------------------------ training files (Studio)
+    def studio_who(request: Request, token: str = "") -> str:
+        """The unlocked engineer behind a Studio HTTP request, or 403. The token comes from the Studio
+        state (header X-Studio-Token, or ?token= for downloads) and dies with lock, leave or a new operator."""
+        origin = request.headers.get("origin")
+        if origin and urlsplit(origin).netloc != request.headers.get("host"):
+            raise HTTPException(403, "Wrong origin")
+        tok = request.headers.get("x-studio-token") or token
+        if not ctrl.token_ok(tok):
+            raise HTTPException(403, "Studio is locked")
+        return who(ctrl.tokens[tok])
+
+    @app.get("/api/studio/packages/{file}")
+    def studio_package(file: str, request: Request, token: str = ""):
+        """A dataset package (.tar.gz) or its checksum (.sha256), to take to Google Colab."""
+        studio_who(request, token)
+        p = state["robot"].train.package_path(file)
+        if p is None:
+            raise HTTPException(404, "no such package")
+        return FileResponse(p, filename=file, media_type="application/gzip" if file.endswith(".gz") else "text/plain")
+
+    @app.get("/api/studio/models/{name}.zip")
+    def studio_model_zip(name: str, request: Request, token: str = ""):
+        """A trained model as a zip (built while it is sent)."""
+        studio_who(request, token)
+        tr = state["robot"].train
+        if tr.model_dir(name) is None:
+            raise HTTPException(404, "no such model")
+        return StreamingResponse(tr.zip_stream(name), media_type="application/zip",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}_pretrained_model.zip"'})
+
+    @app.get("/api/studio/notebook.ipynb")
+    def studio_notebook(request: Request, token: str = ""):
+        """The Colab notebook itself, for uploading it in Colab when the GitHub link does not work."""
+        studio_who(request, token)
+        nb = state["robot"].train.notebook
+        if not nb.is_file():
+            raise HTTPException(404, "no notebook")
+        return FileResponse(nb, filename=nb.name, media_type="application/x-ipynb+json")
+
+    @app.post("/api/studio/models")
+    async def studio_upload(request: Request, name: str = ""):
+        """A trained model zip from the browser (the request body). Written to a temporary file while it
+        arrives, then checked and installed as <policies>/<name>/pretrained_model (training.py)."""
+        by = studio_who(request)
+        tok = request.headers.get("x-studio-token", "")
+        tr = state["robot"].train
+
+        def refused(e: Refused) -> JSONResponse:
+            code = 409 if e.code in ("EXISTS", "BUSY") else 413 if e.code == "TOO_BIG" else 400
+            return JSONResponse({"ok": False, "code": e.code, "detail": e.detail}, status_code=code)
+        try:
+            size = int(request.headers["content-length"])
+        except (KeyError, ValueError):
+            size = None
+        try:
+            tmp = await asyncio.to_thread(tr.begin_upload, name, size, by)
+        except Refused as e:
+            return refused(e)
+        try:
+            n = 0
+            with open(tmp, "wb") as f:
+                async for chunk in request.stream():
+                    n += len(chunk)
+                    if n > ZIP_MAX:
+                        raise Refused("TOO_BIG", f"{n / 1e6:.0f} MB")
+                    if not ctrl.token_ok(tok):     # locked or left while uploading
+                        raise Refused("LOCKED")
+                    await asyncio.to_thread(f.write, chunk)
+            if size is not None and n != size:
+                raise Refused("INCOMPLETE", f"{n} of {size} bytes")
+            info = await asyncio.to_thread(tr.install, tmp, name, by)
+        except Refused as e:
+            log.info("model upload %s refused: %s %s", name, e.code, e.detail)
+            return refused(e)
+        except ClientDisconnect:
+            return JSONResponse({"ok": False, "code": "INCOMPLETE"}, status_code=400)
+        finally:
+            await asyncio.to_thread(tr.end_upload, tmp)
+        return {"ok": True, "model": info}
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

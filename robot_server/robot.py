@@ -37,6 +37,7 @@ from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 from .recorder import Recorder
+from .training import Training
 
 log = logging.getLogger("kiro.robot")
 HERE = Path(__file__).resolve().parent
@@ -131,6 +132,7 @@ class Robot:
         self.guard_profile = "close"  # lidar guard distance of the base program; set by the engineer (Studio page)
         self.refresh_cameras()
         self.rec = Recorder(self)
+        self.train = Training(self)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -296,20 +298,8 @@ class Robot:
 
     # --------------------------------------------------------------- skills
     def models(self) -> list[dict]:
-        root = Path(self.cfg.policies_dir).expanduser()
-        out = []
-        for cfgf in sorted(root.glob("*/pretrained_model/config.json")):
-            d = cfgf.parent
-            if not (d / "model.safetensors").exists():
-                continue
-            try:
-                c = json.loads(cfgf.read_text())
-                cams = sorted(k.split(".")[-1] for k in c.get("input_features", {}) if k.startswith("observation.images."))
-                kind = c.get("type", "?")
-            except (OSError, ValueError):
-                cams, kind = [], "?"
-            out.append({"name": d.parent.name, "path": str(d), "type": kind, "cams": cams})
-        return out
+        """Trained models for the Autonomous skills card. arms: "right", "left", "both" or "?" (training.py)."""
+        return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable")} for m in self.train.models()]
 
     def skill(self, name: str, on: bool, who: str) -> tuple[bool, str]:
         if not on:
@@ -317,6 +307,8 @@ class Robot:
         m = next((m for m in self.models() if m["name"] == name), None)
         if m is None:
             return False, "Model not found."
+        if not m["playable"]:  # run_policy.sh drives the right arm only: a two-arm or left-arm model would go wrong
+            return False, "TWO_ARM" if m["arms"] == "both" else "LEFT_ARM"
         missing = self._missing(["right_follower"])
         if missing:
             return False, "Not connected: right follower"
@@ -956,7 +948,8 @@ class Robot:
                   "obstacle_stop_env": self.obstacle_stop_on(),
                   "paths": {"so101": str(self.so101), "venv": str(self.venv), "datasets": str(self.rec.root),
                             "backups": str(self.rec.backups), "calibration": str(HF_CALIB),
-                            "policies": str(Path(self.cfg.policies_dir).expanduser())}})
+                            "policies": str(self.train.root), "packages": str(self.train.pkg_dir)}},
+            train=self.train.snapshot())
         return out
 
     def set_guard_profile(self, profile: str, who: str) -> tuple[bool, str]:
