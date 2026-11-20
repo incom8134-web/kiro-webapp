@@ -91,9 +91,55 @@ def check(cfg: dict) -> None:
     }, ensure_ascii=False))
 
 
+def one_leader_args(rg, arm: str) -> list:
+    """No left leader: the silver arm (the right leader) drives the green arm, or both arms."""
+    L = rg.ARM_LINKS
+    if arm == "both":
+        robot = ["--robot.type=bi_so_follower", "--robot.id=so101",
+                 f"--robot.left_arm_config.port={L['left_follower']}", f"--robot.right_arm_config.port={L['right_follower']}"]
+    else:
+        robot = ["--robot.type=so101_follower", f"--robot.port={L['left_follower']}", "--robot.id=left_follower"]
+    return robot + ["--teleop.type=so101_leader", f"--teleop.port={L['right_leader']}", "--teleop.id=right_leader"]
+
+
+def sync_two_arm_calibration(calib: Path) -> None:
+    """LeRobot's two-arm robot reads so101_left.json / so101_right.json; they must be today's arm
+    calibrations (the motors hold those), or LeRobot would stop and ask to calibrate. Old files are kept."""
+    import shutil
+    for side in ("left", "right"):
+        src, dst = calib / "robots/so_follower" / f"{side}_follower.json", calib / "robots/so_follower" / f"so101_{side}.json"
+        if dst.exists() and dst.read_bytes() == src.read_bytes():
+            continue
+        if dst.exists():
+            shutil.copy(dst, dst.with_name(f"so101_{side}_before_{time.strftime('%Y%m%d_%H%M%S')}.json"))
+        shutil.copy(src, dst)
+        print(f"two-arm calibration {dst.name} = {src.name}", flush=True)
+
+
+def install_one_leader(lr, rg, cfg: dict) -> None:
+    """Make LeRobot's leader give the action of every follower arm (see leadermath.one_leader_action)."""
+    from leadermath import one_leader_action
+    sides = ["left", "right"] if cfg["arm"] == "both" else ["left"]
+    off_file = Path.home() / ".config/kiro-webapp/follow_offsets.json"
+    offsets = json.loads(off_file.read_text()) if off_file.exists() else {}
+    leader_cal = json.loads((rg.CALIB / "teleoperators/so_leader/right_leader.json").read_text())
+    follower_cals = {s: json.loads((rg.CALIB / f"robots/so_follower/{s}_follower.json").read_text()) for s in sides}
+    print(f"one leader (silver arm) -> {' + '.join(sides)} arm(s), offsets {offsets}", flush=True)
+    real = lr.make_teleoperator_from_config
+
+    def make(tcfg):
+        t = real(tcfg)
+        get = t.get_action
+        deg = bool(getattr(tcfg, "use_degrees", True))
+        print(f"leader values in {'degrees' if deg else 'percent'}", flush=True)
+        t.get_action = lambda: one_leader_action(get(), sides, offsets, leader_cal, follower_cals, degrees=deg)
+        return t
+    lr.make_teleoperator_from_config = make
+
+
 def lerobot_args(rg, cfg: dict, cams: list) -> list:
     """The command line of the old window's build_cmd()."""
-    args = [*rg.ARMS[cfg["arm"]]["args"]]
+    args = one_leader_args(rg, cfg["arm"]) if cfg.get("one_leader") else [*rg.ARMS[cfg["arm"]]["args"]]
     if cams:
         args.append(f"--robot.cameras={rg.cams_config.lerobot_arg(cams)}")
     args += [f"--dataset.repo_id={cfg['repo']}", f"--dataset.root={cfg['root']}", f"--dataset.single_task={cfg['task']}",
@@ -138,6 +184,10 @@ def record(cfg: dict) -> int:
         return say(text, play_sounds, blocking)
     lr.log_say = log_say
     lr.init_keyboard_listener = lambda: stdin_listener(apply_recording_control)
+    if cfg.get("one_leader"):
+        if cfg["arm"] == "both":
+            sync_two_arm_calibration(rg.CALIB)
+        install_one_leader(lr, rg, cfg)
     sys.argv = ["lerobot-record", *args]
     mark(phase="connecting")
     try:

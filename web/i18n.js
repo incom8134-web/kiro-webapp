@@ -130,6 +130,8 @@ const STRINGS = {
     "arm.confirm.release": "Release torque? The arm will fall. Hold it first.",
 
     "skill.none": "No trained models found in {dir}", "skill.run": "Run", "skill.stop": "Stop",
+    "ck.oneleader.left": "Leader: the silver arm drives the green arm (one leader arm)",
+    "ck.oneleader.both": "Leader: the silver arm drives both arms (one leader arm)",
     "skills.title": "Autonomous skills", "skill.play": "Play", "skill.arm": "black arm",
     "skill.nocam": "Needs a camera that is not connected: {cams}",
     "skill.hint": "The arm does the task by itself for {s} s, then stops. E-STOP stops it at once.",
@@ -382,6 +384,8 @@ const STRINGS = {
     "arm.confirm.release": "토크를 끌까요? 팔이 떨어집니다. 먼저 팔을 잡으세요.",
 
     "skill.none": "{dir}에 학습된 모델이 없습니다", "skill.run": "실행", "skill.stop": "중지",
+    "ck.oneleader.left": "리더: 은색 팔이 초록 팔을 움직입니다 (리더 팔 하나)",
+    "ck.oneleader.both": "리더: 은색 팔이 두 팔을 함께 움직입니다 (리더 팔 하나)",
     "skills.title": "자율 동작", "skill.play": "재생", "skill.arm": "검정 팔",
     "skill.nocam": "연결되지 않은 카메라가 필요합니다: {cams}",
     "skill.hint": "팔이 {s}초 동안 스스로 작업한 뒤 멈춥니다. 비상정지를 누르면 바로 멈춥니다.",

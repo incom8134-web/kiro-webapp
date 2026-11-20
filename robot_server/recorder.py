@@ -58,6 +58,16 @@ HINTS = [("read thread is not running", "camlost"), ("read failed (status=False)
          ("FileExistsError", "exists"), ("Calibration", "calib"), ("camera not connected", "camread")]
 
 
+# No left leader arm: the silver arm (the right leader) drives the green arm, or both arms (record_runner.py).
+ONE_LEADER = {
+    "left": {"ports": ["left_follower", "right_leader"], "followers": ["left"],
+             "calib": ["robots/so_follower/left_follower.json", "teleoperators/so_leader/right_leader.json"]},
+    "both": {"ports": ["left_follower", "right_follower", "right_leader"], "followers": ["left", "right"],
+             "calib": ["robots/so_follower/left_follower.json", "robots/so_follower/right_follower.json",
+                       "teleoperators/so_leader/right_leader.json"]},
+}
+
+
 def dir_size(path: Path) -> int:
     total = 0
     for root, _, files in os.walk(path):
@@ -133,6 +143,14 @@ class Recorder:
         self._ds_cache: tuple[float, list] = (0.0, [])
         self.mock_connect_s = 1.5
         self.arms: dict = MOCK_ARMS
+        from .robot import PORT
+        self.has_left_leader = lambda: robot.mock or os.path.exists(PORT["left_leader"])
+
+    def one_leader(self, arm: str) -> bool:
+        return arm in ONE_LEADER and not self.has_left_leader()
+
+    def arm_def(self, arm: str) -> dict:
+        return ONE_LEADER[arm] if self.one_leader(arm) else self.arms.get(arm, MOCK_ARMS[arm])
 
     # ------------------------------------------------------------ datasets
     def path_of(self, repo: str) -> Path | None:
@@ -205,7 +223,9 @@ class Recorder:
             rows.append(row("tool", "fail", "ck.tool", d=str(e)[:160], fix="fix.tool"))
             return self._result(s, rows)
         self.arms = f["arms"]
-        arm = f["arms"].get(s["arm"], MOCK_ARMS[s["arm"]])
+        arm = self.arm_def(s["arm"])
+        if self.one_leader(s["arm"]):
+            rows.append(row("leader", "ok", "ck.oneleader." + s["arm"], d="right_leader"))
         if self.r._arm_ok(s["arm"]):
             rows.append(row("arm", "fail", "ck.arm", a={"arm": s["arm"]}, fix="fix.leftlock"))
         if estop:
@@ -342,9 +362,14 @@ class Recorder:
             s = res["settings"]
             info = self.info(s["repo"], size=False)
             backup = self._backup(s["repo"]) if s["mode"] == "add" else None
-            cfg = {**s, "root": str(self.path_of(s["repo"])), "resume": s["mode"] == "add", "mock_connect_s": self.mock_connect_s}
+            cfg = {**s, "root": str(self.path_of(s["repo"])), "resume": s["mode"] == "add", "mock_connect_s": self.mock_connect_s,
+                   "one_leader": self.one_leader(s["arm"])}
             from .robot import PORT
-            ports = {PORT[p] for p in self.arms.get(s["arm"], MOCK_ARMS[s["arm"]])["ports"]}
+            armdef = self.arm_def(s["arm"])
+            why = self.r._sync_goals([PORT[f"{x}_follower"] for x in armdef["followers"]])
+            if why:   # LeRobot switches torque on: stale targets would make an arm flip
+                return False, why
+            ports = {PORT[p] for p in armdef["ports"]}
             uses = frozenset(ports | {f"cam:{k}" for k in s["cams"]})
             if self.r.mock:
                 cmd = [sys.executable, "-u", str(HERE / "record_runner.py"), "mock", json.dumps(cfg)]
