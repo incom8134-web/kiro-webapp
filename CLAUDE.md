@@ -37,6 +37,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 |---|---|
 | `robot_server/control.py` | Operator lock, PIN, E-STOP, watchdog, speed limits. Pure logic with tests |
 | `robot_server/guard.py` | Obstacle stop of the web server: lidar points limit the speed in each direction (stops 20 cm before an obstacle; turning and backing away stay free). Pure logic with tests. On by default, the operator can switch it off on the Drive tab, `KIRO_GUARD=0` starts with it off |
+| `robot_server/lidar_setup.py` | Studio lidar setup: mounting angle and the robot's own parts the lidar sees (self mask), saved to `~/so101/config/lidar.env` (`LASER_YAW`, `LIDAR_MASK`, `OBSTACLE_STOP=1`). Pure logic with tests. Nothing moves |
 | `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_raw` into the old lidar guard, `/e_stop`, voice topics; reads `/odom`) |
 | `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
