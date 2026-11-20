@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import math
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -82,6 +83,7 @@ class Controller:
         self._zero_left = 0
         self.engineer_pin = cfg.engineer_pin  # the server sets the mock default in mock mode
         self.engineers: set[str] = set()      # operators who also unlocked the engineer tools
+        self.tokens: dict[str, str] = {}      # Studio page token -> connection (camera previews over HTTP)
         self.pin_guard: dict[str, PinGuard] = {}
 
     # ---- connections -------------------------------------------------
@@ -90,7 +92,7 @@ class Controller:
 
     def disconnect(self, cid: str) -> None:
         self.clients.pop(cid, None)
-        self.engineers.discard(cid)
+        self.lock_engineer(cid)
         if self.operator == cid:
             self._set_operator(None)
 
@@ -139,6 +141,7 @@ class Controller:
     def _set_operator(self, cid: str | None) -> None:
         self.operator = cid
         self.engineers.clear()  # a new operator must unlock the engineer tools again
+        self.tokens.clear()
         self._halt()
 
     # ---- engineer tools (servo tester, check wizard) -------------------
@@ -158,9 +161,27 @@ class Controller:
 
     def lock_engineer(self, cid: str) -> None:
         self.engineers.discard(cid)
+        for tok in [k for k, v in self.tokens.items() if v == cid]:
+            del self.tokens[tok]
 
     def is_engineer(self, cid: str) -> bool:
         return cid == self.operator and cid in self.engineers
+
+    def engineer_token(self, cid: str) -> str | None:
+        """A random token for this engineer connection, for the Studio page's HTTP requests (camera
+        previews), which cannot carry the WebSocket. Valid only while this connection is the unlocked
+        engineer: it dies with lock, disconnect or a new operator. None for everyone else."""
+        if not self.is_engineer(cid):
+            return None
+        tok = next((k for k, v in self.tokens.items() if v == cid), None)
+        if tok is None:
+            tok = secrets.token_urlsafe(18)
+            self.tokens[tok] = cid
+        return tok
+
+    def token_ok(self, token: object) -> bool:
+        cid = self.tokens.get(str(token or ""))
+        return cid is not None and self.is_engineer(cid)
 
     def _halt(self) -> None:
         self._target = ZERO

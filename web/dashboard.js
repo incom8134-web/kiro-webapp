@@ -352,7 +352,7 @@ function renderLists() {
 
   const J = r.jobs || {};
   const progs = [["base", "sec.base"], ["teleop_right", "d.tele_r"], ["teleop_left", "d.tele_l"], ["arm_right", "d.pose_r"],
-    ["arm_left", "d.pose_l"], ["bridge", "leader.title"], ["skill", "sec.skills"], ["voice", "sec.voice"], ["wizard", "eng.wizard"]];
+    ["arm_left", "d.pose_l"], ["bridge", "leader.title"], ["skill", "sec.skills"], ["voice", "sec.voice"], ["wizard", "eng.wizard"], ["record", "d.record"]];
   $("programs").innerHTML = progs.map(([k, label]) => {
     const j = J[k];
     const stTxt = !j ? `<span class="mute">${t("d.never")}</span>` : j.running

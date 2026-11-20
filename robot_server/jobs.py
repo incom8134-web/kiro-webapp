@@ -26,6 +26,8 @@ class JobSpec:
     stop_signal: int = signal.SIGINT  # LeRobot and ros2 launch shut down cleanly on Ctrl+C
     stop_wait: float = 6.0            # seconds before the next, harder signal
     label: str = ""
+    stdin: bool = False               # True = the server can send lines to the program (Job.send)
+    on_line: Callable[[str], None] | None = None  # called with every output line, as it arrives
 
 
 class Job:
@@ -38,7 +40,7 @@ class Job:
         self._on_exit = on_exit
         env = {**os.environ, "PYTHONUNBUFFERED": "1", **spec.env}
         env = {k: v for k, v in env.items() if v is not None}
-        self.proc = subprocess.Popen(spec.cmd, cwd=spec.cwd, env=env, stdin=subprocess.DEVNULL,
+        self.proc = subprocess.Popen(spec.cmd, cwd=spec.cwd, env=env, stdin=subprocess.PIPE if spec.stdin else subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      start_new_session=True, text=True, errors="replace", bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
@@ -49,6 +51,11 @@ class Job:
             line = line.rstrip()
             if line:
                 self.lines.append(line[:300])
+                if self.spec.on_line:
+                    try:
+                        self.spec.on_line(line)
+                    except Exception:  # noqa: BLE001 - a parser bug must not stop reading the output
+                        pass
         self.code = self.proc.wait()
         self.ended = time.time()
         if self._on_exit:
@@ -57,6 +64,17 @@ class Job:
     @property
     def running(self) -> bool:
         return self.proc.poll() is None
+
+    def send(self, line: str) -> bool:
+        """One line to the program's stdin (only for jobs started with stdin=True)."""
+        if not self.running or self.proc.stdin is None:
+            return False
+        try:
+            self.proc.stdin.write(line.rstrip("\n") + "\n")
+            self.proc.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError, ValueError):
+            return False
 
     def _signal(self, sig: int) -> None:
         try:

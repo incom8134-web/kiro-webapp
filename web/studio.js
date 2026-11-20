@@ -1,0 +1,804 @@
+"use strict";
+/*
+ * HAEBOT Studio - browser side.
+ *
+ * Locked until this page is the operator AND unlocked the engineer PIN. Only then does the server
+ * send Studio data ("studio" messages: datasets, recording, cameras, engineer values) and accept
+ * Studio commands. Camera previews use a token the server gives to the engineer connection only.
+ *
+ * Recording a dataset, top to bottom: 1 dataset, 2 cameras and checks, 3 record, 4 review.
+ * Below that: the engineer tools (guard distance, servo tester, check wizard) and the read-only
+ * engineer information.
+ */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const HOLD_MS = 2000;
+const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
+
+const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
+  pendingStart: false, token: null, dismissed: null };
+const isOperator = () => !!st.server && st.server.you.role === "operator";
+const isEngineer = () => !!st.server && !!st.server.you.engineer;
+const sess = () => (st.studio && st.studio.session) || null;
+const serverNow = () => (st.studio ? st.studio.now + (performance.now() - st.at) / 1000 : Date.now() / 1000);
+try { st.dismissed = Number(localStorage.getItem("kiro-studio-dismissed")) || null; } catch (e) { /* ignore */ }
+
+function setBtn(el, text, icon) {
+  const span = el.querySelector("span:not(.fill)"), i = el.querySelector("i");
+  if (span) span.textContent = text;
+  if (i && icon) i.className = icon;
+}
+
+// ---------------------------------------------------------------- connection
+function deviceName() {
+  try {
+    let n = sessionStorage.getItem("kiro-name");
+    if (!n) {
+      const kind = /Mobi|Android|iPhone|iPad/.test(navigator.userAgent) ? "Phone" : "Laptop";
+      n = kind + "-" + Math.random().toString(36).slice(2, 5).toUpperCase();
+      sessionStorage.setItem("kiro-name", n);
+    }
+    return n;
+  } catch (e) {
+    return "Device";
+  }
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws?name=${encodeURIComponent(deviceName())}`);
+  st.ws = ws;
+  ws.onopen = () => { st.open = true; renderAll(); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.t === "state") {
+      const was = isEngineer();
+      st.server = m;
+      if (was && !isEngineer()) relock();
+      renderTop(); renderLock();
+    } else if (m.t === "robot") { st.robot = m; renderTop(); }
+    else if (m.t === "studio") {
+      if (!isEngineer()) return;
+      const first = !st.studio;
+      st.studio = m; st.at = performance.now();
+      if (m.token !== st.token) { st.token = m.token; resetPreviews(); }
+      if (first) firstData();
+      renderStudio();
+    } else if (m.t === "wizard_steps") { st.steps = m.steps; renderTools(); }
+    else if (m.t === "pong") { st.rtt = performance.now() - m.ts; renderLink(); }
+    else if (m.t === "note") onNote(m);
+  };
+  ws.onclose = () => {
+    st.open = false; st.server = null; st.rtt = null;
+    relock(); renderAll();
+    setTimeout(connect, 1000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function send(obj) {
+  if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(obj));
+}
+// The ping keeps this page the operator (a silent operator loses control after 10 s)
+setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
+
+/* Locked again (Lock button, another operator, connection lost): forget every Studio value. */
+function relock() {
+  st.studio = null; st.token = null; st.steps = null; st.pendingStart = false;
+  resetPreviews();
+  for (const id of ["camgrid", "cklist", "info", "v-table", "ds-info", "repo-pick", "sv-table", "wz-steps", "wz-detail"]) {
+    const el = $(id);
+    el.innerHTML = ""; delete el.dataset.html; delete el.dataset.keys;
+  }
+  for (const id of ["r-log", "wz-tail", "v-err"]) $(id).textContent = "";
+}
+
+// ---------------------------------------------------------------- notes
+let toastTimer = null;
+function toast(text, isError) {
+  if (!text) return;
+  const n = $("toast");
+  n.textContent = text; n.hidden = false;
+  n.className = "toast" + (isError ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { n.hidden = true; }, 5000);
+}
+const CODES = { CHECKS_FAILED: "rec.n.checks", TOO_SOON: "rec.n.soon", NOT_NOW: "rec.n.notnow", STOPPING: "rec.n.stopping",
+  FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked" };
+function onNote(m) {
+  const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
+  if (m.about === "take" || m.about === "engineer") {
+    if (!m.ok) { $("lock-hint").textContent = text; $("lock-hint").className = "small note err"; }
+    else if (m.about === "engineer") toast(t("studio.unlockedmsg"));
+    return;
+  }
+  if (m.about === "studio") {
+    if (m.cmd === "start") st.pendingStart = false;
+    if (m.msg === "STALE" || (m.ok && m.cmd === "check")) { renderStudio(); return; }   // a late double click: nothing to say
+    if (m.ok && m.cmd === "start") toast(t("rec.n.started"));
+    else if (m.ok && m.cmd === "pack") toast(t("rec.n.packing"));
+    else if (!m.ok) toast(text, true);
+    renderStudio();
+    return;
+  }
+  if (!m.ok) toast(text, true);
+}
+
+// --------------------------------------------------------------- top bar
+function renderLink() {
+  const el = $("link");
+  if (!st.open) { el.textContent = t("link.offline"); el.className = ""; return; }
+  if (st.rtt == null) { el.textContent = t("link.connecting"); el.className = ""; return; }
+  el.textContent = `${Math.round(st.rtt)} ms`;
+  el.className = st.rtt < 150 ? "accent" : "";
+}
+
+function renderTop() {
+  const s = st.server, me = isOperator();
+  applyStrings();
+  document.title = "HAEBOT · " + t("studio.name");
+  for (const b of document.querySelectorAll(".lang button")) b.classList.toggle("on", b.dataset.lang === LANG);
+  renderLink();
+  $("backend").textContent = s ? t(s.backend === "ros" ? "be.ros" : "be.mock") : "...";
+  const op = $("opstat");
+  op.textContent = !s || !s.operator ? t("op.none") : me ? t("op.youstudio") : t("op.other", { name: s.operator.name });
+  op.className = me ? "accent" : "";
+  const stopped = !!s && s.estop;
+  $("estop").classList.toggle("on", stopped);
+  $("estop-label").textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
+  const banner = $("banner");
+  if (!st.open) { banner.hidden = false; banner.className = "banner"; banner.textContent = t("banner.offline"); }
+  else if (stopped) {
+    banner.hidden = false; banner.className = "banner stop";
+    banner.textContent = t("banner.estop", { by: s.estop_by ? t("banner.estop.by", { name: s.estop_by }) : "" }) +
+      t(me ? "banner.estop.op" : "banner.estop.viewer");
+  } else banner.hidden = true;
+  $("ver").textContent = s ? `HAEBOT Robot v${s.version} · ${t("studio.name")}` : "";
+}
+
+$("estop").addEventListener("click", () => send({ t: "estop", on: !(st.server && st.server.estop) }));
+window.addEventListener("keydown", (e) => { if (e.code === "Escape" || e.key === "Escape") send({ t: "estop", on: true }); });
+for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); renderAll(); });
+$("theme-btn").addEventListener("click", () => toggleTheme());
+window.addEventListener("kiro-theme", () => themeIcon($("theme-btn")));
+themeIcon($("theme-btn"));
+// A focused button would react to Space. Remove focus after every click (as on the control page).
+document.addEventListener("click", (e) => { const el = e.target.closest("button, summary"); if (el) el.blur(); });
+
+// ------------------------------------------------------------------ lock
+function renderLock() {
+  const s = st.server, en = isEngineer(), me = isOperator();
+  $("lock").hidden = en || !st.open;
+  $("studio").hidden = !en;
+  if (en) return;
+  $("op-pin-row").hidden = me;
+  const other = s && s.operator && !me;
+  $("lock-other").hidden = !other;
+  if (other) $("lock-other").textContent = t("studio.other", { name: s.operator.name });
+  $("lock-op").hidden = !me;
+  $("unlock-btn").disabled = !s;
+  const hint = $("lock-hint");
+  if (!hint.classList.contains("err")) {
+    const mock = [s && s.default_pin && !me ? t("mockpin") : "", s && s.mock_engineer_pin ? t("eng.mockpin") : ""].filter(Boolean);
+    hint.textContent = mock.join(" ");
+  }
+}
+
+$("unlock").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const s = st.server;
+  if (!s) return;
+  $("lock-hint").className = "small mute"; $("lock-hint").textContent = "";
+  if (!isOperator()) {
+    let force = false;
+    if (s.operator) {
+      force = confirm(t("takeover", { name: s.operator.name }));
+      if (!force) return;
+    }
+    send({ t: "take", pin: $("op-pin").value, force });
+  }
+  send({ t: "engineer", pin: $("eng-pin").value });   // handled after "take": the server reads messages in order
+  $("op-pin").value = ""; $("eng-pin").value = "";
+  document.activeElement && document.activeElement.blur();
+});
+$("release").addEventListener("click", () => send({ t: "release" }));
+$("lock-btn").addEventListener("click", () => send({ t: "engineer", lock: true }));
+
+// -------------------------------------------------------------- the form
+/* The dataset settings, remembered on this device (no PINs). */
+const form = { arm: "right", mode: "new", repo: "", pick: "", task: "", episodes: 10, episode_s: 30, reset_s: 10,
+  fps: 30, vcodec: "h264", streaming: true, flicker: false, cams: null };
+try { Object.assign(form, JSON.parse(localStorage.getItem("kiro-studio-form") || "{}")); } catch (e) { /* ignore */ }
+const saveForm = () => { try { localStorage.setItem("kiro-studio-form", JSON.stringify(form)); } catch (e) { /* ignore */ } };
+const repoOf = () => (form.mode === "add" ? form.pick : form.repo.trim());
+const datasets = () => (st.studio && st.studio.datasets) || [];
+const dsOf = (repo) => datasets().find((d) => d.repo === repo);
+const camKeys = () => ((st.studio && st.studio.cams) || []).map((c) => c.key);
+function camsSel() {
+  if (Array.isArray(form.cams)) return form.cams.slice();
+  const want = (st.studio && st.studio.cams_for && st.studio.cams_for[form.arm]) || [];
+  const have = camKeys();
+  return want.filter((k) => have.includes(k));
+}
+function settings() {
+  return { arm: form.arm, mode: form.mode, repo: repoOf(), task: form.task.trim().split(/\s+/).filter(Boolean).join(" "),
+    episodes: +form.episodes, episode_s: +form.episode_s, reset_s: +form.reset_s, fps: +form.fps,
+    vcodec: form.vcodec, streaming: !!form.streaming, flicker: !!form.flicker, cams: camsSel() };
+}
+function sameSettings(a, b) {
+  if (!a || !b) return false;
+  for (const k of ["arm", "mode", "repo", "task", "episodes", "episode_s", "reset_s", "fps", "vcodec", "streaming", "flicker"]) if (a[k] !== b[k]) return false;
+  return [...a.cams].sort().join() === [...b.cams].sort().join();
+}
+const check = () => (st.studio && st.studio.check) || null;
+const checkFresh = () => !!check() && sameSettings(check().settings, settings());
+
+function fillInputs() {
+  for (const k of ["repo", "task", "episodes", "episode_s", "reset_s", "fps"]) $(k).value = form[k];
+  $("vcodec").value = form.vcodec;
+  $("streaming").checked = !!form.streaming;
+  $("flicker").checked = !!form.flicker;
+}
+for (const k of ["repo", "task", "episodes", "episode_s", "reset_s", "fps"]) {
+  $(k).addEventListener("input", () => { form[k] = $(k).value; saveForm(); renderStudio(); });
+}
+$("vcodec").addEventListener("change", () => { form.vcodec = $("vcodec").value; saveForm(); renderStudio(); });
+for (const k of ["streaming", "flicker"]) $(k).addEventListener("change", () => { form[k] = $(k).checked; saveForm(); renderStudio(); });
+$("repo-pick").addEventListener("change", () => { form.pick = $("repo-pick").value; adoptDataset(); saveForm(); renderStudio(); });
+for (const b of document.querySelectorAll("#arm-seg button")) b.addEventListener("click", () => {
+  form.arm = b.dataset.v; form.cams = null; saveForm(); renderStudio();
+});
+for (const b of document.querySelectorAll("#mode-seg button")) b.addEventListener("click", () => setMode(b.dataset.v));
+
+function setMode(mode, repo) {
+  form.mode = mode;
+  if (mode === "add") {
+    form.pick = repo || (dsOf(form.repo.trim()) ? form.repo.trim() : form.pick) || (datasets()[0] || {}).repo || "";
+    adoptDataset();
+  } else if (repo !== undefined) form.repo = repo;
+  saveForm(); fillInputs(); renderStudio();
+}
+
+/* Adding episodes: the arm, cameras and frame rate must be those of the dataset. */
+function adoptDataset() {
+  const d = dsOf(form.pick);
+  if (!d) return;
+  if (d.robot_type) form.arm = d.robot_type === "bi_so_follower" ? "both" : form.arm === "both" ? "right" : form.arm;
+  if (d.cams) form.cams = d.cams.slice();
+  if (d.fps) form.fps = d.fps;
+  fillInputs();
+}
+
+/* First Studio data after unlocking: defaults for an empty form (user part of the newest dataset). */
+function firstData() {
+  if (!form.repo) {
+    const d = datasets()[0];
+    form.repo = d ? d.repo.split("/")[0] + "/" : "";
+  }
+  fillInputs();
+}
+
+$("go-check").addEventListener("click", () => {
+  send({ t: "studio", cmd: "check", settings: settings() });
+  $("s2").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("recheck").addEventListener("click", () => send({ t: "studio", cmd: "check", settings: settings() }));
+
+/* Hold a button for HOLD_MS to confirm (start recording, force stop, servo writes). */
+function holdButton(el, action) {
+  let timer = null, start = 0, raf = 0;
+  const fill = el.querySelector(".fill");
+  const reset = () => { clearTimeout(timer); cancelAnimationFrame(raf); timer = null; if (fill) fill.style.width = "0"; };
+  const step = () => { if (fill) fill.style.width = Math.min(100, (performance.now() - start) / HOLD_MS * 100) + "%"; raf = requestAnimationFrame(step); };
+  el.addEventListener("pointerdown", (e) => {
+    if (el.disabled) return;
+    el.setPointerCapture(e.pointerId); start = performance.now(); step();
+    timer = setTimeout(() => { reset(); action(); }, HOLD_MS);
+  });
+  for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(n, reset);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+holdButton($("start"), () => {
+  if ($("start").disabled) return;
+  st.pendingStart = true;   // no second start until the server answered (double click, slow Wi-Fi)
+  send({ t: "studio", cmd: "start", settings: settings() });
+  renderStudio();
+});
+
+// ------------------------------------------------------------- recording
+const recCmd = (cmd) => { const s = sess(); if (s) send({ t: "studio", cmd, ep: s.ep, phase: s.phase }); };
+$("r-next").addEventListener("click", () => recCmd("next"));
+$("r-redo").addEventListener("click", () => recCmd("redo"));
+$("r-stop").addEventListener("click", () => recCmd("stop"));
+holdButton($("r-kill"), () => send({ t: "studio", cmd: "kill" }));
+function dismiss() {
+  const s = sess();
+  if (s) { st.dismissed = s.started; try { localStorage.setItem("kiro-studio-dismissed", String(s.started)); } catch (e) { /* ignore */ } }
+}
+$("v-more").addEventListener("click", () => {
+  const s = sess();
+  dismiss();
+  if (s) { setMode("add", s.settings.repo); form.task = s.settings.task; fillInputs(); saveForm(); }
+  renderStudio();
+  $("s1").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("v-new").addEventListener("click", () => {
+  const s = sess();
+  dismiss();
+  setMode("new", s ? s.settings.repo.split("/")[0] + "/" : form.repo);
+  $("s1").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("repo").focus();
+});
+$("v-pack").addEventListener("click", () => { const s = sess(); if (s) send({ t: "studio", cmd: "pack", repo: s.settings.repo }); });
+
+/* Which step is the current one. */
+function stepNow() {
+  const s = sess();
+  if (s && !s.result) return 3;
+  if (s && s.result && s.started !== st.dismissed) return 4;
+  return checkFresh() ? 2 : 1;
+}
+const ACTIVE = ["starting", "tuning", "connecting", "rec", "reset", "saving"];
+const running = () => { const s = sess(); return !!s && !s.result; };
+
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s / 60), r = s % 60;
+  return m ? t("rec.dur.m", { m, s: r }) : t("rec.dur.s", { s: r });
+}
+
+// ---------------------------------------------------------------- render
+function renderAll() { renderTop(); renderLock(); renderStudio(); }
+
+function renderStudio() {
+  if (!isEngineer() || !st.studio) return;
+  const step = stepNow();
+  for (const li of document.querySelectorAll("#stepper li")) {
+    const n = +li.dataset.s;
+    li.className = n === step ? "on" : n < step ? "done" : "";
+  }
+  const busy = running() || step === 4;
+  setCard("s1", busy ? "done" : "open");
+  setCard("s2", busy ? "done" : "open");
+  setCard("s3", step === 3 ? "open" : step === 4 ? "done" : "todo");
+  setCard("s4", step === 4 ? "open" : "todo");
+  renderSetup(step);
+  renderChecks(step);
+  renderRecord(step);
+  renderReview(step);
+  renderTools();
+  renderInfo();
+  updatePreviews();
+}
+
+function setCard(id, mode) {
+  const el = $(id);
+  el.classList.toggle("open", mode === "open");
+  el.classList.toggle("done", mode === "done");
+  el.classList.toggle("todo", mode === "todo");
+}
+
+function renderSetup(step) {
+  const r = st.robot || {}, s = st.studio;
+  const leftOk = !!(r.left_arm_ok || (s.info && s.info.left_arm_ok));
+  for (const b of document.querySelectorAll("#arm-seg button")) {
+    b.classList.toggle("on", b.dataset.v === form.arm);
+    b.disabled = b.dataset.v !== "right" && !leftOk;
+  }
+  $("arm-note").hidden = leftOk;
+  $("arm-note").textContent = leftOk ? "" : t("arm.leftblocked");
+  for (const b of document.querySelectorAll("#mode-seg button")) b.classList.toggle("on", b.dataset.v === form.mode);
+  $("repo-new").hidden = form.mode !== "new";
+  $("repo-add").hidden = form.mode !== "add";
+  const opts = datasets().map((d) => `<option value="${esc(d.repo)}">${esc(d.repo)} · ${t("rec.nep", { n: d.episodes })}</option>`).join("")
+    || `<option value="" disabled>${esc(t("rec.nods"))}</option>`;
+  const pick = $("repo-pick");
+  if (pick.dataset.html !== opts) { pick.innerHTML = opts; pick.dataset.html = opts; }
+  if (form.mode === "add" && !dsOf(form.pick) && datasets().length) { form.pick = datasets()[0].repo; adoptDataset(); }
+  pick.value = form.pick;
+
+  const repo = repoOf(), d = dsOf(repo), path = `${s.root}/${repo}`;
+  let html;
+  if (form.mode === "new") {
+    if (!repo || repo.endsWith("/")) html = `<span class="mute">${esc(t("rec.name.hint"))}</span>`;
+    else if (!REPO_RE.test(repo)) html = `<span class="warn">${esc(t("fix.name.format"))}</span>`;
+    else if (d) html = `<span class="warn">${esc(t("rec.taken", { n: d.episodes }))}</span> <button type="button" class="linkbtn" id="use-existing">${esc(t("rec.addinstead"))}</button>`;
+    else html = `<span>${esc(t("rec.newat"))}</span> <code>${esc(path)}</code>`;
+  } else if (d) {
+    html = `<b>${esc(t("rec.nep", { n: d.episodes }))}</b> · ${esc(t("rec.nframes", { n: d.frames.toLocaleString() }))} · ${esc(d.fps)} fps · ${esc((d.cams || []).join(", ") || "-")} · ${esc(d.mb ?? "-")} MB`
+      + `<br><span class="mute">${esc(t("rec.addat"))}</span> <code>${esc(d.path)}</code><br><span class="mute">${esc(t("rec.addsafe"))}</span>`;
+  } else html = `<span class="mute">${esc(t("rec.nods"))}</span>`;
+  const info = $("ds-info");
+  if (info.dataset.html !== html) {
+    info.innerHTML = html; info.dataset.html = html;
+    const u = $("use-existing");
+    if (u) u.addEventListener("click", () => setMode("add", repo));
+  }
+  const task = settings().task;
+  const err = !task ? "" : !/^[\x20-\x7e]*$/.test(task) ? t("fix.task.english") : "";
+  $("s1-err").hidden = !err;
+  $("s1-err").textContent = err;
+  const n = +form.episodes || 0, es = +form.episode_s || 0, rs = +form.reset_s || 0;
+  $("s1-total").textContent = n > 0 ? t("rec.total", { d: fmtDur(n * es + Math.max(0, n - 1) * rs) }) : "";
+  const goPrimary = step === 1 && !checkFresh();   // exactly one blue button: the next thing to do
+  $("go-check").classList.toggle("primary", goPrimary);
+  $("go-check").disabled = running();
+  for (const el of $("s1").querySelectorAll("input, select, .segbar button")) if (running()) el.disabled = true;
+  if (!running()) for (const el of $("s1").querySelectorAll("input, select, #mode-seg button")) el.disabled = false;
+  const x = settings();
+  $("s1-sum").textContent = `${t("rec.arm." + x.arm)} · ${x.repo || "-"} · ${t("rec.nep", { n: x.episodes })} × ${x.episode_s} s`;
+  $("s1-st").textContent = step > 1 ? "✓" : "";
+  $("s1-st").className = "st" + (step > 1 ? " live" : "");
+}
+
+const PARTS = { right_follower: ["arm.right", "arm.follower"], left_follower: ["arm.left", "arm.follower"],
+  right_leader: ["arm.right", "arm.leader"], left_leader: ["arm.left", "arm.leader"] };
+const camName = (k) => (STRINGS.en["cam." + k] ? t("cam." + k) : k);
+function rowLabel(r) {
+  const a = r.a || {};
+  if (r.k === "ck.port") return t("ck.port", { part: (PARTS[a.part] || [a.part]).map((x) => t(x)).join(" ") });
+  if (r.k === "ck.cam") return t("ck.cam", { name: camName(a.key) });
+  if (r.k === "ck.number") return t("rec.n_" + a.what);
+  if (r.k === "ck.ds") return t(a.mode === "add" ? "ck.ds.add" : "ck.ds.new");
+  if (r.k === "ck.arm") return t("ck.arm", { arm: t("rec.arm." + a.arm) });
+  return t(r.k, a);
+}
+function fixText(r) {
+  if (!r.fix) return "";
+  const fa = { ...(r.fa || {}) };
+  if (fa.what) fa.what = t("rec.n_" + fa.what);
+  return t(r.fix, fa);
+}
+
+function renderChecks(step) {
+  const s = st.studio, c = check(), fresh = checkFresh(), sel = camsSel(), run = running();
+  // camera tiles: built once per camera list, then updated
+  const cams = s.cams || [];
+  const grid = $("camgrid"), keys = cams.map((x) => x.key).join();
+  if (grid.dataset.keys !== keys) {
+    grid.innerHTML = cams.map((x) => `<div class="camtile" data-cam="${esc(x.key)}">
+      <div class="qbody"><img alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
+      <div class="camfoot"><label class="check"><input type="checkbox" data-pick="${esc(x.key)}"><span class="cname"></span></label><span class="cst"></span></div>
+    </div>`).join("") || `<p class="mute small">${esc(t("rec.nocams"))}</p>`;
+    grid.dataset.keys = keys;
+    for (const cb of grid.querySelectorAll("[data-pick]")) cb.addEventListener("change", () => {
+      const cur = camsSel();
+      form.cams = cb.checked ? [...new Set([...cur, cb.dataset.pick])] : cur.filter((k) => k !== cb.dataset.pick);
+      saveForm(); renderStudio();
+    });
+  }
+  for (const x of cams) {
+    const tile = grid.querySelector(`[data-cam="${CSS.escape(x.key)}"]`);
+    if (!tile) continue;
+    const ok = x.present && !x.auto;
+    tile.querySelector(".cname").textContent = camName(x.key);
+    const cst = tile.querySelector(".cst");
+    cst.textContent = ok ? t("rec.cam.ok") : x.present && x.auto ? t("rec.cam.auto", { port: x.auto }) : t("cam.notconnected");
+    cst.className = "cst " + (ok ? "ok" : "warn");
+    const cb = tile.querySelector("[data-pick]");
+    cb.checked = sel.includes(x.key);
+    cb.disabled = run || form.mode === "add";
+    tile.classList.toggle("off", !sel.includes(x.key));
+  }
+  // check results
+  const rows = c ? c.rows : [];
+  const list = $("cklist");
+  const html = !c ? `<p class="mute small">${esc(t("rec.nocheck"))}</p>`
+    : rows.map((r) => `<div class="chk" data-st="${r.st === "ok" ? "ok" : "warn"}"><i class="dot"></i><div class="chk-t">`
+      + `<b>${esc(rowLabel(r))}${r.st === "fail" ? ` <span class="tag">${esc(t("rec.blocks"))}</span>` : ""}</b>`
+      + (r.d ? `<span class="mono">${esc(r.d)}</span>` : "") + (r.fix ? `<small>${esc(fixText(r))}</small>` : "") + `</div></div>`).join("");
+  if (list.dataset.html !== html) { list.innerHTML = html; list.dataset.html = html; }
+  const nbad = rows.filter((r) => r.st === "fail").length;
+  const sum = $("ck-sum");
+  sum.textContent = !c ? t("rec.ck.none") : !fresh ? t("rec.ck.stale") : nbad ? t("rec.ck.bad", { n: nbad }) : t("rec.ck.ok");
+  sum.dataset.st = !c ? "" : !fresh || nbad ? "warn" : "ok";
+  const estop = !!(st.server && st.server.estop);
+  const canStart = fresh && c.ok && !run && !estop && !st.pendingStart && !s.starting;
+  $("start").disabled = !canStart;
+  $("start").classList.toggle("primary", canStart);
+  $("recheck").classList.toggle("primary", !!c && fresh && !c.ok && step <= 2);
+  $("recheck").disabled = run;
+  setBtn($("start"), t(st.pendingStart || s.starting ? "rec.starting" : "rec.start"));
+  $("s2-sum").textContent = c && fresh ? (c.ok ? t("rec.ck.ok") : t("rec.ck.bad", { n: nbad })) : "";
+  $("s2-st").textContent = step > 2 ? "✓" : "";
+  $("s2-st").className = "st" + (step > 2 ? " live" : "");
+}
+
+const PHASE = { starting: ["rec.p.connect", "accent"], tuning: ["rec.p.tune", "accent"], connecting: ["rec.p.connect", "accent"],
+  rec: ["rec.p.rec", "live"], reset: ["rec.p.reset", "warn"], saving: ["rec.p.save", "accent"],
+  done: ["rec.p.done", "live"], stopped: ["rec.p.stopped", "warn"], failed: ["rec.p.failed", "warn"] };
+
+function renderRecord(step) {
+  const s = sess();
+  if (!s || step < 3) {
+    $("s3-sum").textContent = t("rec.s3.wait");
+    $("s3-st").textContent = "";
+    $("s3-st").className = "st";
+    return;
+  }
+  const set = s.settings, n = set.episodes;
+  const k = s.ep == null ? null : s.ep - s.base + 1;
+  const [pk, pc] = PHASE[s.phase] || ["rec.p.connect", "accent"];
+  const ph = $("r-phase");
+  ph.textContent = s.stopping && ACTIVE.includes(s.phase) && s.phase !== "saving" ? t("rec.p.stopping") : t(pk);
+  ph.className = "phase " + pc;
+  $("r-what").textContent = `${t("rec.arm." + set.arm)} · ${set.repo}`;
+  $("r-ep").textContent = k == null ? "-" : t("rec.kofn", { k: Math.min(k, n), n });
+  $("r-saved").textContent = String(s.result ? s.result.added : s.saved || 0);
+  tickTimer(false);
+  const p = s.phase, live = (p === "rec" || p === "reset") && s.running;
+  const age = serverNow() - s.since;
+  const can = live && !s.sent && !s.stopping;
+  const last = k != null && k >= n;
+  setBtn($("r-next"), t(p === "reset" ? "rec.nextnow" : last ? "rec.finish" : "rec.next"));
+  $("r-next").disabled = !can || age < 1;
+  $("r-next").classList.toggle("primary", can);
+  $("r-redo").disabled = !can || age < 1;
+  $("r-stop").disabled = !live || s.stopping || age < 1;
+  $("r-kill").disabled = !s.running;
+  $("r-hint").textContent = s.result ? "" : t({ starting: "rec.h.connect", tuning: "rec.h.tune", connecting: "rec.h.connect", rec: "rec.h.rec",
+    reset: "rec.h.reset", saving: "rec.h.save" }[p] || "rec.h.connect");
+  $("r-explain").textContent = live ? t(p === "reset" ? "rec.x.reset" : "rec.x.rec") : "";
+  const log = $("r-log"), text = (s.log || []).join("\n");
+  if (log.textContent !== text) { log.textContent = text; log.scrollTop = log.scrollHeight; }
+  $("s3-st").textContent = t(pk);
+  $("s3-st").className = "st " + pc;
+  $("s3-sum").textContent = s.result ? t("rec.s3.end", { n: s.result.added }) : "";
+}
+
+/* The countdown runs between the server's updates (4 times a second). The buttons wait until the
+   phase ran 1 s (as the server does); the timer re-renders them once that second has passed. */
+function tickTimer(rerender = true) {
+  const s = sess();
+  if (!s || !isEngineer()) return;
+  const len = s.phase === "rec" ? s.settings.episode_s : s.phase === "reset" ? s.settings.reset_s : 0;
+  const el = serverNow() - s.since;
+  const live = len > 0 && s.running && !s.result;
+  $("r-left").textContent = live ? `${Math.ceil(Math.max(0, len - el))} s` : "-";
+  $("r-left-k").textContent = t(s.phase === "reset" ? "rec.leftreset" : "rec.left");
+  $("r-bar").style.width = live ? Math.min(100, (el / len) * 100) + "%" : s.result ? "100%" : "0";
+  $("r-bar").className = s.phase === "reset" ? "warn" : "";
+  if (rerender && live && el >= 1 && el < 2 && !s.sent && !s.stopping) renderRecord(3);
+}
+setInterval(tickTimer, 250);
+
+function renderReview(step) {
+  const s = sess();
+  if (step !== 4 || !s || !s.result) {
+    $("s4-sum").textContent = t("rec.s4.wait");
+    $("s4-st").textContent = "";
+    $("s4-st").className = "st";
+    return;
+  }
+  const res = s.result, i = res.info || {};
+  const msg = $("v-msg");
+  msg.textContent = t(res.state === "done" ? "rec.v.done" : res.state === "stopped" ? "rec.v.stopped" : "rec.v.failed",
+    { hint: t("rec.hint." + (res.hint || "other")), code: res.code });
+  msg.className = "vmsg " + (res.state === "done" ? "ok" : "warn");
+  const rows = [[t("rec.dataset"), `<b>${esc(s.settings.repo)}</b>`]];
+  if (i.ok) {
+    rows.push([t("rec.eps"), `<b>${esc(i.episodes)}</b> <span class="mute">(${esc(t("rec.added", { n: res.added }))})</span>`],
+      [t("rec.frames"), esc((i.frames || 0).toLocaleString())], [t("rec.fps"), esc(i.fps)],
+      [t("rec.cams"), esc((i.cams || []).map(camName).join(", ") || "-")], [t("rec.size"), `${esc(i.mb ?? "-")} MB`]);
+  } else rows.push([t("rec.eps"), `<span class="mute">${esc(t("rec.v.nods"))}</span>`]);
+  rows.push([t("rec.where"), `<code>${esc(i.path || "")}</code>`]);
+  if (s.backup) rows.push([t("rec.backup"), `<code>${esc(s.backup)}</code>`]);
+  const html = rows.map(([a, b]) => `<tr><th>${esc(a)}</th><td>${b}</td></tr>`).join("");
+  const tb = $("v-table");
+  if (tb.dataset.html !== html) { tb.innerHTML = html; tb.dataset.html = html; }
+  const err = $("v-err");
+  err.hidden = res.state !== "failed" || !(s.errors || []).length;
+  err.textContent = (s.errors || []).join("\n");
+  const pk = st.studio.pack, mine = pk && pk.repo === s.settings.repo && pk.started > s.started;   // a package of this recording
+  $("v-pack").disabled = !i.ok || (pk && pk.running);
+  $("v-pack-st").textContent = !mine ? t("rec.packwhat") : pk.running ? t("rec.packing") : pk.ok ? t("rec.packed", { file: pk.file })
+    : t("rec.packfail", { code: pk.code });
+  $("v-pack-st").className = "small " + (mine && !pk.running && !pk.ok ? "note err" : mine && pk.ok ? "accent" : "mute");
+  $("s4-st").textContent = t(PHASE[res.state][0]);
+  $("s4-st").className = "st " + PHASE[res.state][1];
+  $("s4-sum").textContent = "";
+}
+
+// --------------------------------------------------------- camera previews
+/* Previews only while the checks step is open and the page is visible: each one uses Wi-Fi, and
+   the recorder needs the cameras. The address carries this connection's token; it stops working
+   when the Studio locks. */
+function resetPreviews() {
+  for (const img of document.querySelectorAll(".camtile img")) { img.removeAttribute("src"); delete img.dataset.on; img.hidden = true; }
+}
+function updatePreviews() {
+  const s = st.studio;
+  const want = !!s && isEngineer() && !!st.token && !document.hidden && !running() && stepNow() <= 2;
+  for (const x of (s && s.cams) || []) {
+    const tile = document.querySelector(`.camtile[data-cam="${CSS.escape(x.key)}"]`);
+    if (!tile) continue;
+    const img = tile.querySelector("img"), empty = tile.querySelector(".empty"), msg = tile.querySelector(".msg");
+    const why = !want ? t("rec.cam.paused") : !x.present ? t("cam.notconnected") : x.paused_by ? t("cam.inuse") : x.error ? t("cam.busy") : "";
+    if (why) {
+      if (img.dataset.on) { img.removeAttribute("src"); delete img.dataset.on; }
+      img.hidden = true; empty.hidden = false; msg.textContent = why;
+      continue;
+    }
+    if (!img.dataset.on) {
+      img.dataset.on = "1";
+      img.onload = () => { img.hidden = false; empty.hidden = true; };
+      img.onerror = () => { delete img.dataset.on; img.hidden = true; empty.hidden = false; msg.textContent = t("cam.connecting"); setTimeout(updatePreviews, 2000); };
+      img.src = `/api/studio/camera/${encodeURIComponent(x.key)}.mjpg?token=${encodeURIComponent(st.token)}&t=${Date.now()}`;
+      msg.textContent = t("cam.connecting");
+    }
+  }
+}
+document.addEventListener("visibilitychange", updatePreviews);
+
+// ----------------------------------------------------------- engineer tools
+const eng = { sel: 0, servo: null, prep: {}, secs: 20 };
+const MOTION_STEPS = new Set(["teleop_left", "teleop_right", "teleop_both", "wheels", "mecanum_floor", "ros_base"]);
+$("guard-profile").addEventListener("change", () => send({ t: "guard_profile", profile: $("guard-profile").value }));
+const svPort = () => $("sv-port").value;
+$("sv-scan").addEventListener("click", () => send({ t: "servo", cmd: "scan", port: svPort(), lo: +$("sv-lo").value, hi: +$("sv-hi").value }));
+const svSend = (cmd, value) => send({ t: "servo", cmd, port: svPort(), id: eng.servo, value, arm_ok: $("sv-armok").checked });
+$("sv-ton").addEventListener("click", () => svSend("torque", 1));
+$("sv-toff").addEventListener("click", () => svSend("torque", 0));
+holdButton($("sv-move"), () => svSend("move", +$("sv-pos").value));
+holdButton($("sv-setid"), () => svSend("setid", +$("sv-newid").value));
+
+function renderTools() {
+  const s = st.studio;
+  if (!s) return;
+  if (document.activeElement !== $("guard-profile")) $("guard-profile").value = s.guard_profile || "close";
+  $("guard-off").hidden = !(st.robot && st.robot.obstacle_stop === false);
+  const jobs = (s.info && s.info.jobs) || {};
+  $("guard-profile").disabled = !!(jobs.base && jobs.base.running);
+
+  const ports = s.ports || [];
+  const sel = $("sv-port"), cur = sel.value;
+  const opts = ports.map((p) => `<option value="${esc(p.dev)}">${esc(p.dev)}${p.dev !== p.real ? " (" + esc(p.real.replace("/dev/", "")) + ")" : ""}</option>`).join("");
+  if (sel.dataset.html !== opts + LANG) { sel.innerHTML = opts || `<option value="">${esc(t("studio.noports"))}</option>`; sel.dataset.html = opts + LANG; if (cur) sel.value = cur; }
+  $("sv-scan").disabled = !ports.length;
+
+  const sc = s.servo_scan;
+  const cols = t("eng.cols").split("|");
+  let tb;
+  if (!sc || sc.port !== svPort()) tb = `<tr><td class="mute">${t(ports.length ? "eng.noscan" : "studio.noports")}</td></tr>`;
+  else if (!sc.servos.length) tb = `<tr><td class="mute">${t("eng.none")}</td></tr>`;
+  else tb = `<tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` + sc.servos.map((v) =>
+    `<tr class="pick${v.id === eng.servo ? " sel" : ""}" data-id="${v.id}"><td>${v.id}</td><td>${v.model ?? "-"}</td><td>${v.volt ?? "-"}</td><td>${v.temp ?? "-"}</td><td>${v.pos ?? "-"}</td><td>${v.mode === 1 ? "vel" : v.mode === 0 ? "pos" : (v.mode ?? "-")}</td><td>${v.torque ? "on" : "off"}</td><td>${v.current != null ? Math.round(Math.abs(v.current) * 6.5) : "-"}</td><td>${v.error ? esc(v.error) : v.status ? "0x" + v.status.toString(16) : "ok"}</td></tr>`).join("");
+  const table = $("sv-table");
+  if (table.dataset.html !== tb) {
+    table.innerHTML = tb; table.dataset.html = tb;
+    for (const row of table.querySelectorAll("tr.pick")) row.addEventListener("click", () => {
+      eng.servo = +row.dataset.id;
+      const v = sc.servos.find((x) => x.id === eng.servo);
+      if (v && v.pos != null) $("sv-pos").value = v.pos;
+      $("sv-newid").value = eng.servo;
+      table.dataset.html = ""; renderTools();
+    });
+  }
+  const has = !!(sc && sc.port === svPort() && sc.servos.some((v) => v.id === eng.servo));
+  $("sv-one").hidden = !has;
+  if (has) $("sv-sel").textContent = `${svPort()} · ID ${eng.servo}`;
+  renderWizard();
+}
+
+function renderWizard() {
+  const s = st.studio, steps = st.steps || [];
+  const res = (s && s.wizard) || {};
+  const wj = ((s && s.info && s.info.jobs) || {}).wizard;
+  $("wz-none").hidden = !(st.steps && !steps.length);
+  const status = (k) => (res[k] && res[k].status) || "pending";
+  const list = steps.map((x, i) => `<li data-i="${i}" class="${i === eng.sel ? "sel" : ""}"><span>${esc(x.title)}${x.optional ? ` <span class="mute small">(${t("wz.optional")})</span>` : ""}</span><span class="chip ${status(x.key)}">${t("wz." + status(x.key))}</span></li>`).join("");
+  const ol = $("wz-steps");
+  if (ol.dataset.html !== list) {
+    ol.innerHTML = list; ol.dataset.html = list;
+    for (const li of ol.querySelectorAll("li")) li.addEventListener("click", () => { eng.sel = +li.dataset.i; ol.dataset.html = ""; $("wz-detail").dataset.html = ""; renderWizard(); });
+  }
+  const x = steps[eng.sel];
+  if (!x) { $("wz-detail").innerHTML = ""; $("wz-tail").hidden = true; return; }
+  const runningW = !!(wj && wj.running);
+  const prep = eng.prep[x.key] || (eng.prep[x.key] = x.prep.map(() => false));
+  const li = (a) => a.map((v) => `<li>${esc(v)}</li>`).join("");
+  const motion = MOTION_STEPS.has(x.key);
+  const html = `<div class="wz">
+    <h4>${esc(x.title)}</h4><p>${esc(x.desc)}</p>${LANG === "en" ? `<p class="small mute">${t("eng.kotext")}</p>` : ""}
+    ${x.prep.length ? `<b class="small">${t("eng.prep")}</b>${x.prep.map(([txt, req], i) => `<label><input type="checkbox" data-prep="${i}" ${prep[i] ? "checked" : ""}><span>${esc(txt)}${req ? `<span class="req">${t("eng.required")}</span>` : ""}</span></label>`).join("")}` : ""}
+    ${x.do.length ? `<b class="small">${t("eng.do")}</b><ol>${li(x.do)}</ol>` : ""}
+    ${x.expect.length ? `<b class="small">${t("eng.expect")}</b><ul>${li(x.expect)}</ul>` : ""}
+    ${x.fail.length ? `<details><summary>${t("eng.iffail")}</summary><ul>${li(x.fail)}</ul></details>` : ""}
+    ${x.key.startsWith("teleop") ? `<div class="row"><label class="small mute" for="wz-sec">${t("eng.seconds")}</label><input id="wz-sec" class="num" type="number" min="5" max="120" value="${eng.secs || 20}"></div>` : ""}
+    <div class="row" style="margin-top:10px">
+      ${runningW ? `<button class="btn" id="wz-stop" type="button">${t("eng.stop")}</button>`
+        : `<button class="btn${motion ? " hold" : ""}" id="wz-run" type="button">${motion ? `<span class="fill"></span>${t("eng.runhold")}` : t("eng.run")}</button>`}
+      <span class="grow"></span>
+      <button class="btn" id="wz-pass" type="button" ${runningW ? "disabled" : ""}>${t("eng.pass")}</button>
+      <button class="btn" id="wz-fail" type="button" ${runningW ? "disabled" : ""}>${t("eng.fail")}</button>
+      ${x.optional ? `<button class="btn" id="wz-skip" type="button" ${runningW ? "disabled" : ""}>${t("eng.skip")}</button>` : ""}
+    </div></div>`;
+  const det = $("wz-detail");
+  if (det.dataset.html !== html) {
+    det.innerHTML = html; det.dataset.html = html;
+    for (const cb of det.querySelectorAll("[data-prep]")) cb.addEventListener("change", () => { prep[+cb.dataset.prep] = cb.checked; det.dataset.html = ""; });
+    const sec = $("wz-sec");
+    if (sec) sec.addEventListener("change", () => { eng.secs = +sec.value; });
+    const run = () => {
+      if (x.prep.some(([, req], i) => req && !prep[i])) { toast(t("eng.prepmissing"), true); return; }
+      send({ t: "wizard", step: x.key, on: true, seconds: eng.secs || 20 });
+    };
+    const rb = $("wz-run");
+    if (rb) { if (motion) holdButton(rb, run); else rb.addEventListener("click", run); }
+    const sb = $("wz-stop");
+    if (sb) sb.addEventListener("click", () => send({ t: "wizard", step: x.key, on: false }));
+    for (const [id, v] of [["wz-pass", "pass"], ["wz-fail", "fail"], ["wz-skip", "skip"]]) {
+      const b = $(id);
+      if (b) b.addEventListener("click", () => send({ t: "wizard_decide", step: x.key, status: v }));
+    }
+  }
+  const lines = runningW && wj ? wj.tail : (res[x.key] && res[x.key].lines) || [];
+  const tl = $("wz-tail");
+  tl.hidden = !lines.length;
+  if (lines.length) { tl.textContent = lines.join("\n"); tl.scrollTop = tl.scrollHeight; }
+}
+
+$("wz-report").addEventListener("click", () => {
+  const steps = st.steps || [], res = (st.studio && st.studio.wizard) || {};
+  const now = new Date();
+  const md = [`# HAEBOT Robot hardware check`, ``, `Date: ${now.toLocaleString()}`, `Robot: ${st.server ? st.server.backend : "?"}`, ``,
+    `| Step | Result | Auto |`, `|---|---|---|`,
+    ...steps.map((x) => `| ${x.title} | ${(res[x.key] && res[x.key].status) || "not run"} | ${res[x.key] && res[x.key].auto != null ? res[x.key].auto : "-"} |`), ``,
+    ...steps.filter((x) => res[x.key] && res[x.key].lines).flatMap((x) => [`## ${x.title}`, ``, "```", ...res[x.key].lines, "```", ``])].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+  a.download = `kiro_check_${now.toISOString().slice(0, 10)}.md`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+// ---------------------------------------------------- engineer information
+/* Read only: the technical values that used to sit on the main pages, with plain labels. */
+function renderInfo() {
+  const s = st.studio;
+  if (!s || !$("sec-info").open) return;
+  const i = s.info || {}, yes = (v) => t(v ? "inf.yes" : "inf.no");
+  const table = (head, rows) => `<div class="scroll-x"><table class="kv dtable">${head ? `<tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` : ""}`
+    + (rows.length ? rows.map((r) => `<tr>${r.map((c, n) => (n === 0 && !head ? `<th>${c}</th>` : `<td>${c}</td>`)).join("")}</tr>`).join("")
+      : `<tr><td class="mute" colspan="${head ? head.length : 2}">${esc(t("inf.none"))}</td></tr>`) + `</table></div>`;
+  const code = (v) => `<code>${esc(v)}</code>`;
+  const srv = st.server || {};
+  const parts = [];
+  parts.push([t("inf.server"), table(null, [
+    [esc(t("inf.backend")), esc(srv.backend === "ros" ? t("be.ros") : t("be.mock")) + ` · v${esc(srv.version)}`],
+    [esc(t("inf.leftok")), esc(yes(i.left_arm_ok))],
+    [esc(t("inf.obstacle")), esc(yes(i.obstacle_stop_env))],
+    [esc(t("base.profile")), esc(t(s.guard_profile === "safe" ? "base.safe" : "base.close"))],
+    [esc(t("inf.devices")), esc(srv.clients ?? "-")],
+  ])]);
+  const P = i.paths || {};
+  parts.push([t("inf.paths"), table(null, [["so101", P.so101], ["venv", P.venv], ["datasets", P.datasets], ["backups", P.backups],
+    ["calibration", P.calibration], ["policies", P.policies]].map(([k, v]) => [esc(t("inf.p." + k)), code(v || "-")]))]);
+  const B = i.boards || {};
+  parts.push([t("inf.boards"), table(t("inf.boards.cols").split("|"), Object.entries(B).filter(([k]) => !k.startsWith("_")).map(([k, b]) => [
+    esc((PARTS[k] || [k === "base" ? "sec.base" : k]).map((x) => t(x)).join(" ")), esc(b.state === "busy" ? `${b.state} (${b.by})` : b.state || "-"),
+    esc(b.n != null ? `${b.n}/${b.of}` : "-"), esc(b.vmin ?? "-"), esc(b.tmax ?? "-"), esc(b.alarm ? "ALARM" : b.msg || "-")]))]);
+  parts.push([t("inf.ports"), table(t("inf.ports.cols").split("|"), (s.ports || []).map((p) => [code(p.dev), code(p.real), esc(yes(p.arm))]))]);
+  parts.push([t("inf.cams"), table(t("inf.cams.cols").split("|"), (s.cams || []).map((c) => [esc(camName(c.key)), code(c.device || "-"),
+    esc(yes(c.present)), esc(c.auto || "-"), esc(c.live ? t("inf.yes") : "-"), esc(c.paused_by || "-"), esc(c.error || c.reason || "-")]))]);
+  const now = serverNow();
+  parts.push([t("inf.jobs"), table(t("inf.jobs.cols").split("|"), Object.values(i.jobs || {}).map((j) => [esc(j.label),
+    esc(j.running ? t("d.running") + " · " + fmtDur(now - j.started) : t("d.stopped") + (j.code != null ? ` (${j.code})` : "")),
+    (j.uses || []).map(code).join(" ") || "-"]))]);
+  const se = sess();
+  parts.push([t("inf.cmd"), se && se.cmd ? `<pre class="tail">${esc(se.cmd)}</pre>` : `<p class="small mute">${esc(t("inf.nocmd"))}</p>`]);
+  const html = parts.map(([h, body]) => `<section><h4 class="sub">${esc(h)}</h4>${body}</section>`).join("");
+  const box = $("info");
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
+}
+$("sec-info").addEventListener("toggle", renderInfo);
+
+// Folded sections remember whether they were open
+for (const d of document.querySelectorAll("details.fold, details.adv")) {
+  try { d.open = localStorage.getItem("kiro-open-" + d.id) === "1"; } catch (e) { /* ignore */ }
+  d.addEventListener("toggle", () => { try { localStorage.setItem("kiro-open-" + d.id, d.open ? "1" : "0"); } catch (e) { /* ignore */ } });
+}
+
+fillInputs();
+applyStrings();
+renderAll();
+connect();

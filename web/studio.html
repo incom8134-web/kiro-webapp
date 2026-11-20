@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b">
+<title>HAEBOT · Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="studio">
+<header class="bar">
+  <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
+  <div class="cells">
+    <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
+  </div>
+  <nav class="toplinks">
+    <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
+    <a class="toplink" href="dashboard.html" data-i18n-title="dash.open"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
+  </nav>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
+  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main class="swrap">
+  <!-- LOCKED: nothing of the Studio is sent to this page until the engineer PIN unlocks it -->
+  <section id="lock" class="lockcard" hidden>
+    <span class="lockicon" aria-hidden="true"><i class="ri-lock-2-line"></i></span>
+    <h1 data-i18n="studio.locked">Studio is locked</h1>
+    <p class="mute" data-i18n="studio.lockwhat">Record demonstrations to train AI skills, and use the engineer tools. For engineers: you need control of the robot and the engineer PIN.</p>
+    <form id="unlock" autocomplete="off">
+      <label class="field" id="op-pin-row"><span data-i18n="pin">Operator PIN</span>
+        <input id="op-pin" type="password" inputmode="numeric" autocomplete="off"></label>
+      <label class="field"><span data-i18n="eng.pin">Engineer PIN</span>
+        <input id="eng-pin" type="password" inputmode="numeric" autocomplete="off"></label>
+      <p id="lock-other" class="small note err" hidden></p>
+      <button id="unlock-btn" class="btn primary big wide" type="submit"><i class="ri-lock-unlock-line"></i><span data-i18n="studio.unlock">Unlock Studio</span></button>
+    </form>
+    <p id="lock-hint" class="small mute"></p>
+    <div id="lock-op" class="row" hidden><span class="grow small mute" data-i18n="studio.youop">You have control of the robot.</span>
+      <button id="release" class="btn" type="button"><i class="ri-logout-box-r-line"></i><span data-i18n="release">Release</span></button></div>
+  </section>
+
+  <!-- UNLOCKED -->
+  <div id="studio" hidden>
+    <div class="shead">
+      <div class="grow"><h1><span data-i18n="studio.name">Studio</span></h1>
+        <p class="mute small" data-i18n="studio.sub">Record demonstrations for training AI skills. Engineer tools and technical values are at the bottom.</p></div>
+      <span class="chip pass"><i class="ri-lock-unlock-line"></i> <span data-i18n="studio.unlocked">Unlocked</span></span>
+      <button id="lock-btn" class="btn" type="button"><i class="ri-lock-line"></i><span data-i18n="eng.lock">Lock</span></button>
+    </div>
+
+    <ol class="stepper" id="stepper">
+      <li data-s="1"><b>1</b><span data-i18n="rec.s1">Dataset</span></li>
+      <li data-s="2"><b>2</b><span data-i18n="rec.s2">Checks</span></li>
+      <li data-s="3"><b>3</b><span data-i18n="rec.s3">Record</span></li>
+      <li data-s="4"><b>4</b><span data-i18n="rec.s4">Review</span></li>
+    </ol>
+
+    <!-- 1. DATASET -->
+    <section class="card step" id="s1">
+      <div class="stephead"><b class="num">1</b><h2 data-i18n="rec.s1.t">Dataset</h2><span id="s1-st" class="st"></span></div>
+      <div class="stepbody">
+        <div class="field"><span data-i18n="rec.arm">Arm</span>
+          <div class="segbar" id="arm-seg">
+            <button type="button" data-v="right" data-i18n="rec.arm.right">Right arm</button>
+            <button type="button" data-v="left" data-i18n="rec.arm.left">Left arm</button>
+            <button type="button" data-v="both" data-i18n="rec.arm.both">Both arms</button>
+          </div>
+          <small id="arm-note" class="note err" hidden></small>
+        </div>
+        <div class="field"><span data-i18n="rec.dataset">Dataset</span>
+          <div class="segbar" id="mode-seg">
+            <button type="button" data-v="new" data-i18n="rec.mode.new">Create new</button>
+            <button type="button" data-v="add" data-i18n="rec.mode.add">Add to existing</button>
+          </div>
+        </div>
+        <label class="field" id="repo-new"><span data-i18n="rec.name">Name (user/name)</span>
+          <input id="repo" type="text" spellcheck="false" autocapitalize="off" placeholder="team/pick_cube"></label>
+        <label class="field" id="repo-add" hidden><span data-i18n="rec.pick">Dataset to add episodes to</span>
+          <select id="repo-pick"></select></label>
+        <div id="ds-info" class="dsinfo"></div>
+        <label class="field"><span data-i18n="rec.task">Task, one English sentence</span>
+          <input id="task" type="text" maxlength="200" spellcheck="true" data-i18n-ph="rec.task.ph"></label>
+        <div class="nums">
+          <label class="field"><span data-i18n="rec.eps">Episodes</span><input id="episodes" type="number" min="1" max="500" inputmode="numeric"></label>
+          <label class="field"><span data-i18n="rec.eps_s">Seconds per episode</span><input id="episode_s" type="number" min="5" max="600" inputmode="numeric"></label>
+          <label class="field"><span data-i18n="rec.reset_s">Reset seconds</span><input id="reset_s" type="number" min="0" max="300" inputmode="numeric"></label>
+        </div>
+        <p id="s1-total" class="small mute"></p>
+        <p id="s1-err" class="note err small" hidden></p>
+        <div class="stepfoot"><button id="go-check" class="btn primary" type="button"><i class="ri-checkbox-circle-line"></i><span data-i18n="rec.runchecks">Run checks</span></button></div>
+      </div>
+      <p class="stepsum small mute" id="s1-sum"></p>
+    </section>
+
+    <!-- 2. CHECKS -->
+    <section class="card step" id="s2">
+      <div class="stephead"><b class="num">2</b><h2 data-i18n="rec.s2.t">Cameras and checks</h2><span id="s2-st" class="st"></span></div>
+      <div class="stepbody">
+        <div class="camgrid" id="camgrid"></div>
+        <details class="adv" id="adv">
+          <summary data-i18n="rec.adv">Advanced: frame rate and video encoding</summary>
+          <div class="nums">
+            <label class="field"><span data-i18n="rec.fps">Frames per second</span><input id="fps" type="number" min="5" max="60" inputmode="numeric"></label>
+            <label class="field"><span data-i18n="rec.vcodec">Video encoding</span>
+              <select id="vcodec"><option value="h264" data-i18n="rec.h264">H.264 (fast, small; the old recorder's choice)</option><option value="libsvtav1" data-i18n="rec.av1">AV1 (LeRobot default, slow)</option></select></label>
+          </div>
+          <label class="switch"><input type="checkbox" id="streaming"><span class="track"></span><span data-i18n="rec.streaming">Streaming encoding (video is encoded while recording, no wait between episodes)</span></label>
+          <label class="switch"><input type="checkbox" id="flicker"><span class="track"></span><span data-i18n="rec.flicker">Flicker-safe exposure for the wrist cameras too (the top camera always)</span></label>
+        </details>
+        <div class="checkhead"><h3 data-i18n="rec.preflight">Checks</h3><span id="ck-sum" class="chk-sum"></span></div>
+        <div class="cklist" id="cklist"></div>
+        <div class="stepfoot">
+          <button id="recheck" class="btn" type="button"><i class="ri-refresh-line"></i><span data-i18n="rec.recheck">Run checks again</span></button>
+          <span class="grow"></span>
+          <button id="start" class="btn hold" type="button"><span class="fill"></span><i class="ri-record-circle-line"></i><span data-i18n="rec.start">Hold to start recording</span></button>
+        </div>
+        <p class="small mute" id="start-hint" data-i18n="rec.starthint">When recording starts, the follower arm moves at once to the leader arm's pose. Hold the leader arm first.</p>
+      </div>
+      <p class="stepsum small mute" id="s2-sum"></p>
+    </section>
+
+    <!-- 3. RECORD -->
+    <section class="card step" id="s3">
+      <div class="stephead"><b class="num">3</b><h2 data-i18n="rec.s3.t">Record</h2><span id="s3-st" class="st"></span></div>
+      <div class="stepbody">
+        <div class="recpanel" id="recpanel">
+          <div class="recstate"><span class="phase" id="r-phase"></span><span class="small mute" id="r-what"></span></div>
+          <div class="recnums">
+            <div><span class="k" data-i18n="rec.episode">Episode</span><b id="r-ep">-</b></div>
+            <div><span class="k" id="r-left-k" data-i18n="rec.left">Time left</span><b id="r-left">-</b></div>
+            <div><span class="k" data-i18n="rec.saved">Saved this session</span><b id="r-saved">0</b></div>
+          </div>
+          <div class="pbar"><i id="r-bar"></i></div>
+          <p class="rechint" id="r-hint"></p>
+        </div>
+        <div class="recbtns">
+          <button id="r-next" class="btn big" type="button"><i class="ri-skip-forward-line"></i><span></span></button>
+          <button id="r-redo" class="btn big" type="button"><i class="ri-arrow-go-back-line"></i><span data-i18n="rec.redo">Record this episode again</span></button>
+          <button id="r-stop" class="btn big" type="button"><i class="ri-save-3-line"></i><span data-i18n="rec.stop">Stop and save</span></button>
+        </div>
+        <p class="small mute" id="r-explain"></p>
+        <div class="row forcerow">
+          <button id="r-kill" class="btn hold" type="button"><span class="fill"></span><i class="ri-close-circle-line"></i><span data-i18n="rec.kill">Force stop (hold 2 s)</span></button>
+          <span class="small mute grow" data-i18n="rec.killhint">Stops at once. The episode being recorded is lost; saved episodes stay.</span>
+        </div>
+        <details class="logfold"><summary data-i18n="rec.log">Recorder output</summary><pre id="r-log" class="tail"></pre></details>
+      </div>
+      <p class="stepsum small mute" id="s3-sum"></p>
+    </section>
+
+    <!-- 4. REVIEW -->
+    <section class="card step" id="s4">
+      <div class="stephead"><b class="num">4</b><h2 data-i18n="rec.s4.t">Review</h2><span id="s4-st" class="st"></span></div>
+      <div class="stepbody">
+        <p id="v-msg" class="vmsg"></p>
+        <table class="kv" id="v-table"></table>
+        <pre id="v-err" class="tail" hidden></pre>
+        <div class="stepfoot">
+          <button id="v-more" class="btn primary" type="button"><i class="ri-add-line"></i><span data-i18n="rec.more">Record more episodes</span></button>
+          <button id="v-pack" class="btn" type="button"><i class="ri-archive-line"></i><span data-i18n="rec.pack">Package for upload</span></button>
+          <span class="grow"></span>
+          <button id="v-new" class="btn" type="button"><i class="ri-file-add-line"></i><span data-i18n="rec.newds">New dataset</span></button>
+        </div>
+        <p id="v-pack-st" class="small mute"></p>
+      </div>
+      <p class="stepsum small mute" id="s4-sum"></p>
+    </section>
+
+    <!-- ENGINEER TOOLS (moved here from the control page) -->
+    <details class="card fold" id="sec-tools">
+      <summary class="row head"><h3><i class="ri-tools-line"></i><span data-i18n="studio.tools">Engineer tools</span></h3><span class="st small mute" data-i18n="studio.toolswhat">guard distance, servo tester, check wizard</span></summary>
+      <h4 class="sub" data-i18n="base.profile">Guard distance</h4>
+      <div class="row"><select id="guard-profile" class="grow">
+        <option value="close" data-i18n="base.close">Close</option>
+        <option value="safe" data-i18n="base.safe">Safe</option>
+      </select></div>
+      <p class="small mute" data-i18n="studio.guardwhat">Used by the base program's lidar guard the next time the base starts (Drive tab).</p>
+      <p id="guard-off" class="small note err" data-i18n="base.guardoff" hidden></p>
+
+      <h4 class="sub" data-i18n="eng.servo">Servo tester</h4>
+      <div class="row">
+        <select id="sv-port" class="grow" aria-label="port"></select>
+        <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" aria-label="from ID">
+        <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
+        <button id="sv-scan" class="btn" type="button"><i class="ri-search-line"></i><span data-i18n="eng.scan">Scan</span></button>
+      </div>
+      <label class="switch"><input type="checkbox" id="sv-armok"><span class="track"></span><span data-i18n="eng.armok">Allow control on arm ports</span></label>
+      <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
+      <div id="sv-one" hidden>
+        <p class="small"><b id="sv-sel"></b></p>
+        <div class="row seg">
+          <button id="sv-ton" class="btn" type="button" data-i18n="eng.torqueon">Torque on</button>
+          <button id="sv-toff" class="btn" type="button" data-i18n="eng.torqueoff">Torque off</button>
+        </div>
+        <div class="row">
+          <label class="small mute" for="sv-pos" data-i18n="eng.pos">Position</label>
+          <input id="sv-pos" class="num" type="number" min="0" max="4095" value="2048">
+          <button id="sv-move" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.move">Move (hold)</span></button>
+        </div>
+        <div class="row">
+          <label class="small mute" for="sv-newid" data-i18n="eng.newid">New ID</label>
+          <input id="sv-newid" class="num" type="number" min="1" max="253" value="1">
+          <button id="sv-setid" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.setid">Change ID (hold)</span></button>
+        </div>
+        <p class="small mute" data-i18n="eng.setidhint"></p>
+      </div>
+
+      <h4 class="sub" data-i18n="eng.wizard">Check wizard</h4>
+      <ol id="wz-steps" class="steps"></ol>
+      <p id="wz-none" class="small mute" data-i18n="studio.wznone" hidden>The check wizard steps could not be read from the old code.</p>
+      <div id="wz-detail"></div>
+      <pre id="wz-tail" class="tail" hidden></pre>
+      <div class="row"><button id="wz-report" class="btn" type="button"><i class="ri-download-2-line"></i><span data-i18n="eng.report">Download report</span></button></div>
+    </details>
+
+    <!-- ENGINEER INFORMATION: read only -->
+    <details class="card fold" id="sec-info">
+      <summary class="row head"><h3><i class="ri-information-line"></i><span data-i18n="studio.info">Engineer information</span></h3><span class="st small mute" data-i18n="studio.readonly">read only</span></summary>
+      <div class="infogrid" id="info"></div>
+    </details>
+  </div>
+  <p id="toast" class="toast" role="status" hidden></p>
+</main>
+<div class="foot" id="ver"></div>
+<script src="i18n.js"></script>
+<script src="studio.js"></script>
+</body>
+</html>

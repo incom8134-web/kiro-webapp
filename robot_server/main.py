@@ -27,8 +27,9 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
 OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
-                    "leader", "wave", "follow"}
-ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide"}  # also need the engineer PIN
+                    "leader", "wave", "follow", "studio", "guard_profile"}
+# Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance)
+ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile"}
 
 
 class NoStalePages:
@@ -39,7 +40,7 @@ class NoStalePages:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"].startswith("/camera/"):
+        if scope["type"] != "http" or scope["path"].startswith(("/camera/", "/api/studio/camera/")):
             return await self.app(scope, receive, send)
 
         async def send_no_cache(msg):
@@ -151,6 +152,14 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         if n % 20 == 0:  # 1 Hz
             r = state["robot"].snapshot()
             await asyncio.gather(*(send(cid, r) for cid in list(sockets)))
+            await send_studio([cid for cid in list(sockets) if ctrl.is_engineer(cid)])
+
+    async def send_studio(cids: list[str]) -> None:
+        """Training data and engineer values: only to connections that are the unlocked engineer."""
+        if not cids:
+            return
+        snap = await asyncio.to_thread(state["robot"].studio_snapshot)
+        await asyncio.gather(*(send(cid, {**snap, "token": ctrl.engineer_token(cid)}) for cid in cids if ctrl.is_engineer(cid)))
 
     async def act(cid: str, msg: dict) -> None:
         """Robot actions. Only the operator; never while E-STOP is on (except stopping things)."""
@@ -164,7 +173,11 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             await send(cid, {"t": "note", "ok": False, "msg": "Unlock the engineer tools first.", "about": t})
             return
         starting = on and not (t == "arm" and msg.get("action") == "release")
-        if t == "servo":  # reading and letting go are always allowed; moving and writing are not during E-STOP
+        if t == "studio":  # only starting a recording moves an arm; next / again / stop / force stop / checks never do
+            starting = msg.get("cmd") == "start"
+        elif t == "guard_profile":
+            starting = False
+        elif t == "servo":  # reading and letting go are always allowed; moving and writing are not during E-STOP
             starting = msg.get("cmd") in ("move", "setid") or (msg.get("cmd") == "torque" and bool(msg.get("value")))
         elif t == "wizard_decide":
             starting = False
@@ -172,8 +185,24 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             await send(cid, {"t": "note", "ok": False, "msg": "E-STOP is on.", "about": t})
             return
         name = who(cid)
-        if t == "base":
-            call = lambda: r.base(on, name, str(msg.get("profile", "close")))  # noqa: E731
+        if t == "base":  # guard distance: the engineer's choice on the Studio page, not the message's
+            call = lambda: r.base(on, name, r.guard_profile)  # noqa: E731
+        elif t == "guard_profile":
+            call = lambda: r.set_guard_profile(str(msg.get("profile")), name)  # noqa: E731
+        elif t == "studio":
+            cmd = str(msg.get("cmd"))
+            if cmd == "check":
+                call = lambda: (r.rec.check(msg.get("settings"), ctrl.estop)["ok"], "")  # noqa: E731
+            elif cmd == "start":
+                call = lambda: r.rec.start(msg.get("settings"), name, ctrl.estop)  # noqa: E731
+            elif cmd in ("next", "redo", "stop", "kill"):
+                call = lambda: r.rec.control(cmd, msg.get("ep"), msg.get("phase"), name)  # noqa: E731
+            elif cmd == "pack":
+                call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
+            elif cmd == "hello":
+                call = lambda: (True, "")  # noqa: E731
+            else:
+                return
         elif t == "say":
             call = lambda: r.say(str(msg.get("text", "")), name)  # noqa: E731
         elif t == "servo":
@@ -209,8 +238,10 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             ok, text = False, f"Error: {e}"
         if starting and ctrl.estop:  # E-STOP was pressed while this was starting: stop it now
             await asyncio.to_thread(r.on_estop, ctrl.estop_by or name)
-        await send(cid, {"t": "note", "ok": ok, "msg": text, "about": t})
+        await send(cid, {"t": "note", "ok": ok, "msg": text, "about": t, "cmd": msg.get("cmd")})
         await send(cid, r.snapshot())
+        if t in ENGINEER_ACTIONS:
+            await send_studio([cid])
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -257,6 +288,31 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             cam.attach()
             try:
                 for jpg in cam.frames():
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
+            finally:
+                cam.detach()
+
+        return StreamingResponse(stream(), media_type="multipart/x-mixed-replace; boundary=frame",
+                                 headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/studio/camera/{key}.mjpg")
+    def studio_camera(key: str, token: str = ""):
+        """The Studio page's camera previews: the same streams, but only for the unlocked engineer
+        (token from the Studio state). The stream ends as soon as the engineer locks or leaves."""
+        if not ctrl.token_ok(token):
+            raise HTTPException(403, "Studio is locked")
+        cam = state["robot"].cams.get(key) if state["robot"] else None
+        if cam is None:
+            raise HTTPException(404, "no such camera")
+        if cam.paused_by:
+            raise HTTPException(409, f"camera in use by {cam.paused_by}")
+
+        def stream():
+            cam.attach()
+            try:
+                for jpg in cam.frames():
+                    if not ctrl.token_ok(token):
+                        return
                     yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
             finally:
                 cam.detach()
@@ -317,6 +373,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                         await send(cid, {"t": "note", "ok": ok, "msg": text, "about": "engineer"})
                         if ok:
                             state["robot"].event(who(cid), "unlocked engineer tools")
+                            await send_studio([cid])
                             steps = await asyncio.to_thread(state["robot"].wizard_steps)
                             await send(cid, {"t": "wizard_steps", "steps": steps})
                 elif t == "logs":  # the dashboard terminal: the recent server log once, then every new line

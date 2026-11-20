@@ -36,6 +36,7 @@ from .camera import Camera, find_cameras
 from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
+from .recorder import Recorder
 
 log = logging.getLogger("kiro.robot")
 HERE = Path(__file__).resolve().parent
@@ -63,6 +64,7 @@ WIZARD_USES = {
     "camera_uvc": {"cam:top"}, "gamepad": {"/dev/input/js0"}, "wheels": {"/dev/so101_base"}, "mecanum_floor": {"/dev/so101_base"},
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
+ENGINEER_JOBS = ("record", "pack", "wizard")  # their output is shown only on the Studio page
 ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left")  # programs that move a follower arm by themselves (relay feeds the bridge)
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
@@ -121,7 +123,9 @@ class Robot:
         self._estop_lock = threading.Lock()
         self._cpu_prev: dict = {}
         self._net_prev: tuple | None = None
+        self.guard_profile = "close"  # lidar guard distance of the base program; set by the engineer (Studio page)
         self.refresh_cameras()
+        self.rec = Recorder(self)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -827,6 +831,7 @@ class Robot:
             try:
                 h = {"jetson": self._jetson(), "t": time.time()}
                 self._follow_watch()
+                self.rec.poll()
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})
                 self.health = h
                 if n % 2 == 0:  # a camera plugged in shows up within a few seconds
@@ -837,12 +842,22 @@ class Robot:
             self._stop.wait(self.cfg.health_period)
 
     # ---------------------------------------------------------------- state
-    def snapshot(self) -> dict:
-        self._wizard_collect()
+    def _jobs_view(self, n: int) -> dict:
         jobs = {}
         for name, info in self.jobs.info().items():
-            info["tail"] = [ANSI.sub("", s).strip() for s in info["tail"] if ANSI.sub("", s).strip()][-8:]
+            info["tail"] = [ANSI.sub("", s).strip() for s in info["tail"] if ANSI.sub("", s).strip()][-n:]
             jobs[name] = info
+        return jobs
+
+    def snapshot(self) -> dict:
+        """Sent to every page, viewers too. Engineer-only values (serial ports, servo scan, check wizard,
+        device paths, recording and packaging output) are in studio_snapshot() instead."""
+        self._wizard_collect()
+        jobs = self._jobs_view(8)
+        for name, info in jobs.items():
+            info.pop("uses", None)
+            if name in ENGINEER_JOBS:
+                info["tail"] = []
         cams = []
         for c in self.cam_info:
             cam = self.cams.get(c["key"])
@@ -854,12 +869,38 @@ class Robot:
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
-            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(), "ports": [] if self.mock else self.serial_ports(),
-            "servo_scan": self.servo_scan, "wizard": self.wizard_results,
+            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(),
             "bridge": {"running": self.jobs.running("bridge"), "side": self.bridge_side, "mode": self.bridge_mode,
                        "state": (self._bridge_status() or {}).get("state"), "rx": self.leader_rx,
                        "fresh": time.monotonic() - self.leader_last < 0.5 if self.leader_last else False},
         }
+
+    def studio_snapshot(self) -> dict:
+        """Only for the unlocked engineer (Studio page): recording, engineer tools and the technical values."""
+        self._wizard_collect()
+        out = self.rec.snapshot()
+        cams = []
+        for c in self.cam_info:
+            cam = self.cams.get(c["key"])
+            cams.append({**{k: c.get(k) for k in ("key", "label", "device", "present", "reason", "auto", "width", "height", "fps")},
+                         **({k: v for k, v in cam.info().items() if k in ("live", "viewers", "paused_by", "error")} if cam else {})})
+        out.update(
+            cams=cams, guard_profile=self.guard_profile, servo_scan=self.servo_scan, wizard=self.wizard_results,
+            ports=[] if self.mock else self.serial_ports(),
+            info={"mock": self.mock, "jobs": self._jobs_view(12), "boards": self.health.get("boards", {}),
+                  "jetson": self.health.get("jetson", {}), "left_arm_ok": self.cfg.left_arm_ok,
+                  "obstacle_stop_env": self.obstacle_stop_on(),
+                  "paths": {"so101": str(self.so101), "venv": str(self.venv), "datasets": str(self.rec.root),
+                            "backups": str(self.rec.backups), "calibration": str(HF_CALIB),
+                            "policies": str(Path(self.cfg.policies_dir).expanduser())}})
+        return out
+
+    def set_guard_profile(self, profile: str, who: str) -> tuple[bool, str]:
+        if profile not in GUARD_PROFILES:
+            return False, "Unknown guard distance."
+        self.guard_profile = profile
+        self.event(who, f"guard distance: {profile} (used when the base starts)")
+        return True, ""
 
     def close(self) -> None:
         self._stop.set()

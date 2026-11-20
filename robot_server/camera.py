@@ -55,6 +55,34 @@ def find_cameras(so101_dir: Path) -> list[dict]:
         return []
 
 
+class _Pattern:
+    """Pretend camera (device "mock:<name>", mock mode and tests): a moving test picture, no hardware."""
+
+    def __init__(self, name: str):
+        self.name, self.n = name, 0
+
+    def isOpened(self) -> bool:  # noqa: N802 - same names as cv2.VideoCapture
+        return True
+
+    def set(self, *_a) -> bool:
+        return True
+
+    def read(self):
+        import cv2
+        import numpy as np
+        time.sleep(1 / 30)
+        self.n += 1
+        img = np.full((480, 640, 3), 28, np.uint8)
+        x = (self.n * 6) % 640
+        cv2.rectangle(img, (x, 0), (x + 40, 480), (70, 70, 70), -1)
+        cv2.putText(img, f"MOCK {self.name}", (24, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (235, 235, 235), 3)
+        cv2.putText(img, time.strftime("%H:%M:%S"), (24, 440), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+        return True, img
+
+    def release(self) -> None:
+        pass
+
+
 class Camera:
     """One preview stream. Thread-safe."""
 
@@ -118,7 +146,7 @@ class Camera:
     def _run(self) -> None:
         import cv2
 
-        cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
+        cap = _Pattern(self.device[5:]) if self.device.startswith("mock:") else cv2.VideoCapture(self.device, cv2.CAP_V4L2)
         if self.fourcc:
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)

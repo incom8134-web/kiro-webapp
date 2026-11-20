@@ -8,6 +8,15 @@
       "port": 8080
     },
     {
+      "name": "kiro-mock-8090-fakecams",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "KIRO_SO101_DIR=tests/fake_so101 KIRO_PORT=8090 KIRO_HTTPS_PORT=8453 KIRO_BACKEND=mock ./run.sh"
+      ],
+      "port": 8090
+    },
+    {
       "name": "kiro-mock-8090",
       "runtimeExecutable": "bash",
       "runtimeArgs": [

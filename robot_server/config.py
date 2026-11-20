@@ -57,6 +57,10 @@ class Config:
     so101_dir: str = "~/so101"
     lerobot_venv: str = "~/lerobot-venv"
     policies_dir: str = "~/policies"
+    # Recorded datasets (Studio page). "" = the LeRobot folder (HF_LEROBOT_HOME, as the old recorder uses)
+    # on the robot, and a separate pretend folder in mock mode, so mock recordings never mix with real ones.
+    datasets_dir: str = ""
+    backups_dir: str = "~/.cache/kiro-webapp/dataset_backups"  # copy of a dataset before episodes are added
     skill_seconds: float = 20.0
     health_period: float = 3.0
     # The left arm calibration was broken on 16 Nov 2026 (see ~/so101/CLAUDE.md).
@@ -101,6 +105,8 @@ class Config:
             so101_dir=os.environ.get("KIRO_SO101_DIR", d.so101_dir),
             lerobot_venv=os.environ.get("KIRO_LEROBOT_VENV", d.lerobot_venv),
             policies_dir=os.environ.get("KIRO_POLICIES_DIR", d.policies_dir),
+            datasets_dir=os.environ.get("KIRO_DATASETS_DIR", d.datasets_dir),
+            backups_dir=os.environ.get("KIRO_BACKUPS_DIR", d.backups_dir),
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),
             left_arm_ok=os.environ.get("KIRO_LEFT_ARM_OK", "0") == "1",

@@ -18,7 +18,10 @@
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
   </div>
-  <a class="toplink" href="dashboard.html"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
+  <nav class="toplinks">
+    <a class="toplink" href="dashboard.html"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
+    <a class="toplink" href="studio.html" data-i18n-title="studio.open"><i class="ri-lock-2-line"></i><span data-i18n="studio.open">Studio</span></a>
+  </nav>
   <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
   <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
   <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
@@ -158,59 +161,6 @@
             <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
           </div>
         </div>
-
-        <details class="card fold" id="sec-eng">
-          <summary class="row head"><h3><span data-i18n="sec.eng">Engineer</span></h3><span id="eng-st" class="st"></span></summary>
-          <form id="eng-box" class="row" autocomplete="off">
-            <input id="eng-pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="eng.pin">
-            <button class="btn" type="submit" data-op><i class="ri-lock-unlock-line"></i><span data-i18n="eng.unlock">Unlock</span></button>
-          </form>
-          <p id="eng-hint" class="small mute"></p>
-          <div id="eng-body" hidden>
-            <div class="row"><span class="grow small mute" data-i18n="eng.unlocked"></span><button id="eng-lock" class="btn" type="button"><i class="ri-lock-line"></i><span data-i18n="eng.lock">Lock</span></button></div>
-
-            <h4 class="sub" data-i18n="base.profile">Guard distance</h4>
-            <select id="guard-profile" class="wide">
-              <option value="close" data-i18n="base.close">Close</option>
-              <option value="safe" data-i18n="base.safe">Safe</option>
-            </select>
-            <p id="guard-off" class="small mute" data-i18n="base.guardoff" hidden></p>
-
-            <h4 class="sub" data-i18n="eng.servo">Servo tester</h4>
-            <div class="row">
-              <select id="sv-port" class="grow" aria-label="port"></select>
-              <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" aria-label="from ID">
-              <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
-              <button id="sv-scan" class="btn primary" type="button"><i class="ri-search-line"></i><span data-i18n="eng.scan">Scan</span></button>
-            </div>
-            <label class="switch"><input type="checkbox" id="sv-armok"><span class="track"></span><span data-i18n="eng.armok">Allow control on arm ports</span></label>
-            <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
-            <div id="sv-one" hidden>
-              <p class="small"><b id="sv-sel"></b></p>
-              <div class="row seg">
-                <button id="sv-ton" class="btn" type="button" data-i18n="eng.torqueon">Torque on</button>
-                <button id="sv-toff" class="btn" type="button" data-i18n="eng.torqueoff">Torque off</button>
-              </div>
-              <div class="row">
-                <label class="small mute" for="sv-pos" data-i18n="eng.pos">Position</label>
-                <input id="sv-pos" class="num" type="number" min="0" max="4095" value="2048">
-                <button id="sv-move" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.move">Move (hold)</span></button>
-              </div>
-              <div class="row">
-                <label class="small mute" for="sv-newid" data-i18n="eng.newid">New ID</label>
-                <input id="sv-newid" class="num" type="number" min="1" max="253" value="1">
-                <button id="sv-setid" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.setid">Change ID (hold)</span></button>
-              </div>
-              <p class="small mute" data-i18n="eng.setidhint"></p>
-            </div>
-
-            <h4 class="sub" data-i18n="eng.wizard">Check wizard</h4>
-            <ol id="wz-steps" class="steps"></ol>
-            <div id="wz-detail"></div>
-            <pre id="wz-tail" class="tail" hidden></pre>
-            <div class="row"><button id="wz-report" class="btn" type="button"><i class="ri-download-2-line"></i><span data-i18n="eng.report">Download report</span></button></div>
-          </div>
-        </details>
       </section>
     </div>
     <div class="foot" id="ver"></div>

@@ -46,7 +46,10 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/servo_probe.py` | Read-only servo voltage / temperature / current, run as a short subprocess |
 | `robot_server/servo_tool.py` | Servo tester commands, reusing the old `so101_servo_tester.Bus` |
 | `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |
+| `robot_server/recorder.py`, `record_runner.py` | Studio page: records demonstration datasets with the old recorder (LeRobot's `lerobot-record`, set up like `~/so101/record_gui.py`), checks before recording, next / again / stop / force stop, a copy before adding episodes, `pack_dataset.sh` for upload |
 | `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/` |
+| `web/studio.html`, `studio.js` | Studio page (lock icon in the top bars): recording training data, the engineer tools (guard distance, servo tester, check wizard) and the read-only engineer information. Locked until the operator unlocks it with the engineer PIN |
+| `tests/fake_so101/` | Pretend camera list for mock mode: `KIRO_SO101_DIR=tests/fake_so101 ./run.sh` shows test pictures and never opens a real camera |
 | `web/` | Plain HTML, CSS, JavaScript. `style.css` holds the look of both pages (colour tokens at the top). `i18n.js` holds every string in English and Korean, `feetech.js` reads the leader arm over Web Serial (read only). No build step, no CDN |
 | `deploy/` | Hotspot script, systemd unit, shutdown sudoers rule, robot setup steps |
 | `docs/` | Handover, architecture, plan, to-do list |
