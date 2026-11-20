@@ -121,19 +121,33 @@ class Config:
             laser_x=_f("KIRO_LASER_X", d.laser_x),
         )
 
+    @property
+    def lidar_env(self) -> Path:
+        """Lidar mounting values of the old code (run_base_teleop.sh reads it too)."""
+        return Path(self.so101_dir).expanduser() / "config" / "lidar.env"
+
+    def _lidar_value(self, key: str) -> str | None:
+        try:
+            for line in self.lidar_env.read_text().splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() == key:
+                    return v.split("#")[0].strip()
+        except OSError:
+            pass
+        return None
+
     def lidar_yaw(self) -> float:
         """Mounting angle of the lidar, as used by the old launch file and guard."""
         if self.laser_yaw is not None:
             return self.laser_yaw
-        env = Path(self.so101_dir).expanduser() / "config" / "lidar.env"
         try:
-            for line in env.read_text().splitlines():
-                k, _, v = line.partition("=")
-                if k.strip() == "LASER_YAW":
-                    return float(v.split("#")[0].strip())
-        except (OSError, ValueError):
-            pass
-        return 1.26
+            return float(self._lidar_value("LASER_YAW") or "1.26")
+        except ValueError:
+            return 1.26
+
+    def lidar_mask(self) -> str:
+        """Directions where the lidar sees the robot itself (LIDAR_MASK, written by the lidar setup in Studio)."""
+        return self._lidar_value("LIDAR_MASK") or ""
 
     @property
     def pin_is_default(self) -> bool:

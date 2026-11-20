@@ -242,6 +242,38 @@
       <div class="flist" id="fm-models"></div>
     </section>
 
+    <!-- LIDAR SETUP: front direction and the robot's own parts, then the obstacle stop on (robot_server/lidar_setup.py) -->
+    <section class="card" id="lidar">
+      <div class="row head"><h3><i class="ri-radar-line"></i><span data-i18n="ls.title">Lidar setup</span></h3><span id="ls-st" class="chk-sum"></span></div>
+      <p class="small mute" data-i18n="ls.what">Put the lidar where it will stay. Two snapshots find the robot's front and the robot's own parts the lidar can see. Then the obstacle stop switches on. Nothing moves.</p>
+      <div class="lsgrid">
+        <table class="kv" id="ls-now"></table>
+        <svg id="ls-map" class="lsmap" viewBox="-60 -60 120 120" role="img" aria-label="lidar view"></svg>
+      </div>
+      <ol class="tsteps" id="ls-steps">
+        <li data-s="clear"><b class="num">1</b><div class="tbody">
+          <h3 data-i18n="ls.s1">Clear the space around the robot</h3>
+          <p data-i18n="ls.s1.t">Nothing within 1 m of the robot, and step back yourself. The arms in their usual place. Everything the lidar sees close by now counts as part of the robot.</p>
+          <div class="stepfoot"><button id="ls-clear" class="btn" type="button"><i class="ri-checkbox-circle-line"></i><span data-i18n="ls.clear">The space is clear</span></button></div>
+        </div></li>
+        <li data-s="box"><b class="num">2</b><div class="tbody">
+          <h3 data-i18n="ls.s2">Put a box in front</h3>
+          <p data-i18n="ls.s2.t">A box at least 10 cm wide, 30 to 60 cm in front of the middle of the robot, standing on the floor at the lidar's height. Step back again.</p>
+          <div class="stepfoot"><button id="ls-box" class="btn" type="button"><i class="ri-checkbox-circle-line"></i><span data-i18n="ls.box">The box is in place</span></button></div>
+        </div></li>
+        <li data-s="result"><b class="num">3</b><div class="tbody">
+          <h3 data-i18n="ls.s3">Check and save</h3>
+          <p id="ls-res"></p>
+          <div id="ls-warn"></div>
+          <div class="stepfoot"><button id="ls-apply" class="btn primary" type="button"><i class="ri-save-3-line"></i><span data-i18n="ls.apply">Save and switch the obstacle stop on</span></button></div>
+        </div></li>
+      </ol>
+      <p id="ls-err" class="small note err" hidden></p>
+      <div class="stepfoot"><button id="ls-start" class="btn" type="button"><i class="ri-play-line"></i><span id="ls-start-t">Start lidar setup</span></button>
+        <button id="ls-cancel" class="btn" type="button" hidden><span data-i18n="ls.cancel">Cancel</span></button>
+        <span class="grow"></span><span id="ls-busy" class="small mute" hidden data-i18n="ls.busy">Measuring...</span></div>
+    </section>
+
     <!-- ENGINEER TOOLS (moved here from the control page) -->
     <details class="card fold" id="sec-tools">
       <summary class="row head"><h3><i class="ri-tools-line"></i><span data-i18n="studio.tools">Engineer tools</span></h3><span class="st small mute" data-i18n="studio.toolswhat">guard distance, servo tester, check wizard</span></summary>

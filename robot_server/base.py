@@ -5,17 +5,21 @@ RosBase  - the real robot. Publishes speed commands to /cmd_vel_raw (through the
 """
 from __future__ import annotations
 
+import collections
 import math
+import random
 import threading
 import time
 
 from .config import Config
+from .lidar_setup import Scan, is_self, parse_mask
 
 
 def scan_points(ranges, angle_min: float, angle_inc: float, rmin: float, rmax: float,
-                yaw: float, lx: float, n_out: int) -> list[int]:
+                yaw: float, lx: float, n_out: int, mask: dict[int, float] | None = None) -> list[int]:
     """Laser ranges -> flat [x0, y0, x1, y1, ...] in cm in the robot frame (x forward, y left).
-    Keeps the nearest point of each angle bin, so nothing close is ever thinned away."""
+    Keeps the nearest point of each angle bin, so nothing close is ever thinned away.
+    Points of the robot itself (mask, from the lidar setup in Studio) are left out."""
     n = len(ranges)
     if n == 0:
         return []
@@ -25,8 +29,11 @@ def scan_points(ranges, angle_min: float, angle_inc: float, rmin: float, rmax: f
         best = None
         for i in range(start, min(n, start + step)):
             r = ranges[i]
-            if math.isfinite(r) and rmin < r < rmax and (best is None or r < best[0]):
-                best = (r, i)
+            if not (math.isfinite(r) and rmin < r < rmax) or (best is not None and r >= best[0]):
+                continue
+            if mask and is_self(math.degrees(angle_min + i * angle_inc + yaw), r, mask):
+                continue
+            best = (r, i)
         if best:
             r, i = best
             a = angle_min + i * angle_inc + yaw
@@ -37,6 +44,10 @@ def scan_points(ranges, angle_min: float, angle_inc: float, rmin: float, rmax: f
 # A pretend room for mock mode, in world metres: walls and one box (x0, y0, x1, y1).
 MOCK_ROOM = (-2.0, -1.8, 3.5, 2.2)
 MOCK_BOXES = ((1.4, 0.6, 1.9, 1.1), (-1.2, -1.6, -0.6, -1.0))
+# The pretend lidar for the lidar setup: mounted turned like the real one, with a robot part in view
+MOCK_LIDAR_YAW = 1.26
+MOCK_SELF = ((125.0, 150.0, 0.28), (-150.0, -125.0, 0.30))  # robot-frame degrees from..to, metres (the arms)
+MOCK_SETUP_BOX = (8.0, 0.45)  # half width in degrees and distance of the box the person puts in front
 
 
 def _ray_box(ox, oy, dx, dy, box):
@@ -58,21 +69,54 @@ class MockBase:
     def __init__(self) -> None:
         self.x = self.y = self.th = 0.0
         self.v = (0.0, 0.0, 0.0)
+        self.lidar = (MOCK_LIDAR_YAW, {})
+
+    def _ray(self, a: float) -> float:
+        """Distance to the pretend room from the robot along robot-frame angle a (rad)."""
+        x0, y0, x1, y1 = MOCK_ROOM
+        dx, dy = math.cos(self.th + a), math.sin(self.th + a)
+        ts = [t for t in ((x1 - self.x) / dx if dx > 1e-9 else None, (x0 - self.x) / dx if dx < -1e-9 else None,
+                          (y1 - self.y) / dy if dy > 1e-9 else None, (y0 - self.y) / dy if dy < -1e-9 else None) if t]
+        r = min([t for t in ts if t > 0] + [8.0])
+        for b in MOCK_BOXES:
+            t = _ray_box(self.x, self.y, dx, dy, b)
+            if t is not None:
+                r = min(r, t)
+        return r
+
+    def grab_scans(self, step: str, n: int, timeout: float) -> list[Scan]:
+        """Raw scans of the pretend lidar (its own frame) for the lidar setup. The 'box' step has a box in front."""
+        k = 450
+        inc = 2 * math.pi / k
+        out = []
+        for _ in range(n):
+            ranges: list[float | None] = []
+            for i in range(k):
+                a = -math.pi + i * inc + MOCK_LIDAR_YAW  # robot frame
+                deg = math.degrees(math.atan2(math.sin(a), math.cos(a)))
+                r: float | None = self._ray(a) + random.uniform(-0.01, 0.01)
+                for lo, hi, d in MOCK_SELF:
+                    if lo <= deg <= hi:
+                        r = None if random.random() < 0.3 else d + random.uniform(-0.01, 0.01)  # close parts flicker
+                if step == "box" and abs(deg) <= MOCK_SETUP_BOX[0]:
+                    r = MOCK_SETUP_BOX[1] + random.uniform(-0.01, 0.01)
+                ranges.append(r)
+            out.append(Scan(-math.pi, inc, ranges))
+        time.sleep(min(timeout, 0.1 * n))  # a real lidar gives 10 scans a second
+        return out
+
+    def set_lidar(self, yaw: float, mask: dict[int, float]) -> None:
+        self.lidar = (yaw, mask)
+
+    def scan_age(self) -> float:
+        return 0.0
 
     def scan(self, n_out: int = 360) -> dict:
         """Ray-cast the pretend room from the robot. Points in cm, robot frame."""
-        x0, y0, x1, y1 = MOCK_ROOM
         pts: list[int] = []
         for k in range(n_out):
             a = -math.pi + 2 * math.pi * k / n_out
-            dx, dy = math.cos(self.th + a), math.sin(self.th + a)
-            ts = [t for t in ((x1 - self.x) / dx if dx > 1e-9 else None, (x0 - self.x) / dx if dx < -1e-9 else None,
-                              (y1 - self.y) / dy if dy > 1e-9 else None, (y0 - self.y) / dy if dy < -1e-9 else None) if t]
-            r = min([t for t in ts if t > 0] + [8.0])
-            for b in MOCK_BOXES:
-                t = _ray_box(self.x, self.y, dx, dy, b)
-                if t is not None:
-                    r = min(r, t)
+            r = self._ray(a)
             pts += [round(r * math.cos(a) * 100), round(r * math.sin(a) * 100)]
         return {"xy": pts, "src": "mock"}
 
@@ -129,8 +173,12 @@ class RosBase:
         from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import LaserScan
         self._yaw, self._lx, self._n_scan = cfg.lidar_yaw(), cfg.laser_x, cfg.scan_points
+        self._mask = parse_mask(cfg.lidar_mask())
         self._scan: dict | None = None
         self._scan_t = 0.0
+        self._raw: collections.deque[Scan] = collections.deque(maxlen=40)  # for the lidar setup in Studio
+        self._raw_n = 0
+        self._raw_t = 0.0
         self._node.create_subscription(LaserScan, "/scan", self._on_scan, qos_profile_sensor_data)
         # Text topics of the old voice node and lidar guard, shown on the page
         self._str_pubs = {t: self._node.create_publisher(String, t, 10) for t in ("/voice/listen", "/voice/say")}
@@ -162,12 +210,37 @@ class RosBase:
 
     def _on_scan(self, msg) -> None:
         now = time.monotonic()
+        with self._lock:
+            self._raw.append(Scan(msg.angle_min, msg.angle_increment, list(msg.ranges), msg.range_min, msg.range_max))
+            self._raw_n += 1
+            self._raw_t = now
         if now - self._scan_t < 0.15:  # the page needs about 5 per second
             return
         pts = scan_points(msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
-                          self._yaw, self._lx, self._n_scan)
+                          self._yaw, self._lx, self._n_scan, self._mask)
         with self._lock:
             self._scan, self._scan_t = {"xy": pts, "src": "lidar"}, now
+
+    def grab_scans(self, step: str, n: int, timeout: float) -> list[Scan] | None:
+        """The next n raw scans (lidar frame), or None if they do not come in time."""
+        with self._lock:
+            start = self._raw_n
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout:
+            with self._lock:
+                if self._raw_n - start >= n:
+                    return list(self._raw)[-n:]
+            time.sleep(0.05)
+        return None
+
+    def set_lidar(self, yaw: float, mask: dict[int, float]) -> None:
+        """New mounting values from the lidar setup, used from the next scan on."""
+        self._yaw, self._mask = yaw, dict(mask)
+
+    def scan_age(self) -> float:
+        """Seconds since the last lidar scan (inf = none yet)."""
+        with self._lock:
+            return time.monotonic() - self._raw_t if self._raw_t else math.inf
 
     def scan(self, n_out: int = 360) -> dict | None:
         with self._lock:

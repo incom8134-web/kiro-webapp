@@ -30,9 +30,9 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
 OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
-                    "leader", "wave", "follow", "studio", "guard_profile"}
-# Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance)
-ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile"}
+                    "leader", "wave", "follow", "studio", "guard_profile", "lidar_setup"}
+# Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance, lidar setup)
+ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile", "lidar_setup"}
 
 
 UPLOAD_WAIT_S = 5.0     # how often a quiet upload is looked at
@@ -210,6 +210,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             starting = msg.get("cmd") == "start"
         elif t == "guard_profile":
             starting = False
+        elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
+            starting = msg.get("cmd") == "apply"
         elif t == "servo":  # reading and letting go are always allowed; moving and writing are not during E-STOP
             starting = msg.get("cmd") in ("move", "setid") or (msg.get("cmd") == "torque" and bool(msg.get("value")))
         elif t == "wizard_decide":
@@ -222,6 +224,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             call = lambda: r.base(on, name, r.guard_profile)  # noqa: E731
         elif t == "guard_profile":
             call = lambda: r.set_guard_profile(str(msg.get("profile")), name)  # noqa: E731
+        elif t == "lidar_setup":
+            call = lambda: r.lidar(str(msg.get("cmd")), name)  # noqa: E731
         elif t == "studio":
             cmd = str(msg.get("cmd"))
             if cmd == "check":

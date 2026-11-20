@@ -378,6 +378,7 @@ function renderStudio() {
   renderRecord(step);
   renderReview(step);
   renderTrain();
+  renderLidar();
   renderTools();
   renderInfo();
   updatePreviews();
@@ -841,6 +842,79 @@ for (const id of ["fm-ds", "fm-pkg", "fm-models"]) $(id).addEventListener("click
   else return;
   renderFiles();
 });
+
+// ------------------------------------------------------------- lidar setup
+// Two snapshots (clear, box in front) -> front angle + the robot's own parts -> lidar.env, obstacle stop on.
+const lsSend = (cmd) => send({ t: "lidar_setup", cmd });
+$("ls-start").addEventListener("click", () => lsSend("start"));
+$("ls-cancel").addEventListener("click", () => lsSend("cancel"));
+$("ls-clear").addEventListener("click", () => lsSend("clear"));
+$("ls-box").addEventListener("click", () => lsSend("box"));
+$("ls-apply").addEventListener("click", () => lsSend("apply"));
+
+function lsMap(res) {
+  // Robot frame seen from above: front up. Amber wedges = directions where the lidar sees the robot itself.
+  const R = 50, toXY = (deg, r) => [-Math.sin(deg * Math.PI / 180) * r, -Math.cos(deg * Math.PI / 180) * r];
+  let g = `<circle cx="0" cy="0" r="${R}" class="ring"/><circle cx="0" cy="0" r="${R / 2}" class="ring"/>`;
+  for (const [a, m] of (res && res.mask) || []) {
+    const r = Math.min(R, 8 + m * 90);
+    const [x1, y1] = toXY(a, r), [x2, y2] = toXY(a + 5, r);
+    g += `<path d="M0 0L${x1.toFixed(1)} ${y1.toFixed(1)}A${r.toFixed(1)} ${r.toFixed(1)} 0 0 0 ${x2.toFixed(1)} ${y2.toFixed(1)}Z" class="self"/>`;
+  }
+  g += `<rect x="-9" y="-11" width="18" height="22" rx="3" class="body"/><path d="M0 -${R + 4}L-4 -${R - 3}L4 -${R - 3}Z" class="front"/>`;
+  return g;
+}
+
+function renderLidar() {
+  const s = st.studio, L = s && s.lidar_setup;
+  if (!L) return;
+  const step = L.step, busy = !!L.busy;
+  $("ls-st").textContent = t(L.stop_on ? "ls.on" : "ls.off");
+  $("ls-st").dataset.st = L.stop_on ? "ok" : "warn";
+  const scans = !L.plugged ? t("ls.v.unplugged") : L.scan_age == null ? t("ls.v.none")
+    : L.scan_age < 2 ? t("ls.v.live") : t("ls.v.age", { s: Math.round(L.scan_age) });
+  const rows = [["ls.k.stop", t(L.stop_on ? "ls.v.on" : "ls.v.off")],
+    ["ls.k.front", L.yaw_deg == null ? t("ls.v.nofront") : t("ls.v.front", { deg: -L.yaw_deg })],
+    ["ls.k.mask", L.mask_bins ? t("ls.v.mask", { k: L.mask_bins }) : t("ls.v.nomask")],
+    ["ls.k.scans", scans]];
+  const html = rows.map(([k, v]) => `<tr><th>${esc(t(k))}</th><td>${esc(v)}</td></tr>`).join("") + LANG;
+  if ($("ls-now").dataset.html !== html) { $("ls-now").innerHTML = html.slice(0, -LANG.length); $("ls-now").dataset.html = html; }
+  const map = lsMap(L.result || L);  // the new measurement, else what lidar.env holds now
+  if ($("ls-map").dataset.html !== map) { $("ls-map").innerHTML = map; $("ls-map").dataset.html = map; }
+
+  const order = ["clear", "box", "result"], at = order.indexOf(step);
+  for (const li of $("ls-steps").children) {
+    const i = order.indexOf(li.dataset.s);
+    li.className = at < 0 ? "todo" : i === at ? "on" : i < at ? "done" : "todo";
+  }
+  $("ls-steps").hidden = at < 0;
+  $("ls-clear").disabled = busy || step !== "clear";
+  $("ls-box").disabled = busy || step !== "box";
+  $("ls-apply").disabled = busy || step !== "result";
+  $("ls-start-t").textContent = t(at < 0 ? "ls.start" : "ls.again");  // no data-i18n: applyStrings would reset it
+  $("ls-start").disabled = busy;
+  $("ls-cancel").hidden = at < 0;
+  $("ls-busy").hidden = !busy;
+
+  const r = L.result;
+  $("ls-res").textContent = r ? t("ls.res", { deg: -r.yaw_deg, cm: Math.round(r.box.dist * 100), n: r.box.points, k: r.mask.length }) : "";
+  const warns = (r && r.warnings) || [];
+  const wh = warns.map((w) => `<p class="small note err">${esc(t(w.key, { lo: w.deg ? w.deg[0] : "", hi: w.deg ? w.deg[1] : "", cm: w.cm ?? "", pct: w.pct ?? "" }))}</p>`).join("");
+  if ($("ls-warn").dataset.html !== wh + LANG) { $("ls-warn").innerHTML = wh; $("ls-warn").dataset.html = wh + LANG; }
+
+  const e = L.error;
+  let msg = "";
+  if (e) msg = STRINGS.en[e.key] ? t(e.key, e) : e.msg;
+  else if (L.saved && at < 0) msg = "";
+  $("ls-err").textContent = msg;
+  $("ls-err").hidden = !msg;
+  $("ls-err").className = "small note err";
+  if (L.saved && at < 0 && !e) {
+    $("ls-err").textContent = t("ls.saved", { time: new Date(L.saved.t * 1000).toLocaleTimeString(), deg: -L.saved.yaw_deg });
+    $("ls-err").className = "small note ok";
+    $("ls-err").hidden = false;
+  }
+}
 
 // ----------------------------------------------------------- engineer tools
 const eng ={ sel: 0, servo: null, prep: {}, secs: 20 };

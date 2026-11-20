@@ -688,3 +688,19 @@ details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: 
   .lockcard { margin-top: 3vh; padding: 22px 18px 18px; }
   .stepsum { margin-left: 16px; }
 }
+
+/* Lidar setup card (Studio) */
+.lsgrid { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 18px; align-items: center; margin: 4px 0 6px; }
+.lsmap { width: 132px; height: 132px; }
+.lsmap .ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.lsmap .self { fill: var(--warn-soft); stroke: var(--warn); stroke-width: .6; }
+.lsmap .body { fill: var(--raise-2); stroke: var(--mute); stroke-width: 1; }
+.lsmap .front { fill: var(--accent); }
+#ls-steps { margin: 8px 0 4px; }
+#ls-steps > li.todo { opacity: .45; }
+#ls-steps > li.on .num { background: var(--accent); color: var(--accent-ink); }
+#ls-steps > li.done .num { background: var(--ok-soft); color: var(--ok); }
+.note.ok { color: var(--ok); }
+@media (max-width: 560px) {
+  .lsgrid { grid-template-columns: 1fr; justify-items: center; }
+}
