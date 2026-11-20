@@ -445,3 +445,13 @@ def test_estop_fold_can_be_switched_off(cfg):
         assert r.estop_fold_state() is None
     finally:
         r.close()
+
+
+def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
+    from robot_server.robot import Robot
+    r = Robot(cfg, MockBase())
+    try:
+        assert r.base(True, "t")[0]
+        assert r.jobs.get("base").spec.env["TOUCH_DIST"] == "0.05"
+    finally:
+        r.close()
