@@ -93,7 +93,8 @@ def cpu_percent(prev: dict[str, list[int]], cur: dict[str, list[int]]) -> dict[s
 SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p device:=auto -p output_topic:=/cmd_vel_raw "
-              "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0")
+              "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.5 -p max_dist:=1.0 -p default_angle:=90.0")
+# Steps per voice command: 0.5 m / 90 degrees since 20 Nov 2026 (the user found 0.2 m / 45 degrees too small).
 
 
 def _sides(side: str) -> list[str]:
@@ -329,6 +330,10 @@ class Robot:
         if not on:
             return self._stop_job("voice", who)
         lang = "en" if lang == "en" else "ko"
+        if self.jobs.running("voice"):
+            if self.voice_lang == lang:
+                return True, ""
+            self._stop_job("voice", who)       # switching language: restart with the other speech model
         model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
         if not self.mock and not model.is_dir():
             return False, f"Speech model not installed: {model}"

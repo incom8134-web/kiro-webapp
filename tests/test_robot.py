@@ -457,3 +457,18 @@ def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
         assert float(env["STOP_DIST"]) > 0                                   # the distance stop is not
     finally:
         r.close()
+
+
+def test_voice_switches_language_and_takes_bigger_steps(cfg):
+    from robot_server.robot import VOICE_ARGS, Robot
+    assert "default_dist:=0.5" in VOICE_ARGS and "default_angle:=90.0" in VOICE_ARGS
+    r = Robot(cfg, MockBase())
+    try:
+        assert r.voice(True, "t", "ko")[0] and r.voice_lang == "ko"
+        first = r.jobs.get("voice")
+        assert r.voice(True, "t", "ko") == (True, "")              # same language: nothing restarts
+        assert r.jobs.get("voice") is first
+        assert r.voice(True, "t", "en")[0] and r.voice_lang == "en"  # other language: restarted with it
+        assert r.jobs.get("voice") is not first and r.jobs.running("voice")
+    finally:
+        r.close()

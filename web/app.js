@@ -258,7 +258,15 @@ talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base") }));   // guard distance: set in the Studio
 $("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
-$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
+// Speech language: the operator's choice (remembered in this browser), not the page language
+let voiceLang = (() => { try { return localStorage.getItem("kiro-voice-lang"); } catch (e) { return null; } })() || (LANG === "en" ? "en" : "ko");
+$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: voiceLang }));
+for (const b of document.querySelectorAll("[data-vlang]")) b.addEventListener("click", () => {
+  voiceLang = b.dataset.vlang;
+  try { localStorage.setItem("kiro-voice-lang", voiceLang); } catch (e) { /* private window */ }
+  if (jobRunning("voice") && state.robot && state.robot.voice_lang !== voiceLang) send({ t: "voice", on: true, lang: voiceLang });
+  renderRobot();
+});
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
@@ -486,11 +494,15 @@ function renderRobot() {
   setBtn($("voice-btn"), t(vOn ? "btn.stop" : "btn.start"), vOn ? "ri-stop-fill" : "ri-play-fill");
   $("voice-btn").classList.toggle("on", vOn);
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
+  for (const b of document.querySelectorAll("[data-vlang]")) {
+    b.classList.toggle("on", b.dataset.vlang === voiceLang);
+    b.disabled = !me || (b.dataset.vlang === "en" && !(r.voice_models || []).some((m) => m.includes("-en-")));
+  }
   $("voice-st").className = "st" + (vOn ? " live" : "");
   $("voice-on").hidden = !vOn;
   $("talk").disabled = !me || !vOn;
   $("voice-text").textContent = (r.voice && r.voice.text) || "-";
-  const noEn = LANG === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
+  const noEn = voiceLang === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
   $("voice-note").hidden = vOn || !noEn;
   $("voice-note").textContent = noEn ? t("voice.koonly") : "";
   renderQuick();
