@@ -80,7 +80,9 @@ def dir_size(path: Path) -> int:
 
 
 def robot_type(arm: str) -> str:
-    return "bi_so_follower" if arm == "both" else "so101_follower"
+    """The robot_type LeRobot 0.6.1 writes into meta/info.json: the robot class name, not the
+    --robot.type choice (so101_follower). lerobot-record refuses to add to a dataset whose robot_type differs."""
+    return "bi_so_follower" if arm == "both" else "so_follower"
 
 
 def clean(settings: object) -> tuple[dict, list[dict]]:

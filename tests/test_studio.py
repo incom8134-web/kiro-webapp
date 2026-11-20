@@ -251,7 +251,7 @@ def test_record_next_again_and_stop_like_lerobot(robot, fast):
     s = phase(robot, "done")
     res = s["result"]
     assert res["state"] == "done" and res["added"] == 2 and res["info"]["episodes"] == 2 and res["info"]["frames"] > 0
-    assert res["info"]["cams"] == ["right_wrist", "top"] and res["info"]["robot_type"] == "so101_follower"
+    assert res["info"]["cams"] == ["right_wrist", "top"] and res["info"]["robot_type"] == "so_follower"
     assert [d["repo"] for d in r.snapshot()["datasets"]] == ["tester/pick_cube"]
 
 
@@ -295,6 +295,26 @@ def test_new_never_overwrites_and_add_keeps_a_copy(robot, fast, cfg):
     assert s["result"]["added"] == 1 and s["result"]["info"]["episodes"] == 2
     backup = Path(s["backup"])
     assert backup.parent == Path(cfg.backups_dir) and json.loads((backup / "meta" / "info.json").read_text())["total_episodes"] == 1
+
+
+def test_add_accepts_datasets_recorded_by_lerobot_0_6(robot, cfg):
+    """LeRobot 0.6.1 writes the robot class name: so_follower (one arm) or bi_so_follower (two arms)."""
+    def dataset(repo, robot_type, cams):
+        meta = Path(cfg.datasets_dir) / repo / "meta"
+        meta.mkdir(parents=True)
+        feats = {"action": {"dtype": "float32", "shape": [6]}, "observation.state": {"dtype": "float32", "shape": [6]},
+                 **{f"observation.images.{k}": {"dtype": "video", "shape": [480, 640, 3]} for k in cams}}
+        (meta / "info.json").write_text(json.dumps({"codebase_version": "v3.0", "robot_type": robot_type, "fps": 30,
+                                                    "total_episodes": 43, "total_frames": 19283, "features": feats}))
+    dataset("tester/right_arm_task2", "so_follower", ["top", "right_wrist"])
+    dataset("tester/two_arms", "bi_so_follower", ["top"])
+    dataset("tester/old_name", "so101_follower", ["top", "right_wrist"])
+    ds = lambda **kw: {x["id"]: x for x in robot.rec.check(settings(mode="add", **kw))["rows"]}["dataset"]
+    assert ds(repo="tester/right_arm_task2")["st"] == "ok"
+    assert ds(repo="tester/right_arm_task2", arm="both")["fix"] == "fix.dsrobot"
+    assert ds(repo="tester/two_arms", arm="both", cams=["top"])["st"] == "ok"
+    assert ds(repo="tester/two_arms", cams=["top"])["fa"] == {"have": "bi_so_follower", "want": "so_follower"}
+    assert ds(repo="tester/old_name")["fix"] == "fix.dsrobot"      # lerobot-record 0.6.1 would refuse it too
 
 
 def test_recording_holds_the_arm_ports_and_cameras(robot, fast):

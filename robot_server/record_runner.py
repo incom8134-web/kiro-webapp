@@ -210,7 +210,7 @@ def mock(cfg: dict) -> int:
         if root.exists():
             print(f"Error: FileExistsError: {root} already exists", flush=True)
             return 1
-        info = {"codebase_version": "v3.0", "robot_type": "bi_so_follower" if cfg["arm"] == "both" else "so101_follower",
+        info = {"codebase_version": "v3.0", "robot_type": "bi_so_follower" if cfg["arm"] == "both" else "so_follower",
                 "total_episodes": 0, "total_frames": 0, "fps": fps,
                 "features": {"action": {"dtype": "float32"}, "observation.state": {"dtype": "float32"},
                              **{f"observation.images.{k}": {"dtype": "video"} for k in cfg["cams"]}}}
