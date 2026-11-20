@@ -39,7 +39,7 @@ function connect() {
     else if (m.t === "pong") st.rtt = performance.now() - m.ts;
     else if (m.t === "log") onLog(m);
   };
-  ws.onclose = () => { st.open = false; st.server = null; st.rtt = null; render(); termLive(); setTimeout(connect, 1000); };
+  ws.onclose = () => { st.open = false; st.server = null; st.rtt = null; render(); termLive(); renderCheck(); setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
 }
 const send = (o) => { if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(o)); };
@@ -100,6 +100,7 @@ function onRobot() {
   updateCharts();
   renderLists();
   renderCams();
+  renderCheck();
 }
 
 // ------------------------------------------------------------- numbers
@@ -404,6 +405,94 @@ function renderCams() {
   }
 }
 
+// ----------------------------------------------------------- system check
+/* Every part of the robot on one line: green = fine, amber = needs attention (with what to do),
+   grey = not connected and not needed right now. Built from what the robot server measures. */
+const ARM_MIN_V = 4.5, WHEEL_MIN_V = 11.0, HOT_C = 55;
+
+function boardCheck(b, kind) {   // kind: "arm", "wheels" or "leader"
+  const power = kind === "wheels" ? "chk.fix.12v" : "chk.fix.5v";
+  if (!b || b.state === "missing") return kind === "leader" ? ["off", t("chk.off"), t("chk.lead.opt")] : ["warn", t("chk.off"), t("chk.fix.usb")];
+  if (b.state === "busy") return ["ok", t("chk.inuse"), ""];
+  if (b.state === "silent") return ["warn", t("chk.silent"), t(power)];
+  if (b.state !== "ok") return ["warn", t("chk.noanswer"), t("chk.fix.usb")];
+  const d = t("chk.motors", { n: b.n, of: b.of, v: b.vmin ?? "-", c: b.tmax ?? "-" });
+  if (b.n < b.of) return ["warn", d, t("chk.fix.motors", { n: b.n, of: b.of })];
+  if (b.vmin != null && b.vmin < (kind === "wheels" ? WHEEL_MIN_V : ARM_MIN_V)) return ["warn", d, t(power)];
+  if (b.alarm) return ["warn", d, t("chk.fix.alarm")];
+  if (b.tmax != null && b.tmax >= HOT_C) return ["warn", d, t("chk.fix.hot")];
+  return ["ok", d, ""];
+}
+
+function wheelsCheck(r, boards) {
+  const base = r.jobs && r.jobs.base;
+  if (base && base.running) {
+    if (r.wheels === "off") return ["warn", t("chk.base.run"), t("chk.fix.12v")];
+    return ["ok", t(r.wheels === "ok" ? "chk.base.ready" : "chk.base.starting"), ""];
+  }
+  const [s, d, f] = boardCheck(boards.base, "wheels");
+  return [s, s === "ok" ? `${d} · ${t("chk.base.idle")}` : d, f];
+}
+
+function camCheck(r, key) {
+  const c = (r.cams || []).find((x) => x.key === key);
+  if (!c || !c.present) return ["warn", t("chk.off"), t("chk.fix.cam")];
+  if (c.error) return ["warn", t("cam.busy"), t("chk.fix.camapp")];
+  if (c.paused_by) return ["ok", t("chk.inuse"), ""];
+  return ["ok", t(c.live ? "chk.cam.live" : "chk.cam.ready"), ""];
+}
+
+function lidarCheck(r) {
+  const g = (st.server && st.server.guard) || {};
+  const scanning = !!(st.scan && performance.now() - st.scan.at < 2000);
+  if (scanning) {
+    const what = st.scan.src === "mock" ? t("chk.lidar.sim") : t("chk.lidar.scan");
+    return [g.on ? "ok" : "warn", `${what} · ${t(g.on ? "chk.guard.on" : "chk.guard.off")}`, g.on ? "" : t("chk.fix.guardoff")];
+  }
+  if (!r.lidar) return ["warn", t("chk.off"), t("chk.fix.lidarusb")];
+  return ["warn", t("chk.lidar.idle"), t(r.obstacle_stop ? "chk.fix.lidarbase" : "chk.fix.lidarenv")];
+}
+
+function jetsonCheck(r) {
+  const j = (r.health && r.health.jetson) || {};
+  const d = t("chk.jetson.d", { c: j.temp ?? "-", m: j.mem != null ? Math.round(j.mem) : "-", g: j.disk_free_gb ?? "-" });
+  if (j.temp != null && j.temp >= 85) return ["warn", d, t("chk.fix.jhot")];
+  if (j.mem != null && j.mem >= 92) return ["warn", d, t("chk.fix.mem")];
+  if (j.disk_free_gb != null && j.disk_free_gb < 2) return ["warn", d, t("chk.fix.disk")];
+  return ["ok", d, ""];
+}
+
+function renderCheck() {
+  const r = st.robot, s = st.server;
+  const rows = [[t("chk.server"), st.open && s
+    ? ["ok", `${s.backend === "mock" ? t("chk.server.mock") : "ROS 2"} · v${s.version} · ${fmtUp(s.up_s)}`, ""]
+    : ["warn", t("chk.server.down"), t("chk.fix.server")]]];
+  if (st.open && r) {
+    const B = (r.health && r.health.boards) || {};
+    const left = boardCheck(B.left_follower, "arm");
+    rows.push(
+      [t("chk.wheels"), wheelsCheck(r, B)],
+      [t("chk.rarm"), boardCheck(B.right_follower, "arm")],
+      [t("chk.larm"), r.left_arm_ok || left[0] !== "ok" ? left : ["warn", left[1], t("chk.fix.leftlock")]],
+      [t("chk.rlead"), boardCheck(B.right_leader, "leader")],
+      [t("chk.llead"), boardCheck(B.left_leader, "leader")],
+      [t("cam.top"), camCheck(r, "top")],
+      [t("cam.right_wrist"), camCheck(r, "right_wrist")],
+      [t("cam.left_wrist"), camCheck(r, "left_wrist")],
+      [t("chk.lidar"), lidarCheck(r)],
+      [t("chk.pad"), r.gamepad == null ? ["off", "-", ""] : r.gamepad ? ["ok", t("chk.connected"), ""] : ["off", t("chk.off"), t("chk.pad.opt")]],
+      [t("chk.mic"), r.mic == null ? ["off", "-", ""] : r.mic ? ["ok", t("chk.mic.usb"), ""] : ["off", t("chk.off"), t("chk.mic.opt")]],
+      [t("chk.jetson"), jetsonCheck(r)],
+    );
+  }
+  $("chk-grid").innerHTML = rows.map(([name, [s, d, f]]) => `<div class="chk" data-st="${s}"><i class="dot"></i>`
+    + `<div class="chk-t"><b>${esc(name)}</b><span>${esc(d)}</span>${f ? `<small>${esc(f)}</small>` : ""}</div></div>`).join("");
+  const n = rows.filter(([, [x]]) => x === "warn").length;
+  const sum = $("chk-sum");
+  sum.textContent = !st.open ? t("chk.server.down") : n ? t("chk.attention", { n }) : t("chk.allok");
+  sum.dataset.st = !st.open || n ? "warn" : "ok";
+}
+
 // --------------------------------------------------------------- terminal
 /* The server log, live: the same lines the server prints in its own terminal. A line that
    repeats right away is counted (x12) instead of filling the window. */
@@ -502,4 +591,5 @@ buildTiles();
 buildCharts();
 render();
 termLive();
+renderCheck();
 connect();

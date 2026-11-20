@@ -294,3 +294,19 @@ def test_cpu_percent_from_proc_stat():
     cur = {"cpu": [150, 0, 150, 900, 0, 0, 0], "cpu0": [50, 0, 50, 500, 0, 0, 0]}
     assert cpu_percent(prev, cur) == {"cpu": 50.0, "cpu0": 0.0}   # 100 busy of 200; core 0 idle
     assert cpu_percent({}, cur) == {}                             # first reading: nothing yet
+
+
+def test_system_check_sees_gamepad_and_usb_mic(cfg, tmp_path):
+    from robot_server.robot import Robot
+    cards = tmp_path / "cards"
+    cards.write_text(" 0 [HDA ]: tegra-hda - NVIDIA Jetson Orin Nano HDA\n 2 [APE ]: tegra-ape - NVIDIA APE\n")
+    assert Robot.usb_mic(str(cards)) is False                # the Jetson's own sound cards are not a microphone
+    cards.write_text(cards.read_text() + " 1 [Device ]: USB-Audio - USB PnP Sound Device\n")
+    assert Robot.usb_mic(str(cards)) is True
+    assert Robot.usb_mic(str(tmp_path / "missing")) is False
+    r = Robot(cfg, MockBase())
+    try:
+        snap = r.snapshot()
+        assert isinstance(snap["gamepad"], bool) and isinstance(snap["mic"], bool)
+    finally:
+        r.close()
