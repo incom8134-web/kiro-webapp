@@ -36,9 +36,11 @@ from .camera import Camera, find_cameras, repair_top
 from .config import Config
 from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
+from .lidar_setup import LidarSetup, Result, bin_start, env_get, env_update, mask_str, parse_mask
 from .recorder import Recorder
 from .stopmeter import StopMeter, csv_lines
 from .training import Training
+from .colab import ColabLink
 
 log = logging.getLogger("kiro.robot")
 HERE = Path(__file__).resolve().parent
@@ -96,8 +98,11 @@ SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 # Tagged lines of the voice node worth showing on the page (heard, executed, done, stopped, ignored...)
 VOICE_TAG = re.compile(r"\[(들림|실행|완료|정지|중단|무시|취소|비슷한 문구|주의|오류|이어붙임)\].*")
-VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p output_topic:=/cmd_vel_raw "
-              "-p lin_speed:=0.10 -p min_conf:=0.6 -p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0")
+VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p output_topic:=/cmd_vel_raw -p lin_speed:=0.10 -p min_conf:=0.6")
+# Steps per voice command. "big" 0.5 m / 90 degrees is the default since 20 Nov 2026 (the user found 0.2 m / 45
+# degrees too small); "test" 0.2 m / 45 degrees is what the voice test form asks for (시험평가서 4.1).
+VOICE_STEPS = {"big": "-p default_dist:=0.5 -p max_dist:=1.0 -p default_angle:=90.0",
+               "test": "-p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0"}
 
 
 # Lines of a program that lost its USB serial board (LeRobot / Feetech / pyserial messages)
@@ -142,6 +147,7 @@ class Robot:
         self.cam_info: list[dict] = []
         self._stop = threading.Event()
         self.voice_lang = "ko"
+        self.voice_step = "big"  # VOICE_STEPS: "big" (default) or "test" (0.2 m / 45 degrees, the voice test form)
         self.voice_log: deque[dict] = deque(maxlen=12)  # the voice node's last tagged lines, with their time
         self.servo_scan: dict | None = None
         self._wizard_steps: list[dict] | None = None
@@ -169,9 +175,12 @@ class Robot:
         self._joints_csv = None
         self._link_flowing = False
         threading.Thread(target=self._joints_loop, name="joints", daemon=True).start()
+        self.lidar_setup = LidarSetup(self._lidar_grab, self._lidar_save)
+        self._lidar_restart_t = 0.0  # last time the wheel program was restarted because the lidar went quiet
         self.refresh_cameras()
         self.rec = Recorder(self)
         self.train = Training(self)
+        self.colab = ColabLink(self)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -307,16 +316,133 @@ class Robot:
         except OSError:
             return False
 
+    @property
+    def lidar_env(self) -> Path:
+        """~/so101/config/lidar.env on the robot; a file of its own in mock mode (never the robot's)."""
+        return self.rec.root.parent / "mock_lidar.env" if self.mock else self.cfg.lidar_env
+
+    def _lidar_env_text(self) -> str:
+        try:
+            return self.lidar_env.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
     def obstacle_stop_on(self) -> bool:
         """The old config/lidar.env can switch the obstacle stop off (OBSTACLE_STOP=0)."""
+        return env_get(self._lidar_env_text(), "OBSTACLE_STOP") != "0"
+
+    # ---------------------------------------------------------- lidar setup
+    # Studio wizard (robot_server/lidar_setup.py): measures where the robot's front is and which close
+    # points are the robot itself, then switches the obstacle stop on. Nothing moves.
+    def lidar_info(self) -> dict:
+        text = self._lidar_env_text()
+        age = self.ros.scan_age() if self.ros is not None and hasattr(self.ros, "scan_age") else None
         try:
-            for line in (self.so101 / "config" / "lidar.env").read_text().splitlines():
-                k, _, v = line.partition("=")
-                if k.strip() == "OBSTACLE_STOP":
-                    return v.split("#")[0].strip() != "0"
-        except OSError:
-            pass
-        return True
+            yaw = float(env_get(text, "LASER_YAW") or "nan")
+        except ValueError:
+            yaw = float("nan")
+        mask = parse_mask(env_get(text, "LIDAR_MASK"))
+        return {"stop_on": env_get(text, "OBSTACLE_STOP") != "0", "yaw_deg": None if math.isnan(yaw) else round(math.degrees(yaw)),
+                "mask_bins": len(mask), "mask": [[bin_start(b), r] for b, r in sorted(mask.items())],
+                "plugged": self.mock or os.path.exists("/dev/rplidar"),
+                "scan_age": None if age is None or math.isinf(age) else round(age, 1), "driver": self.jobs.running("lidar")}
+
+    def lidar(self, cmd: str, who: str) -> tuple[bool, str]:
+        ls = self.lidar_setup
+        if cmd == "start":
+            ok, msg = self._lidar_feed(who)
+            if not ok:
+                return ok, msg
+            self.event(who, "lidar setup started")
+            return ls.start()
+        if cmd in ("clear", "box"):
+            return ls.measure(cmd)
+        if cmd == "apply":
+            ok, msg = ls.apply()
+            if ok:
+                self._lidar_stop_feed(who)
+            return ok, msg
+        if cmd == "cancel":
+            self._lidar_stop_feed(who)
+            return ls.cancel()
+        return False, "Unknown lidar setup step."
+
+    def _lidar_feed(self, who: str) -> tuple[bool, str]:
+        """Scans for the setup: from the wheel program if it runs with the lidar, else from the lidar driver alone."""
+        if self.mock:
+            return True, ""
+        if not os.path.exists("/dev/rplidar"):
+            return False, "Lidar /dev/rplidar not found. Check its USB cable."
+        if self.ros is not None and self.ros.scan_age() < 2.0:
+            return True, ""
+        if self.jobs.running("base"):
+            return False, "The wheel program runs but no lidar scans come in. Stop the wheels, then start the lidar setup again."
+        cmd = ["bash", "-c", ROS_SETUP + "exec ros2 run sllidar_ros2 sllidar_node --ros-args -p channel_type:=serial "
+               "-p serial_port:=/dev/rplidar -p serial_baudrate:=460800 -p frame_id:=laser -p angle_compensate:=true "
+               "-p scan_mode:=Standard"]
+        ok, msg = self._start("lidar", JobSpec(cmd, frozenset({"/dev/rplidar"}), label="lidar driver (setup)"), who)
+        if not ok:
+            return ok, msg
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 10:  # the C1 spins up in 2-3 s
+            if self.ros.scan_age() < 1.0:
+                return True, ""
+            if not self.jobs.running("lidar"):
+                break
+            time.sleep(0.2)
+        self._lidar_stop_feed(who)
+        return False, "The lidar driver did not send scans. Unplug the lidar USB, plug it back in, then try again."
+
+    def _lidar_stop_feed(self, who: str) -> None:
+        if self.jobs.running("lidar"):
+            self._stop_job("lidar", who)
+
+    def _lidar_grab(self, step: str, n: int, timeout: float):
+        if self.ros is None or not hasattr(self.ros, "grab_scans"):
+            return None
+        return self.ros.grab_scans(step, n, timeout)
+
+    def _lidar_save(self, res: Result) -> tuple[bool, str]:
+        """lidar.env: LASER_YAW, LIDAR_MASK and OBSTACLE_STOP=1, after a backup. The web server uses it at once,
+        the wheel program from its next start (restarted here if it runs)."""
+        path = self.lidar_env
+        old = self._lidar_env_text()
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if old:
+                (path.parent / f"{path.name}.bak_{stamp}").write_text(old, encoding="utf-8")
+            path.write_text(env_update(old, {"LASER_YAW": f"{res.yaw:.2f}", "LIDAR_MASK": mask_str(res.mask), "OBSTACLE_STOP": "1"},
+                                       f"{time.strftime('%Y-%m-%d %H:%M')} web lidar setup"), encoding="utf-8")
+        except OSError as e:
+            return False, f"Could not write {path}: {e}"
+        if self.ros is not None and hasattr(self.ros, "set_lidar"):
+            self.ros.set_lidar(res.yaw, res.mask)
+        self.event("lidar setup", f"saved: front = lidar {-math.degrees(res.yaw):+.0f} deg, robot seen in {len(res.mask)} of 72 directions, obstacle stop ON")
+        if self.jobs.running("base"):
+            self._stop_job("base", "lidar setup")
+            ok, msg = self.base(True, "lidar setup", self.guard_profile)
+            return True, "Saved. The wheel program restarted with the new values." if ok else f"Saved. Start the wheels again: {msg}"
+        return True, "Saved. The obstacle stop is on from the next wheel start."
+
+    def _lidar_watch(self) -> None:
+        """The lidar USB sometimes drops and comes back: the driver then stays silent and the old guard stops
+        everything ('no scans'). Restart the wheel program, at most once a minute. Nothing moves meanwhile."""
+        j = self.jobs.get("base")
+        if self.mock or not j or not j.running or self.ros is None or not hasattr(self.ros, "scan_age"):
+            return
+        if not self.obstacle_stop_on() or not os.path.exists("/dev/rplidar"):
+            return
+        now = time.time()
+        if now - j.started < 20 or now - self._lidar_restart_t < 60:
+            return
+        age = self.ros.scan_age()
+        if age < 5:
+            return
+        self._lidar_restart_t = now
+        self.event("lidar", f"no lidar scans for {'a while' if math.isinf(age) else f'{age:.0f} s'}: restarting the wheel program")
+        self._stop_job("base", "lidar watch")
+        self.base(True, "lidar watch", self.guard_profile)
 
     def base(self, on: bool, who: str, profile: str = "close") -> tuple[bool, str]:
         if not on:
@@ -418,10 +544,15 @@ class Robot:
                                             env=self._venv_env(), label=f"skill {name}", stop_wait=8.0), who)
 
     # ---------------------------------------------------------------- voice
-    def voice(self, on: bool, who: str, lang: str = "ko") -> tuple[bool, str]:
+    def voice(self, on: bool, who: str, lang: str = "ko", step: str = "big") -> tuple[bool, str]:
         if not on:
             return self._stop_job("voice", who)
         lang = "en" if lang == "en" else "ko"
+        step = step if step in VOICE_STEPS else "big"
+        if self.jobs.running("voice"):
+            if self.voice_lang == lang and self.voice_step == step:
+                return True, ""
+            self._stop_job("voice", who)       # switching language or step: restart with the other model / steps
         model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
         if not self.mock and not model.is_dir():
             return False, f"Speech model not installed: {model}"
@@ -430,9 +561,9 @@ class Robot:
         if self.mock:
             cmd = self._mock_cmd(f"voice ({lang}, push-to-talk)")
         else:
-            cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} "
+            cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} {VOICE_STEPS[step]} "
                                              f"-p lang:={lang} -p model_path:={model} -p device:={device}"]
-        self.voice_lang = lang
+        self.voice_lang, self.voice_step = lang, step
         self.voice_log.clear()
         ok, msg = self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}", on_line=self._voice_line), who)
         return ok, ("NO_MIC" if ok and device == "none" else msg)
@@ -1088,6 +1219,7 @@ class Robot:
             try:
                 h = {"jetson": self._jetson(), "t": time.time()}
                 self._follow_watch()
+                self._lidar_watch()
                 self.rec.poll()
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})
                 self.health = h
@@ -1124,7 +1256,7 @@ class Robot:
                          **({"live": cam.info()["live"], "paused_by": cam.paused_by, "error": cam.error} if cam else {})})
         return {
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
-            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang,
+            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
@@ -1147,6 +1279,7 @@ class Robot:
                          **({k: v for k, v in cam.info().items() if k in ("live", "viewers", "paused_by", "error", "fps_real")} if cam else {})})
         out.update(
             cams=cams, guard_profile=self.guard_profile, servo_scan=self.servo_scan, wizard=self.wizard_results,
+            lidar_setup={**self.lidar_setup.view(), **self.lidar_info()},
             ports=[] if self.mock else self.serial_ports(),
             info={"mock": self.mock, "jobs": self._jobs_view(12), "boards": self.health.get("boards", {}),
                   "jetson": self.health.get("jetson", {}), "left_arm_ok": self.cfg.left_arm_ok,
@@ -1154,7 +1287,7 @@ class Robot:
                   "paths": {"so101": str(self.so101), "venv": str(self.venv), "datasets": str(self.rec.root),
                             "backups": str(self.rec.backups), "calibration": str(HF_CALIB),
                             "policies": str(self.train.root), "packages": str(self.train.pkg_dir)}},
-            train=self.train.snapshot())
+            train=self.train.snapshot(), colab=self.colab.snapshot())
         return out
 
     def set_guard_profile(self, profile: str, who: str) -> tuple[bool, str]:
@@ -1167,6 +1300,7 @@ class Robot:
     def close(self) -> None:
         self._stop.set()
         self._wave_stop.set()
+        self.colab.close()
         stopped = self.jobs.stop_all()
         log.info("server stopping; stopped: %s", ", ".join(stopped) or "nothing running")
         for cam in self.cams.values():

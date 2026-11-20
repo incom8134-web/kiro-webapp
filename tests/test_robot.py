@@ -515,3 +515,22 @@ def test_voice_record_keeps_tagged_lines(cfg):
         assert all(e["ts"] > 0 for e in log)
     finally:
         r.close()
+
+
+def test_voice_switches_language_and_takes_bigger_steps(cfg):
+    from robot_server.robot import VOICE_STEPS, Robot
+    assert "default_dist:=0.5" in VOICE_STEPS["big"] and "default_angle:=90.0" in VOICE_STEPS["big"]
+    assert "default_dist:=0.2" in VOICE_STEPS["test"] and "default_angle:=45.0" in VOICE_STEPS["test"]  # voice test form 4.1
+    r = Robot(cfg, MockBase())
+    try:
+        assert r.voice(True, "t", "ko")[0] and r.voice_lang == "ko"
+        first = r.jobs.get("voice")
+        assert r.voice(True, "t", "ko") == (True, "")              # same language: nothing restarts
+        assert r.jobs.get("voice") is first
+        assert r.voice(True, "t", "en")[0] and r.voice_lang == "en"  # other language: restarted with it
+        assert r.jobs.get("voice") is not first and r.jobs.running("voice")
+        second = r.jobs.get("voice")
+        assert r.voice(True, "t", "en", "test")[0] and r.voice_step == "test"  # test steps: restarted with them
+        assert r.jobs.get("voice") is not second and r.jobs.running("voice")
+    finally:
+        r.close()

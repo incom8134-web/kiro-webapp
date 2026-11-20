@@ -139,6 +139,10 @@
         <div class="card">
           <div class="row head"><h3><span data-i18n="sec.voice">Voice</span></h3><span id="voice-st" class="st"></span><span class="grow"></span>
             <button id="voice-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
+          <div class="row voice-lang"><span class="small mute" data-i18n="voice.lang">Speech language</span><span class="grow"></span>
+            <div class="row seg" id="voice-langs"><button class="btn" type="button" data-vlang="ko">한국어</button><button class="btn" type="button" data-vlang="en">English</button></div></div>
+          <div class="row voice-lang"><span class="small mute" data-i18n="voice.step">Step per command</span><span class="grow"></span>
+            <div class="row seg" id="voice-steps"><button class="btn" type="button" data-vstep="big" data-i18n="voice.step.big">0.5 m · 90°</button><button class="btn" type="button" data-vstep="test" data-i18n="voice.step.test">0.2 m · 45° (test)</button></div></div>
           <p id="voice-note" class="small mute" hidden></p>
           <div id="voice-on" hidden>
             <button id="talk" class="btn talk" type="button"><i class="ri-mic-fill"></i><span data-i18n="voice.talk">Hold to talk</span></button>

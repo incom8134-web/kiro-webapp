@@ -37,6 +37,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 |---|---|
 | `robot_server/control.py` | Operator lock, PIN, E-STOP, watchdog, speed limits. Pure logic with tests |
 | `robot_server/guard.py` | Obstacle stop of the web server: lidar points limit the speed in each direction (stops 20 cm before an obstacle; turning and backing away stay free). Pure logic with tests. On by default, the operator can switch it off on the Drive tab, `KIRO_GUARD=0` starts with it off |
+| `robot_server/lidar_setup.py` | Studio lidar setup: mounting angle and the robot's own parts the lidar sees (self mask), saved to `~/so101/config/lidar.env` (`LASER_YAW`, `LIDAR_MASK`, `OBSTACLE_STOP=1`). Pure logic with tests. Nothing moves |
 | `robot_server/base.py` | `MockBase` and `RosBase` (publishes `/cmd_vel_raw` into the old lidar guard, `/e_stop`, voice topics; reads `/odom`) |
 | `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
@@ -49,6 +50,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |
 | `robot_server/recorder.py`, `record_runner.py` | Studio page: records demonstration datasets with the old recorder (LeRobot's `lerobot-record`, set up like `~/so101/record_gui.py`), checks before recording, next / again / stop / force stop, a copy before adding episodes, `pack_dataset.sh` for upload |
 | `robot_server/training.py` | Studio training files: dataset packages and trained models (arm, steps), checks and installs a model zip uploaded from the browser, model zip download, delete only inside its own folder. Two-arm / left-arm models cannot be played. See `docs/TRAINING.md` |
+| `robot_server/colab.py` | Studio "Train in Colab": the robot (internet through its LAN cable) sends the dataset to the Colab notebook's temporary Cloudflare address and fetches the trained model back, then installs it through `training.py`. Outgoing calls only, to `*.trycloudflare.com` |
 | `robot_server/main.py` | FastAPI app, WebSocket `/ws`, `/camera/<key>.mjpg`, serves `web/`, Studio file downloads and the model upload (engineer token) |
 | `web/studio.html`, `studio.js` | Studio page (lock icon in the top bars): recording training data, training a skill in Google Colab (package and download, model upload, training files), the engineer tools (guard distance, servo tester, check wizard) and the read-only engineer information. Locked until the operator unlocks it with the engineer PIN |
 | `colab/make_notebook.py` | Writes `colab/so101_train_colab.ipynb`, the Google Colab training notebook the Studio opens (run it after a change; a test checks they match) |

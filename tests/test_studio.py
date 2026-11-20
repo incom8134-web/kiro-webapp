@@ -130,7 +130,7 @@ STUDIO_MESSAGES = [
     {"t": "studio", "cmd": "start", "settings": settings()}, {"t": "studio", "cmd": "stop"},
     {"t": "studio", "cmd": "kill"}, {"t": "studio", "cmd": "pack", "repo": "tester/pick_cube"},
     {"t": "studio", "cmd": "cam_repair"},
-    {"t": "guard_profile", "profile": "safe"},
+    {"t": "guard_profile", "profile": "safe"}, {"t": "lidar_setup", "cmd": "start"},
 ]
 
 
@@ -153,6 +153,7 @@ def test_studio_refuses_viewers_and_operators_without_the_engineer_pin(cfg, msg)
                         break
             r = client.app.state.data["robot"]
             assert not r.jobs.running("record") and r.guard_profile == "close" and r.rec.last_check is None
+            assert r.lidar_setup.step == "idle"
 
 
 def test_studio_camera_previews_need_the_engineer_token(cfg):

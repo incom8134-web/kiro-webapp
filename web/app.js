@@ -258,7 +258,26 @@ talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base") }));   // guard distance: set in the Studio
 $("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
-$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
+// Speech language: the operator's choice (remembered in this browser), not the page language
+let voiceLang = (() => { try { return localStorage.getItem("kiro-voice-lang"); } catch (e) { return null; } })() || (LANG === "en" ? "en" : "ko");
+// Step per command: "big" 0.5 m / 90 degrees, or "test" 0.2 m / 45 degrees as the voice test form asks
+let voiceStep = (() => { try { return localStorage.getItem("kiro-voice-step"); } catch (e) { return null; } })() || "big";
+$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: voiceLang, step: voiceStep }));
+const voiceRestart = () => {
+  const r = state.robot;
+  if (jobRunning("voice") && r && (r.voice_lang !== voiceLang || r.voice_step !== voiceStep)) send({ t: "voice", on: true, lang: voiceLang, step: voiceStep });
+  renderRobot();
+};
+for (const b of document.querySelectorAll("[data-vlang]")) b.addEventListener("click", () => {
+  voiceLang = b.dataset.vlang;
+  try { localStorage.setItem("kiro-voice-lang", voiceLang); } catch (e) { /* private window */ }
+  voiceRestart();
+});
+for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("click", () => {
+  voiceStep = b.dataset.vstep;
+  try { localStorage.setItem("kiro-voice-step", voiceStep); } catch (e) { /* private window */ }
+  voiceRestart();
+});
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
@@ -500,6 +519,14 @@ function renderRobot() {
   setBtn($("voice-btn"), t(vOn ? "btn.stop" : "btn.start"), vOn ? "ri-stop-fill" : "ri-play-fill");
   $("voice-btn").classList.toggle("on", vOn);
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
+  for (const b of document.querySelectorAll("[data-vstep]")) {
+    b.classList.toggle("on", b.dataset.vstep === voiceStep);
+    b.disabled = !me;
+  }
+  for (const b of document.querySelectorAll("[data-vlang]")) {
+    b.classList.toggle("on", b.dataset.vlang === voiceLang);
+    b.disabled = !me || (b.dataset.vlang === "en" && !(r.voice_models || []).some((m) => m.includes("-en-")));
+  }
   $("voice-st").className = "st" + (vOn ? " live" : "");
   $("voice-on").hidden = !vOn;
   $("talk").disabled = !me || !vOn;
@@ -513,7 +540,7 @@ function renderRobot() {
   }).join("");
   const vl = $("voice-log");
   if (vl.dataset.html !== vhtml) { vl.innerHTML = vhtml; vl.dataset.html = vhtml; }
-  const noEn = LANG === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
+  const noEn = voiceLang === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
   $("voice-note").hidden = vOn || !noEn;
   $("voice-note").textContent = noEn ? t("voice.koonly") : "";
   renderQuick();

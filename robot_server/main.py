@@ -30,9 +30,9 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
 OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
-                    "leader", "wave", "follow", "studio", "guard_profile"}
-# Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance)
-ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile"}
+                    "leader", "wave", "follow", "studio", "guard_profile", "lidar_setup"}
+# Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance, lidar setup)
+ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile", "lidar_setup"}
 
 
 UPLOAD_WAIT_S = 5.0     # how often a quiet upload is looked at
@@ -79,7 +79,9 @@ class NoStalePages:
         async def send_no_cache(msg):
             if msg["type"] == "http.response.start":
                 headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache")]}
+                # no other site may show these pages inside its own (a hidden frame could trick a click on Send)
+                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache"), (b"x-frame-options", b"DENY"),
+                                                    (b"content-security-policy", b"frame-ancestors 'none'")]}
             await send(msg)
         await self.app(scope, receive, send_no_cache)
 
@@ -217,6 +219,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             starting = msg.get("cmd") == "start"
         elif t == "guard_profile":
             starting = False
+        elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
+            starting = msg.get("cmd") == "apply"
         elif t == "servo":  # reading and letting go are always allowed; moving and writing are not during E-STOP
             starting = msg.get("cmd") in ("move", "setid") or (msg.get("cmd") == "torque" and bool(msg.get("value")))
         elif t == "wizard_decide":
@@ -229,6 +233,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             call = lambda: r.base(on, name, r.guard_profile)  # noqa: E731
         elif t == "guard_profile":
             call = lambda: r.set_guard_profile(str(msg.get("profile")), name)  # noqa: E731
+        elif t == "lidar_setup":
+            call = lambda: r.lidar(str(msg.get("cmd")), name)  # noqa: E731
         elif t == "studio":
             cmd = str(msg.get("cmd"))
             if cmd == "check":
@@ -243,6 +249,16 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
             elif cmd == "cam_repair":  # re-plugs the top camera's USB in software; never moves anything
                 call = lambda: r.cam_repair(name)  # noqa: E731
+            elif cmd == "colab":    # train in Colab, the automatic way (robot_server/colab.py)
+                act_ = str(msg.get("action"))
+                if act_ == "start":
+                    call = lambda: r.colab.start(str(msg.get("repo", "")), name)  # noqa: E731
+                elif act_ == "connect":
+                    call = lambda: r.colab.connect(str(msg.get("url", "")), str(msg.get("key", "")), name)  # noqa: E731
+                elif act_ == "stop":
+                    call = lambda: r.colab.stop(name)  # noqa: E731
+                else:
+                    return
             elif cmd == "hello":
                 call = lambda: (True, "")  # noqa: E731
             else:
@@ -270,7 +286,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         elif t == "skill":
             call = lambda: r.skill(str(msg.get("name", "")), on, name)  # noqa: E731
         elif t == "voice":
-            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")))  # noqa: E731
+            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")), str(msg.get("step", "big")))  # noqa: E731
         elif t == "system":
             call = lambda: r.system(str(msg.get("action")), name)  # noqa: E731
         else:
