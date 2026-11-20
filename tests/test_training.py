@@ -413,3 +413,119 @@ def test_viewers_see_two_arm_flags_but_no_training_files(cfg):
                 break
         assert m["models"][0]["arms"] == "both" and m["models"][0]["playable"] is False
         assert "train" not in m and "steps" not in m["models"][0]
+
+
+# ------------------------------------------------------ after the review
+def test_a_silent_upload_is_given_up_and_a_lock_stops_it():
+    import asyncio
+    from robot_server.main import copy_upload
+
+    async def stalls():
+        yield b"PK"
+        await asyncio.sleep(30)                                  # the laptop left the Wi-Fi: no data, no end
+        yield b"never"
+
+    got = []
+
+    async def write(c):
+        got.append(c)
+
+    with pytest.raises(Refused) as e:
+        asyncio.run(copy_upload(stalls(), write, lambda: True, 100, wait_s=0.05, idle_s=0.2))
+    assert e.value.code == "INCOMPLETE" and got == [b"PK"]
+    with pytest.raises(Refused) as e:
+        asyncio.run(copy_upload(stalls(), write, lambda: False, 100, wait_s=0.05, idle_s=10))
+    assert e.value.code == "LOCKED"
+
+    async def chunks():
+        for _ in range(3):
+            yield b"x" * 40
+    with pytest.raises(Refused) as e:
+        asyncio.run(copy_upload(chunks(), write, lambda: True, 100))
+    assert e.value.code == "TOO_BIG"
+    assert asyncio.run(copy_upload(chunks(), write, lambda: True, 1000)) == 120
+
+
+def set_method(data: bytes, method: int) -> bytes:
+    """The zip with every entry's compression method changed (local and central headers)."""
+    b = bytearray(data)
+    for sig, off in ((b"PK\x03\x04", 8), (b"PK\x01\x02", 10)):
+        i = b.find(sig)
+        while i != -1:
+            b[i + off:i + off + 2] = method.to_bytes(2, "little")
+            i = b.find(sig, i + 4)
+    return bytes(b)
+
+
+def corrupt_deflate() -> bytes:
+    data = bytearray(make_zip(model_files()))
+    with zipfile.ZipFile(io.BytesIO(bytes(data))) as zf:
+        i = zf.getinfo("pretrained_model/config.json")
+    start = i.header_offset + 30 + len(i.filename.encode()) + len(i.extra)
+    data[start:start + 6] = b"\xff" * 6                          # garbage in the compressed data
+    return bytes(data)
+
+
+@pytest.mark.parametrize("make,code", [(corrupt_deflate, "NOT_ZIP"), (lambda: set_method(make_zip(model_files()), 9), "ZIP_METHOD"),
+                                       (lambda: make_zip(model_files())[:-30], "NOT_ZIP")], ids=["corrupt", "deflate64", "cut"])
+def test_damaged_or_odd_zips_get_a_code_not_a_crash(robot, cfg, tmp_path, make, code):
+    with pytest.raises(Refused) as e:
+        install(robot, tmp_path, make())
+    assert e.value.code == code
+    assert robot.models() == [] and not any((Path(cfg.policies_dir) / ".incoming").glob("*/"))
+
+
+def test_huge_settings_files_and_tables_are_refused(robot, tmp_path, monkeypatch):
+    monkeypatch.setattr(tr_mod, "JSON_MAX", 1000)
+    with pytest.raises(Refused) as e:
+        install(robot, tmp_path, make_zip({**model_files(), "train_config.json": b'{"x": "' + b"a" * 5000 + b'"}'}))
+    assert e.value.code == "TOO_BIG" and "train_config.json" in e.value.detail
+    many = make_zip({**model_files(), **{f"x{i}.json": b"{}" for i in range(100)}})
+    with pytest.raises(Refused) as e:                            # counted before the zip is even opened
+        install(robot, tmp_path, many)
+    assert e.value.code == "TOO_MANY"
+
+
+def test_the_unpacked_size_must_fit_on_the_disk(robot, tmp_path, monkeypatch):
+    monkeypatch.setattr(tr_mod, "MIN_FREE_GB", 1e9)
+    with pytest.raises(Refused) as e:
+        install(robot, tmp_path, make_zip(model_files()))
+    assert e.value.code == "DISK"
+
+
+@pytest.mark.parametrize("name", ["nl\n", "a\n", "pick_act\n"])
+def test_names_ending_in_a_newline_are_refused(robot, tmp_path, name):
+    with pytest.raises(Refused) as e:
+        install(robot, tmp_path, make_zip(model_files()), name=name)
+    assert e.value.code == "NAME"
+    with pytest.raises(Refused):
+        robot.train.begin_upload(name, 10, "Laptop")
+
+
+def test_a_package_without_its_checksum_is_listed_but_never_offered(robot, cfg):
+    pkg = Path(cfg.packages_dir)
+    pkg.mkdir(parents=True)
+    (pkg / "pick_20261120_1200.tar.gz").write_bytes(b"half written")     # pack_dataset.sh still at work, or it failed
+    p = robot.train.packages()
+    assert len(p) == 1 and p[0]["complete"] is False and p[0]["sha"] is None
+    assert robot.train.package_path("pick_20261120_1200.tar.gz") is None
+    (pkg / "pick_20261120_1200.sha256").write_text("0" * 64 + "  pick_20261120_1200.tar.gz\n")
+    assert robot.train.packages()[0]["complete"] and robot.train.package_path("pick_20261120_1200.tar.gz")
+
+
+def test_downloads_stop_when_the_studio_locks(robot, cfg, tmp_path):
+    from robot_server.training import file_chunks
+    d = put_model(Path(cfg.policies_dir), "pick_act")
+    (d / "model.safetensors").write_bytes(weights() + b"\0" * (3 << 20))
+    full = b"".join(robot.train.zip_stream("pick_act"))
+    calls = {"n": 0}
+
+    def alive():
+        calls["n"] += 1
+        return calls["n"] < 3
+    cut = b"".join(robot.train.zip_stream("pick_act", alive))
+    assert len(cut) < len(full) / 2
+    f = tmp_path / "big.bin"
+    f.write_bytes(b"x" * (3 << 20))
+    assert len(b"".join(file_chunks(f, lambda: True))) == 3 << 20
+    assert b"".join(file_chunks(f, lambda: False)) == b""

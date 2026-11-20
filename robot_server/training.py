@@ -13,6 +13,7 @@ Only the unlocked engineer reaches any of this (robot_server/main.py).
 """
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -23,20 +24,23 @@ import threading
 import time
 import uuid
 import zipfile
+import zlib
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 log = logging.getLogger("kiro.training")
 
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")         # always fullmatch: "$" lets a newline through
 # Files a model folder may hold: settings and weights only. No pickles (.bin, .pt): loading those can run code.
-FILE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,119}\.(json|safetensors)$")
+FILE_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,119}\.(json|safetensors)")
 EXTRA_FILES = {"README.md"}
 SKIPPED = {".DS_Store", "Thumbs.db"}           # added by a Mac or Windows when zipping again: left out, not refused
-PKG_RE = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)_(?P<stamp>\d{8}_\d{4})\.tar\.gz$")
+PKG_RE = re.compile(r"(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)_(?P<stamp>\d{8}_\d{4})\.tar\.gz")
 ZIP_MAX = 3 * 1024 ** 3        # an ACT model zip is about 0.2 GB, a diffusion model about 1 GB
 UNPACKED_MAX = 4 * 1024 ** 3
 MAX_FILES = 40
+JSON_MAX = 10 * 1024 ** 2       # settings files are a few KB; the pages read them every second
+CD_MAX = 1024 ** 2              # the zip's table of contents; read before the zip is opened (a huge one would fill the memory)
 MIN_FREE_GB = 2.0
 INCOMING = ".incoming"          # uploads are unpacked here first (same disk), then moved in one step
 
@@ -51,6 +55,8 @@ class Refused(Exception):
 
 def _json(path: Path) -> dict:
     try:
+        if path.stat().st_size > JSON_MAX:
+            return {}
         v = json.loads(path.read_text(encoding="utf-8"))
         return v if isinstance(v, dict) else {}
     except (OSError, ValueError):
@@ -112,16 +118,63 @@ def model_info(d: Path) -> dict:
             "mb": round(size / 1e6, 1), "files": files, "mtime": mtime}
 
 
+_INFO_CACHE: dict[str, tuple[tuple, dict]] = {}
+
+
+def _cached_info(d: Path) -> dict:
+    """model_info, read again only when a file in the folder changed (the pages ask every second)."""
+    try:
+        sig = tuple(sorted((e.name, e.stat().st_size, e.stat().st_mtime_ns) for e in os.scandir(d)))
+    except OSError:
+        sig = ()
+    hit = _INFO_CACHE.get(str(d))
+    if hit and hit[0] == sig:
+        return dict(hit[1])
+    info = model_info(d)
+    _INFO_CACHE[str(d)] = (sig, info)
+    return dict(info)
+
+
 def list_models(root: Path) -> list[dict]:
-    """Every usable model folder, newest first. Folders starting with a dot (uploads in progress) are left out."""
+    """Every usable model folder, by name. Folders starting with a dot (uploads in progress) are left out."""
     out = []
     for cfgf in root.glob("*/pretrained_model/config.json"):
         d = cfgf.parent
         if d.parent.name.startswith(".") or not (d / "model.safetensors").is_file():
             continue
-        out.append(model_info(d))
+        out.append(_cached_info(d))
     out.sort(key=lambda m: m["name"])
     return out
+
+
+def zip_entries(path: Path) -> tuple[int, int]:
+    """(entries, table size) from the end of a zip, read without opening it. Raises Refused."""
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            f.seek(max(0, size - 65557))
+            tail = f.read()
+    except OSError as e:
+        raise Refused("NOT_ZIP", str(e)[:120])
+    i = tail.rfind(b"PK\x05\x06")
+    if i < 0 or len(tail) < i + 22:
+        raise Refused("NOT_ZIP", "no end record")
+    n, cd = struct.unpack("<H", tail[i + 10:i + 12])[0], struct.unpack("<I", tail[i + 12:i + 16])[0]
+    if n == 0xFFFF or cd == 0xFFFFFFFF:          # zip64: the real numbers are in the zip64 end record
+        j = tail.rfind(b"PK\x06\x06", 0, i)
+        if j < 0 or len(tail) < j + 56:
+            raise Refused("NOT_ZIP", "no zip64 end record")
+        n, cd = struct.unpack("<Q", tail[j + 32:j + 40])[0], struct.unpack("<Q", tail[j + 40:j + 48])[0]
+    return n, cd
+
+
+def file_chunks(path: Path, alive: Callable[[], bool]) -> Iterator[bytes]:
+    """A file for download, stopped as soon as alive() says the Studio was locked or left."""
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            if not alive():
+                return
+            yield chunk
 
 
 def _safetensors_ok(path: Path) -> bool:
@@ -178,25 +231,27 @@ class Training:
         out = []
         if self.pkg_dir.is_dir():
             for f in self.pkg_dir.glob("*.tar.gz"):
-                m = PKG_RE.match(f.name)
+                m = PKG_RE.fullmatch(f.name)
                 if not m or not f.is_file():
                     continue
                 sha = f.with_name(f.name[: -len(".tar.gz")] + ".sha256")
                 st = f.stat()
+                # pack_dataset.sh writes the checksum after the tar.gz: without it the package is still being
+                # written, or packing failed and the file is cut short. Such a file is listed, never offered.
                 out.append({"file": f.name, "name": m["name"], "mb": round(st.st_size / 1e6, 1), "mtime": st.st_mtime,
-                            "sha": sha.name if sha.is_file() else None})
+                            "sha": sha.name if sha.is_file() else None, "complete": sha.is_file()})
         out.sort(key=lambda p: p["mtime"], reverse=True)
         return out
 
     def package_path(self, file: str) -> Path | None:
         """A listed package or its checksum, for download. Anything else: None."""
         for p in self.packages():
-            if file in (p["file"], p["sha"]):
+            if p["complete"] and file in (p["file"], p["sha"]):
                 return self.pkg_dir / file
         return None
 
     def model_dir(self, name: str) -> Path | None:
-        if not NAME_RE.match(name or ""):
+        if not NAME_RE.fullmatch(name or ""):
             return None
         d = self.root / name / "pretrained_model"
         return d if any(m["name"] == name for m in self.models()) else None
@@ -208,9 +263,10 @@ class Training:
                 "zip_max_mb": ZIP_MAX // 10 ** 6, "uploading": {k: up[k] for k in ("name", "by", "started")} if up else None}
 
     # ----------------------------------------------------------- download
-    def zip_stream(self, name: str) -> Iterator[bytes]:
+    def zip_stream(self, name: str, alive: Callable[[], bool] = lambda: True) -> Iterator[bytes]:
         """The model as <name>_pretrained_model.zip with the folder pretrained_model/ inside, as the
-        Colab notebook makes it, so the same zip can be uploaded again on another robot."""
+        Colab notebook makes it, so the same zip can be uploaded again on another robot. Stops when
+        alive() says the Studio was locked or left. Fastest compression: weights hardly shrink."""
         d = self.model_dir(name)
         if d is None:
             return
@@ -221,8 +277,11 @@ class Training:
                     continue
                 zi = zipfile.ZipInfo.from_file(f, "pretrained_model/" + f.name)
                 zi.compress_type = zipfile.ZIP_DEFLATED
+                setattr(zi, "compress_level" if hasattr(zi, "compress_level") else "_compresslevel", 1)   # from_file leaves it unset (= 6)
                 with open(f, "rb") as src, zf.open(zi, "w") as dst:
                     for chunk in iter(lambda: src.read(1 << 20), b""):
+                        if not alive():
+                            return
                         dst.write(chunk)
                         yield sink.take()
                 yield sink.take()
@@ -231,7 +290,7 @@ class Training:
     # ------------------------------------------------------------- upload
     def begin_upload(self, name: str, size: int | None, who: str) -> Path:
         """Before the bytes arrive: the name, the size, the disk. Returns the file to write the zip to."""
-        if not NAME_RE.match(name or ""):
+        if not NAME_RE.fullmatch(name or ""):
             raise Refused("NAME")
         if (self.root / name).exists():
             raise Refused("EXISTS", name)
@@ -260,19 +319,27 @@ class Training:
 
     def install(self, zpath: Path, name: str, who: str) -> dict:
         """Checks the uploaded zip and installs it as <policies>/<name>/pretrained_model. Raises Refused."""
-        if not NAME_RE.match(name or ""):
+        if not NAME_RE.fullmatch(name or ""):
             raise Refused("NAME")
         target = self.root / name
         if target.exists():
             raise Refused("EXISTS", name)
+        n, cd = zip_entries(zpath)
+        if n > MAX_FILES * 2 or cd > CD_MAX:
+            raise Refused("TOO_MANY", str(n))
         try:
             zf = zipfile.ZipFile(zpath)
-        except (zipfile.BadZipFile, OSError) as e:
+        except (zipfile.BadZipFile, OSError, ValueError, EOFError) as e:
             raise Refused("NOT_ZIP", str(e)[:120])
         stage = self.root / INCOMING / uuid.uuid4().hex
         try:
             with zf:
                 files = self._pick(zf)
+                need = sum(i.file_size for i in files.values()) + MIN_FREE_GB * 1e9
+                stage.parent.mkdir(parents=True, exist_ok=True)
+                free = shutil.disk_usage(stage.parent).free
+                if free < need:       # what it unpacks to, not what the zip weighs: the disk must not fill up
+                    raise Refused("DISK", f"{free / 1e9:.1f} GB")
                 stage.mkdir(parents=True)
                 d = stage / "pretrained_model"
                 d.mkdir()
@@ -304,8 +371,12 @@ class Training:
             except FileExistsError:
                 raise Refused("EXISTS", name)
             os.rename(d, target / "pretrained_model")
-        except zipfile.BadZipFile as e:  # a CRC error while unpacking: the zip is damaged
+        except (zipfile.BadZipFile, zlib.error, EOFError) as e:   # damaged while unpacking (CRC, cut short, bad data)
             raise Refused("NOT_ZIP", str(e)[:120])
+        except NotImplementedError as e:   # e.g. Deflate64 from Windows "compressed folder" for big files
+            raise Refused("ZIP_METHOD", str(e)[:120])
+        except OSError as e:
+            raise Refused("DISK" if e.errno == errno.ENOSPC else "WRITE", str(e)[:120])
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         info = model_info(target / "pretrained_model")
@@ -324,7 +395,7 @@ class Training:
             steps = _json(d / proc).get("steps")
             for step in steps if isinstance(steps, list) else []:
                 sf = step.get("state_file") if isinstance(step, dict) else None
-                if sf is not None and (not isinstance(sf, str) or not FILE_RE.match(sf) or not (d / sf).is_file()):
+                if sf is not None and (not isinstance(sf, str) or not FILE_RE.fullmatch(sf) or not (d / sf).is_file()):
                     out.append(str(sf)[:80])
         return out
 
@@ -364,11 +435,14 @@ class Training:
         if other:
             raise Refused("EXTRA_FILES", ", ".join(other[:4]) + (" ..." if len(other) > 4 else ""))
         files = by_dir[home]
-        bad = sorted(n for n in files if not FILE_RE.match(n) and n not in EXTRA_FILES)
+        bad = sorted(n for n in files if not FILE_RE.fullmatch(n) and n not in EXTRA_FILES)
         if bad:
             raise Refused("BAD_FILE", ", ".join(bad[:4]))
         if len(files) > MAX_FILES:
             raise Refused("TOO_MANY", str(len(files)))
+        big = sorted(n for n, i in files.items() if n.endswith(".json") and i.file_size > JSON_MAX)
+        if big:
+            raise Refused("TOO_BIG", ", ".join(big[:4]))
         if sum(i.file_size for i in files.values()) > UNPACKED_MAX:
             raise Refused("TOO_BIG", f"{sum(i.file_size for i in files.values()) / 1e6:.0f} MB")
         return files
@@ -378,7 +452,7 @@ class Training:
         """Deletes one dataset, package or model for good, only if it is in its own listing."""
         name = str(name or "")
         if kind == "model":
-            if not any(m["name"] == name for m in self.models()) or not NAME_RE.match(name):
+            if not any(m["name"] == name for m in self.models()) or not NAME_RE.fullmatch(name):
                 return False, "NOT_FOUND"
             if self.r.jobs.running("skill"):
                 return False, "IN_USE"

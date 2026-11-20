@@ -174,8 +174,13 @@ document.addEventListener("click", (e) => { const el = e.target.closest("button,
 // ------------------------------------------------------------------ lock
 function renderLock() {
   const s = st.server, en = isEngineer(), me = isOperator();
+  if (en) st.seenEng = true;
   $("lock").hidden = en || !st.open;
   $("studio").hidden = !en;
+  $("studio-more").hidden = !en;
+  // The training guide stays once it was seen: following it means leaving the robot's Wi-Fi (step 2)
+  $("tsect").hidden = !en && !st.seenEng;
+  $("tsect").classList.toggle("away", !en);
   if (en) return;
   $("op-pin-row").hidden = me;
   const other = s && s.operator && !me;
@@ -299,7 +304,7 @@ function holdButton(el, action) {
   el.addEventListener("pointerdown", (e) => {
     if (el.disabled) return;
     el.setPointerCapture(e.pointerId); start = performance.now(); step();
-    timer = setTimeout(() => { reset(); action(); }, HOLD_MS);
+    timer = setTimeout(() => { reset(); if (el.isConnected) action(); }, HOLD_MS);   // re-rendered while held: not this button any more
   });
   for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(n, reset);
   el.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -644,7 +649,7 @@ const tr = { ds: "", file: null, name: "", nameTouched: false, xhr: null, pct: 0
 try { tr.ds = localStorage.getItem("kiro-studio-train-ds") || ""; } catch (e) { /* ignore */ }
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;   // same rule as the server
 const UP_CODES = ["NAME", "EXISTS", "TOO_BIG", "BUSY", "DISK", "NOT_ZIP", "BAD_PATH", "ENCRYPTED", "TOO_MANY", "NO_MODEL", "MANY_MODELS",
-  "EXTRA_FILES", "BAD_FILE", "BAD_CONFIG", "BAD_WEIGHTS", "MISSING", "LOCKED", "INCOMPLETE", "NETWORK", "ABORTED"];
+  "EXTRA_FILES", "BAD_FILE", "BAD_CONFIG", "BAD_WEIGHTS", "MISSING", "LOCKED", "INCOMPLETE", "NETWORK", "ABORTED", "ZIP_METHOD", "WRITE"];
 const train = () => (st.studio && st.studio.train) || { models: [], packages: [] };
 const qtok = () => encodeURIComponent(st.token || "");
 const pkgUrl = (f) => `/api/studio/packages/${encodeURIComponent(f)}?token=${qtok()}`;
@@ -652,7 +657,7 @@ const modelUrl = (n) => `/api/studio/models/${encodeURIComponent(n)}.zip?token=$
 const fmtMB = (mb) => (mb == null ? "-" : mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`);
 const fmtDate = (sec) => (sec ? new Date(sec * 1000).toLocaleString(LANG === "ko" ? "ko-KR" : "en-GB",
   { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-");
-const pkgsOf = (repo) => train().packages.filter((p) => p.name === repo.split("/")[1]);   // newest first
+const pkgsOf = (repo) => train().packages.filter((p) => p.complete && p.name === repo.split("/")[1]);   // newest first, finished only
 const armText = (a) => ({ right: t("rec.arm.right"), left: t("rec.arm.left"), both: t("rec.arm.both"), other: t("fm.arm.other") }[a] || "");
 const jobOn = (name) => !!(st.robot && st.robot.jobs && st.robot.jobs[name] && st.robot.jobs[name].running);
 const packing = () => !!(st.studio && st.studio.pack && st.studio.pack.running);
@@ -701,8 +706,8 @@ function renderTrain() {
     if (b) b.addEventListener("click", () => send({ t: "studio", cmd: "pack", repo: tr.ds }));
   }
   // 3. Colab
-  $("t-colab").href = T.colab || "https://colab.research.google.com/";
-  $("t-nb").hidden = !T.notebook;
+  if (T.colab) $("t-colab").href = T.colab;
+  $("t-nb-row").hidden = !T.notebook;
   if (T.notebook) $("t-nb").href = `/api/studio/notebook.ipynb?token=${qtok()}`;
   renderUpload();
   renderFiles();
@@ -804,9 +809,10 @@ function renderFiles() {
       (d.cams || []).map(camName).join(" + ")],
     `<button class="btn" type="button" data-act="pack" ${recBusy ? "disabled" : ""}><i class="ri-archive-line"></i><span>${esc(t("tr.pack"))}</span></button>`,
     "", !recBusy)).join("") || none("rec.nods");
-  const pkH = T.packages.map((p) => fitem("package", p.file, `<b class="mono">${esc(p.file)}</b>`, [fmtMB(p.mb), fmtDate(p.mtime)],
-    `<a class="btn" href="${pkgUrl(p.file)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dl"))}</span></a>`
-    + (p.sha ? `<a class="btn" href="${pkgUrl(p.sha)}" download><span>.sha256</span></a>` : ""), "", !packing())).join("") || none("fm.none.pkg");
+  const pkH = T.packages.map((p) => fitem("package", p.file, `<b class="mono">${esc(p.file)}</b>`, p.complete ? [fmtMB(p.mb), fmtDate(p.mtime)] : [fmtDate(p.mtime)],
+    p.complete ? `<a class="btn" href="${pkgUrl(p.file)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dl"))}</span></a>`
+      + `<a class="btn" href="${pkgUrl(p.sha)}" download><span>.sha256</span></a>` : "",
+    p.complete ? "" : t(packing() ? "fm.pkg.writing" : "fm.pkg.broken"), !packing())).join("") || none("fm.none.pkg");
   const skillOn = jobOn("skill");
   const mH = T.models.map((m) => fitem("model", m.name, `<b>${esc(m.name)}</b>`,
     [String(m.type).toUpperCase(), armText(m.arms), m.steps ? t("fm.steps", { n: m.steps.toLocaleString() }) : "", m.dataset,

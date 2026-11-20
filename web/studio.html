@@ -175,15 +175,23 @@
       <p class="stepsum small mute" id="s4-sum"></p>
     </section>
 
-    <!-- TRAINING: dataset package -> Google Colab -> trained model -> Autonomous skills -->
+  </div>
+
+  <!-- TRAINING: dataset package -> Google Colab -> trained model -> Autonomous skills. Outside the locked block:
+       step 2 takes this computer off the robot's Wi-Fi, and the guide must stay readable then ("away": the
+       parts that need the robot are hidden). -->
+  <div id="tsect" hidden>
     <div class="sect"><h2 data-i18n="tr.title">Train a skill</h2>
       <p class="small mute" data-i18n="tr.sub">The robot cannot train. Google Colab trains on a free Google graphics card, then the model comes back here.</p></div>
     <section class="card" id="train">
       <ol class="tsteps">
         <li><b class="num">1</b><div class="tbody">
           <h3 data-i18n="tr.s1">Package the dataset and download it</h3>
-          <label class="field"><span data-i18n="tr.ds">Dataset</span><select id="t-ds"></select></label>
-          <div id="t-pkg" class="tpkg"></div>
+          <label class="field needs-robot"><span data-i18n="tr.ds">Dataset</span><select id="t-ds"></select></label>
+          <div id="t-pkg" class="tpkg needs-robot"></div>
+          <p class="small needs-robot" id="t-nb-row"><span data-i18n="tr.nbwhy">Take the notebook file too, in case the Colab link does not open:</span>
+            <a id="t-nb" class="linkbtn" download data-i18n="tr.nb">Notebook file</a></p>
+          <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
         </div></li>
         <li><b class="num">2</b><div class="tbody">
           <h3 data-i18n="tr.s2">Go online and put the files in Google Drive</h3>
@@ -191,9 +199,8 @@
         </div></li>
         <li><b class="num">3</b><div class="tbody">
           <h3 data-i18n="tr.s3">Open the training notebook in Google Colab</h3>
-          <div class="stepfoot"><a id="t-colab" class="btn" target="_blank" rel="noopener noreferrer"><i class="ri-external-link-line"></i><span data-i18n="tr.colab">Open Google Colab</span></a>
-            <a id="t-nb" class="btn" download><i class="ri-file-download-line"></i><span data-i18n="tr.nb">Notebook file</span></a></div>
-          <p class="small mute" data-i18n="tr.s3.t">Opens in a new tab. Sign in with a Google account when Colab asks. If the page does not open, download the notebook file and in Colab choose File > Upload notebook.</p>
+          <div class="stepfoot"><a id="t-colab" class="btn" href="https://colab.research.google.com/github/incom8134-web/kiro-webapp/blob/main/colab/so101_train_colab.ipynb" target="_blank" rel="noopener noreferrer"><i class="ri-external-link-line"></i><span data-i18n="tr.colab">Open Google Colab</span></a></div>
+          <p class="small mute" data-i18n="tr.s3.t">Opens in a new tab. Sign in with a Google account when Colab asks. If the page does not open: in Colab choose File > Upload notebook and pick the notebook file from step 1.</p>
         </div></li>
         <li><b class="num">4</b><div class="tbody">
           <h3 data-i18n="tr.s4">Run all cells on a T4 GPU</h3>
@@ -206,12 +213,15 @@
         <li><b class="num">6</b><div class="tbody">
           <h3 data-i18n="tr.s6">Upload the model to the robot</h3>
           <p data-i18n="tr.s6.t">Connect this computer to the robot's Wi-Fi again and open this page. Choose the zip; the robot checks it and installs it.</p>
-          <label class="field"><span data-i18n="tr.zip">Model zip</span><input id="t-file" type="file" accept=".zip,application/zip"></label>
-          <label class="field"><span data-i18n="tr.name">Skill name</span><input id="t-name" type="text" spellcheck="false" autocapitalize="off" maxlength="80" placeholder="pick_cube_act"></label>
-          <div class="stepfoot"><button id="t-up" class="btn" type="button"><i class="ri-upload-2-line"></i><span data-i18n="tr.upload">Upload and install</span></button>
-            <span class="grow"></span><span id="t-up-pct" class="small mute"></span></div>
-          <div class="pbar" id="t-up-bar" hidden><i></i></div>
-          <p id="t-up-msg" class="small" hidden></p>
+          <div class="tbody needs-robot">
+            <label class="field"><span data-i18n="tr.zip">Model zip</span><input id="t-file" type="file" accept=".zip,application/zip"></label>
+            <label class="field"><span data-i18n="tr.name">Skill name</span><input id="t-name" type="text" spellcheck="false" autocapitalize="off" maxlength="80" placeholder="pick_cube_act"></label>
+            <div class="stepfoot"><button id="t-up" class="btn" type="button"><i class="ri-upload-2-line"></i><span data-i18n="tr.upload">Upload and install</span></button>
+              <span class="grow"></span><span id="t-up-pct" class="small mute"></span></div>
+            <div class="pbar" id="t-up-bar" hidden><i></i></div>
+            <p id="t-up-msg" class="small" hidden></p>
+          </div>
+          <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
         </div></li>
         <li><b class="num">7</b><div class="tbody">
           <h3 data-i18n="tr.s7">Play it</h3>
@@ -219,7 +229,9 @@
         </div></li>
       </ol>
     </section>
+  </div>
 
+  <div id="studio-more" hidden>
     <section class="card" id="files">
       <div class="row head"><h3><i class="ri-folder-3-line"></i><span data-i18n="fm.title">Training files</span></h3><span class="st" data-i18n="fm.where">on the robot</span></div>
       <h4 class="sub" data-i18n="fm.ds">Datasets</h4>

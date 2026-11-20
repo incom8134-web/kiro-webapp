@@ -617,6 +617,11 @@ details.logfold > summary { font-size: 12.5px; }
 .tbody p.accent { color: var(--accent); }
 .tbody p.note.err { color: var(--warn); }
 .tpkg { display: grid; gap: 10px; min-width: 0; }
+/* away = this page is offline or locked: the guide stays, the parts that need the robot do not */
+.away-note { display: none; }
+#tsect.away .away-note { display: block; color: var(--warn); }
+#tsect.away .needs-robot { display: none; }
+#t-nb-row:empty { display: none; }
 .tpkg:empty { display: none; }
 .tpkg .tail { margin: 0; }
 .pkgline { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--raise-2); min-width: 0; }

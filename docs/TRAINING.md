@@ -94,6 +94,8 @@ record (steps 1-4) -> package -> download -> Google Drive -> Colab (T4, Run all,
 | 6 Upload | Studio | Back on the robot's Wi-Fi. The robot checks the zip and installs it as `~/policies/<name>/pretrained_model` |
 | 7 Play | Control page, Arms tab | The skill is in Autonomous skills |
 
+**Checkpoints in Drive.** Every 2,000 steps the notebook copies the finished checkpoint to Drive, first as `<step>.part` with a list of file sizes, then renamed. Drive keeps the newest two. After a disconnect, "Run all" continues from the newest copy whose files all match the list, so a copy cut short by the disconnect is skipped. Each package file gets its own training folder (`SO101/outputs/<name>_<date>_act/`), so training a newer package of the same dataset never gives back the old model.
+
 **Why Google Drive and not an upload button in the notebook.** Colab's `files.upload()` keeps the whole file in the browser and sends it in small pieces; uploads of 100 MB and more are known to break. Drive uploads are reliable, survive a disconnect, and the notebook keeps its checkpoints there. Without Drive, the notebook still works with the Files panel upload (`USE_DRIVE` off), but a disconnect then loses everything. The same goes for the model zip: download it from drive.google.com rather than from Colab.
 
 **Why a GitHub link.** `colab.research.google.com/github/<owner>/<repo>/blob/<branch>/<path>` opens a notebook from a public repo with no setup; Colab asks for the Google account itself. The link points at branch `main`, so it works once this branch is merged. If the repo becomes private, use the "Notebook file" button instead.
@@ -103,16 +105,21 @@ record (steps 1-4) -> package -> download -> Google Drive -> Colab (T4, Run all,
 | Check | Refused when |
 |---|---|
 | Name | not letters, numbers, `.`, `_`, `-` (up to 80), or the name is taken (never overwritten) |
-| Size | zip over 3 GB, unpacked over 4 GB, or less than 2 GB disk left |
+| Size | zip over 3 GB, unpacked over 4 GB, a settings file over 10 MB, more than 80 entries (counted before the zip is opened), or less than 2 GB disk left after unpacking |
 | Paths | `..`, absolute paths, backslashes, links, more than one model folder, files outside the model folder (for example `training_state/`), folders deeper than 3 |
 | File types | anything but `.json` and `.safetensors` (and `README.md`). No `.bin` / `.pt` pickles: loading those can run code |
 | Content | broken JSON, `config.json` without type and features, a `.safetensors` file with a broken header, missing processor files or the state files they name |
+| Damage | bad or cut-short compressed data, or a packing method the robot cannot read (Windows "Deflate64" for big files): a clear message, never a crash |
 
 The zip is written to `~/policies/.incoming/`, checked and unpacked there, then moved into place in one step, so a half-installed skill never appears. Mac zips are fine (`__MACOSX/` and `.DS_Store` are left out).
 
+An upload that sends nothing for 60 s (the laptop left the Wi-Fi or slept) is given up, so the next upload is not refused as busy. Locking the Studio, leaving or a new operator stops uploads and downloads at once. The upload and unpacking run beside the 20 Hz control loop, never in it (a real 191 MB zip took 3.8 s; the page's ping stayed under 15 ms).
+
+**When the laptop leaves the robot's Wi-Fi** (step 2), the Studio locks itself, but the guide stays on the page: steps 2 to 5 and the Colab link remain readable, and steps 1 and 6 say they need the robot. Back on the robot's Wi-Fi, unlock again with both PINs. The notebook file can be downloaded in step 1, while still on the robot's Wi-Fi.
+
 ### Training files
 
-The Studio lists datasets, packages and trained models (size, date, episodes, frames, cameras, steps, arm). Downloads and deletes work only for what is in these lists. A delete asks first and needs a 2 s hold. Datasets are deleted only if they have `meta/info.json` and never under `calibration/`. A model cannot be deleted while a skill plays; a dataset not while recording or packaging.
+The Studio lists datasets, packages and trained models (size, date, episodes, frames, cameras, steps, arm). Downloads and deletes work only for what is in these lists. A package without its `.sha256` is still being written, or packing failed: it is listed as incomplete and never offered for download. A delete asks first and needs a 2 s hold. Datasets are deleted only if they have `meta/info.json` and never under `calibration/`. A model cannot be deleted while a skill plays; a dataset not while recording or packaging.
 
 ### Two-arm models
 

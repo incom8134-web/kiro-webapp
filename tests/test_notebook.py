@@ -128,3 +128,71 @@ def test_cell_2_refuses_a_damaged_package(tmp_path):
     g.update(USE_DRIVE=False, DRIVE_DIR=str(up), LOCAL_ROOT=str(tmp_path / "so101"), OUT_ROOT=str(tmp_path / "out"))
     with pytest.raises(SystemExit, match="SHA-256"):
         run(code[1], g)
+
+
+def checkpoint(base: Path, n: int):
+    ck = base / f"{n:06d}"
+    (ck / "pretrained_model").mkdir(parents=True)
+    (ck / "training_state").mkdir()
+    (ck / "training_state" / "training_step.json").write_text(json.dumps({"step": n}))
+    for name, b in model_files().items():
+        (ck / "pretrained_model" / name).write_bytes(b)
+    return ck
+
+
+def test_drive_keeps_whole_checkpoint_copies_and_resume_skips_half_ones(tmp_path, monkeypatch):
+    """Cell 4 with a stand-in lerobot-train: finished checkpoints go to Drive whole (size list, rename), the
+    newest two stay, and after a cut session the resume ignores a half-copied checkpoint."""
+    import os
+    _, code = cells()
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "lerobot-train").write_text("#!/bin/sh\nexit 0\n")
+    (fake / "lerobot-train").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+    up = tmp_path / "content"
+    up.mkdir()
+    fake_package(up)
+    g = {"__name__": "__main__"}
+    run(code[0], g)
+    g.update(USE_DRIVE=False, DRIVE_DIR=str(up), LOCAL_ROOT=str(tmp_path / "so101"), OUT_ROOT=str(tmp_path / "drive"))
+    run(code[1], g)
+    local = tmp_path / "so101" / "outputs" / "pick_20261120_1405_act" / "checkpoints"
+    for n in (2000, 4000, 6000):
+        checkpoint(local, n)
+    os.symlink("006000", local / "last")
+    run(code[3], g)                                         # "trains" (the stand-in), then copies to Drive
+    drive = tmp_path / "drive" / "pick_20261120_1405_act" / "checkpoints"
+    assert sorted(p.name for p in drive.iterdir()) == ["004000", "006000"]
+    assert json.loads((drive / "006000" / "kiro_copy.json").read_text())["pretrained_model/model.safetensors"] > 0
+    # the session is cut: local disk gone, and Drive holds a half copy of 008000 that looks newer
+    import shutil
+    shutil.rmtree(tmp_path / "so101" / "outputs")
+    half = checkpoint(drive, 8000)
+    (half / "pretrained_model" / "model.safetensors").unlink()
+    g2 = {"__name__": "__main__"}
+    run(code[0], g2)
+    g2.update(USE_DRIVE=False, DRIVE_DIR=str(up), LOCAL_ROOT=str(tmp_path / "so101"), OUT_ROOT=str(tmp_path / "drive"))
+    run(code[1], g2)
+    run(code[3], g2)
+    assert any("--config_path=" in c and "006000" in c for c in g2["cmd"])   # resumed from the whole one
+    assert (local / "006000").is_dir() and not (local / "008000").exists()   # (the half copy goes at the next save)
+
+
+def test_cell_2_takes_robot_packages_from_the_drive_folder_first(tmp_path):
+    _, code = cells()
+    folder, top = tmp_path / "SO101", tmp_path / "MyDrive"
+    folder.mkdir()
+    top.mkdir()
+    fake_package(folder, "pick_20261120_1405")
+    import os
+    import time
+    time.sleep(0.01)
+    fake_package(top, "other_20261121_0900")              # newer, but not in the package folder
+    (top / "backup.tar.gz").write_bytes(b"not a package")
+    g = {"__name__": "__main__"}
+    run(code[0], g)
+    g.update(USE_DRIVE=False, DRIVE_DIR=str(folder), LOCAL_ROOT=str(tmp_path / "so101"), OUT_ROOT=str(tmp_path / "out"))
+    run(code[1], g)
+    assert g["TAG"] == "pick_20261120_1405"
+    assert os.path.basename(g["SRC"]) == "pick_20261120_1405.tar.gz"

@@ -29,9 +29,9 @@ You need the dataset package from the robot: **Studio > Train a skill > 1 > Down
 
 1. **Put both files in Google Drive**: drive.google.com > My Drive > folder `SO101` > folder `데이터셋_업로드` (make the folders if they are missing; putting the files straight into My Drive also works).
 2. **GPU**: menu **Runtime > Change runtime type > T4 GPU > Save**.
-3. **Run**: menu **Runtime > Run all** (Ctrl+F9). If Colab warns that the notebook is not from Google, press **Run anyway**. When Google asks to connect Google Drive, allow it.
+3. **Run**: menu **Runtime > Run all** (Ctrl+F9). If Colab warns that the notebook is not from Google, press **Run anyway**. When Google asks to connect Google Drive, allow it and tick every box (**Select all**), or Drive does not connect.
 4. **Wait**: 20,000 steps take about 3 to 4 hours on a free T4 (the first robot skill took 3.5 hours, with two disconnects). Keep this tab open. If Colab disconnects, press **Run all** again: training continues from the last checkpoint saved in Drive (one every 2,000 steps).
-5. **Model**: at the end the zip is in Drive: My Drive > `SO101` > `outputs` > `<name>_act_pretrained_model.zip`. Download it from drive.google.com (right click > Download).
+5. **Model**: at the end the zip is in Drive: My Drive > `SO101` > `outputs` > `<name>_act_pretrained_model.zip`. Download it from drive.google.com (right click > Download; Drive cannot scan files this big for viruses: press **Download anyway**).
 6. **Install**: connect to the robot's Wi-Fi again, open **Studio > Train a skill > 6 Upload the model to the robot**, and choose the zip. The skill then appears under **Autonomous skills** on the Arms tab.
 
 **Without Google Drive**: untick `USE_DRIVE` in cell 1, open the **Files** panel (folder icon on the left), upload the `.tar.gz` with its upload button, wait until it has fully arrived, then **Run all**. If Colab disconnects, everything is gone and you start again. The zip download starts by itself at the end.
@@ -44,9 +44,9 @@ You need the dataset package from the robot: **Studio > Train a skill > 1 > Down
 
 1. **Google Drive 에 두 파일 올리기**: drive.google.com > 내 드라이브 > `SO101` 폴더 > `데이터셋_업로드` 폴더 (없으면 만드세요. 내 드라이브 바로 아래에 두어도 됩니다).
 2. **GPU**: 메뉴 **런타임 > 런타임 유형 변경 > T4 GPU > 저장**.
-3. **실행**: 메뉴 **런타임 > 모두 실행** (Ctrl+F9). Google 이 만든 노트북이 아니라는 경고가 나오면 **무시하고 실행**. Google Drive 연결을 물으면 허용하세요.
+3. **실행**: 메뉴 **런타임 > 모두 실행** (Ctrl+F9). Google 이 만든 노트북이 아니라는 경고가 나오면 그래도 실행하는 버튼 (**Run anyway**) 을 누르세요. Google Drive 연결을 물으면 허용하고 모든 항목에 체크하세요 (**모두 선택**). 체크를 빼면 Drive 가 연결되지 않습니다.
 4. **기다리기**: 무료 T4 에서 20,000 스텝은 약 3~4 시간 (첫 스킬은 3.5 시간, 연결 끊김 2번). 이 탭을 열어 두세요. 연결이 끊기면 **모두 실행** 을 다시 누르면 Drive 에 저장된 마지막 체크포인트 (2,000 스텝마다) 부터 이어서 학습합니다.
-5. **모델**: 끝나면 zip 이 Drive 의 내 드라이브 > `SO101` > `outputs` > `<이름>_act_pretrained_model.zip` 에 있습니다. drive.google.com 에서 내려받으세요 (오른쪽 클릭 > 다운로드).
+5. **모델**: 끝나면 zip 이 Drive 의 내 드라이브 > `SO101` > `outputs` > `<이름>_act_pretrained_model.zip` 에 있습니다. drive.google.com 에서 내려받으세요 (오른쪽 클릭 > 다운로드. 파일이 커서 바이러스 검사를 못 한다는 안내가 나오면 그래도 다운로드).
 6. **설치**: 로봇 Wi-Fi 에 다시 연결하고 **스튜디오 > 스킬 학습 > 6 모델을 로봇에 올리기** 에서 zip 을 고르세요. 팔 탭의 **자율 동작** 에 스킬이 나타납니다.
 
 **Google Drive 없이**: 1번 셀의 `USE_DRIVE` 를 끄고, 왼쪽 **파일** 패널(폴더 아이콘)의 업로드 버튼으로 `.tar.gz` 를 올린 뒤 다 올라갈 때까지 기다렸다가 **모두 실행**. 연결이 끊기면 모두 사라지므로 처음부터 다시 해야 합니다. 끝나면 zip 내려받기가 자동으로 시작됩니다.
@@ -75,7 +75,7 @@ print(f"policy {POLICY}, {STEPS} steps, batch {BATCH}, checkpoint every {SAVE_FR
 
 code(r"""
 #@title 2. Google Drive + dataset: find, check SHA-256, unpack / 데이터셋 찾기·확인·풀기
-import glob, hashlib, json, os, shutil, tarfile
+import glob, hashlib, json, os, re, shutil, tarfile
 if USE_DRIVE:
     try:
         from google.colab import drive
@@ -85,8 +85,12 @@ if USE_DRIVE:
 places = [DRIVE_DIR] + (["/content/drive/MyDrive", "/content"] if USE_DRIVE else [])
 if TAR_NAME:
     found = [p for p in (os.path.join(d, TAR_NAME) for d in places) if os.path.isfile(p)]
-else:
-    found = sorted((p for d in places for p in glob.glob(os.path.join(d, "*.tar.gz"))), key=os.path.getmtime)
+else:   # packages from the robot are <name>_<YYYYmmdd>_<HHMM>.tar.gz; the first folder that has one wins, newest there
+    for d in places:
+        found = sorted((p for p in glob.glob(os.path.join(d, "*.tar.gz")) if re.fullmatch(r".+_\d{8}_\d{4}\.tar\.gz", os.path.basename(p))),
+                       key=os.path.getmtime)
+        if found:
+            break
 assert found, ("No .tar.gz found in " + ", ".join(places) + ". "
                + ("Put the package from the robot into Google Drive > SO101 > 데이터셋_업로드 and run again. "
                   "/ 로봇에서 받은 tar.gz 를 Google Drive > SO101 > 데이터셋_업로드 에 올리고 다시 실행하세요."
@@ -171,12 +175,21 @@ OUT_DRIVE = os.path.join(OUT_ROOT, f"{TAG}_{POLICY}")                     # copy
 os.makedirs(os.path.join(OUT_DRIVE, "checkpoints"), exist_ok=True)   # OUT_LOCAL is made by lerobot (it refuses an existing one unless resuming)
 TRAIN = shutil.which("lerobot-train") or str(Path(sys.executable).parent / "lerobot-train")
 
-def step_dirs(base):
-    return sorted(d for d in glob.glob(os.path.join(base, "checkpoints", "*")) if os.path.basename(d) != "last"
-                  and os.path.exists(os.path.join(d, "pretrained_model", "train_config.json")) and os.path.isdir(os.path.join(d, "training_state")))
+def copied_whole(d):
+    # a Drive copy counts only when every file in its size list is there with that size (a cut session can leave half a copy)
+    try:
+        want = json.load(open(os.path.join(d, "kiro_copy.json")))
+        return bool(want) and all(os.path.getsize(os.path.join(d, f)) == n for f, n in want.items())
+    except (OSError, ValueError):
+        return False
+
+def step_dirs(base, whole=False):
+    return sorted(d for d in glob.glob(os.path.join(base, "checkpoints", "*")) if os.path.basename(d).isdigit()
+                  and os.path.exists(os.path.join(d, "pretrained_model", "train_config.json")) and os.path.isdir(os.path.join(d, "training_state"))
+                  and (not whole or copied_whole(d)))
 
 # Continue: bring the newest checkpoint from Drive to the local disk
-local, drive_ck = step_dirs(OUT_LOCAL), step_dirs(OUT_DRIVE)
+local, drive_ck = step_dirs(OUT_LOCAL), step_dirs(OUT_DRIVE, whole=True)
 if drive_ck and (not local or os.path.basename(drive_ck[-1]) > os.path.basename(local[-1])):
     dst = os.path.join(OUT_LOCAL, "checkpoints", os.path.basename(drive_ck[-1]))
     print("checkpoint from Drive:", drive_ck[-1]); shutil.copytree(drive_ck[-1], dst, dirs_exist_ok=True)
@@ -197,19 +210,29 @@ else:
            "--log_freq=100", "--num_workers=2", f"--output_dir={OUT_LOCAL}", f"--job_name={NAME}"]
 
 def mirror_once(done):
-    # copy complete checkpoints (the one 'last' points to, or older) to Drive; Drive keeps only the newest
+    # copy finished checkpoints (the one 'last' points to, or older) to Drive: first to <step>.part with a size
+    # list, then renamed, so a cut session never leaves a half copy that looks whole. Drive keeps the newest two.
     link = os.path.join(OUT_LOCAL, "checkpoints", "last")
     if not os.path.islink(link):
         return
-    newest = os.readlink(link).rstrip("/")
+    newest = os.path.basename(os.readlink(link).rstrip("/"))
     for d in step_dirs(OUT_LOCAL):
         n = os.path.basename(d)
         if n in done or n > newest:
             continue
         dst = os.path.join(OUT_DRIVE, "checkpoints", n)
-        shutil.copytree(d, dst, dirs_exist_ok=True); done.add(n)
+        part = dst + ".part"
+        shutil.rmtree(part, ignore_errors=True)
+        shutil.copytree(d, part)
+        sizes = {os.path.relpath(os.path.join(r, f), part): os.path.getsize(os.path.join(r, f))
+                 for r, _, fs in os.walk(part) for f in fs if f != "kiro_copy.json"}
+        with open(os.path.join(part, "kiro_copy.json"), "w") as fh:
+            json.dump(sizes, fh)
+        shutil.rmtree(dst, ignore_errors=True)
+        os.rename(part, dst); done.add(n)
+        keep = step_dirs(OUT_DRIVE, whole=True)[-2:]
         for old in glob.glob(os.path.join(OUT_DRIVE, "checkpoints", "*")):
-            if os.path.basename(old) != n and os.path.isdir(old):
+            if old not in keep and os.path.isdir(old) and not old.endswith(".part"):
                 shutil.rmtree(old, ignore_errors=True)
         print(f"[saved to Drive] checkpoint {n} -> {dst}", flush=True)
 
@@ -234,7 +257,7 @@ if cmd:
 code(r"""
 #@title 5. The model zip for the robot's Studio page / 스튜디오에 올릴 모델 zip
 import datetime, json, os, zipfile
-ck = step_dirs(OUT_LOCAL) or step_dirs(OUT_DRIVE)
+ck = step_dirs(OUT_LOCAL) or step_dirs(OUT_DRIVE, whole=True)
 assert ck, "no checkpoint yet: training has not finished / 체크포인트 없음: 학습이 끝나지 않았습니다"
 PM = os.path.join(ck[-1], "pretrained_model")
 cfg = json.load(open(os.path.join(PM, "train_config.json")))
@@ -257,6 +280,12 @@ with zipfile.ZipFile(zip_path + ".part", "w", zipfile.ZIP_DEFLATED) as zf:
 os.replace(zip_path + ".part", zip_path)
 print(f"step {step}: {zip_path} ({os.path.getsize(zip_path) / 1e6:.0f} MB)")
 if USE_DRIVE:
+    try:
+        from google.colab import drive
+        drive.flush_and_unmount()      # Drive saves in the background: wait until the zip is really there
+        print("saved in Google Drive / Google Drive 에 저장됨")
+    except ImportError:
+        pass
     print("Download it from drive.google.com: My Drive > SO101 > outputs > " + os.path.basename(zip_path) + " (right click > Download)")
     print("drive.google.com 에서 내려받기: 내 드라이브 > SO101 > outputs > " + os.path.basename(zip_path))
 else:
@@ -276,7 +305,7 @@ md(r"""
 - **No GPU**: Runtime > Change runtime type > T4 GPU. Free accounts sometimes get no GPU; try again later. / GPU 없음: 런타임 유형을 T4 GPU 로. 무료 계정은 GPU 가 없을 때가 있으니 나중에 다시.
 - **Disconnected**: open the notebook again and Run all. Cell 4 takes the last checkpoint from Drive and continues. To start from zero, delete `SO101/outputs/<name>_<date>_act/` in Drive. / 연결 끊김: 다시 모두 실행. 처음부터 하려면 Drive 의 `SO101/outputs/<이름>_<날짜>_act/` 삭제.
 - **`cannot import name 'FqnToConfig'`** in cell 4: cell 3 removes torchao by itself; with an old copy of this notebook, run `pip uninstall -y torchao` in a new cell, then cell 4 again.
-- **pip errors**: LeRobot 0.6.1 installs on Python 3.12 and 3.13. If torch changed during the install, use Runtime > Restart session once and run from cell 3.
+- **pip errors**: LeRobot 0.6.1 installs on Python 3.12 and 3.13. If torch changed during the install, use Runtime > Restart session once, then Runtime > Run all again (cell 2 is quick the second time).
 - **Speed**: ACT with batch 8 runs about 0.5 to 0.6 s per step on a T4, so 20,000 steps take 3 to 4 hours (the first skill: 3.5 hours). Free GPU time is limited; if Colab gives no GPU, continue another day: Run all picks up the checkpoint in Drive. The dataset is unpacked on the local disk (/content), so Drive speed does not matter.
 - **Drive space**: Drive keeps only the newest checkpoint (about 0.6 GB) and the model zip (about 0.2 GB).
 - **The zip download from Colab breaks**: download it from drive.google.com instead (USE_DRIVE on). / Colab 에서 내려받기가 끊기면 drive.google.com 에서 받으세요.
