@@ -234,6 +234,16 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
             elif cmd == "delete":   # a dataset, package or model, for good (the page asks first)
                 call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
+            elif cmd == "colab":    # train in Colab, the automatic way (robot_server/colab.py)
+                act_ = str(msg.get("action"))
+                if act_ == "start":
+                    call = lambda: r.colab.start(str(msg.get("repo", "")), name)  # noqa: E731
+                elif act_ == "connect":
+                    call = lambda: r.colab.connect(str(msg.get("url", "")), str(msg.get("key", "")), name)  # noqa: E731
+                elif act_ == "stop":
+                    call = lambda: r.colab.stop(name)  # noqa: E731
+                else:
+                    return
             elif cmd == "hello":
                 call = lambda: (True, "")  # noqa: E731
             else:

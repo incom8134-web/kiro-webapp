@@ -17,7 +17,7 @@ const HOLD_MS = 2000;
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
 
 const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
-  pendingStart: false, token: null, dismissed: null };
+  pendingStart: false, token: null, dismissed: null, offer: null, colabAct: null };
 const isOperator = () => !!st.server && st.server.you.role === "operator";
 const isEngineer = () => !!st.server && !!st.server.you.engineer;
 const sess = () => (st.studio && st.studio.session) || null;
@@ -109,7 +109,8 @@ function toast(text, isError) {
 }
 const CODES = { CHECKS_FAILED: "rec.n.checks", TOO_SOON: "rec.n.soon", NOT_NOW: "rec.n.notnow", STOPPING: "rec.n.stopping",
   FORCE_SENT: "rec.n.force", RUNNING: "rec.n.running", NO_DATASET: "rec.n.nods", LEFT_BLOCKED: "arm.leftblocked",
-  NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse" };
+  NOT_FOUND: "fm.e.notfound", IN_USE: "fm.e.inuse", COLAB_BUSY: "col.e.COLAB_BUSY", COLAB_ADDR: "col.e.COLAB_ADDR",
+  COLAB_NORUN: "col.e.COLAB_NORUN" };
 function onNote(m) {
   const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
   if (m.about === "take" || m.about === "engineer") {
@@ -123,6 +124,14 @@ function onNote(m) {
     if (m.ok && m.cmd === "start") toast(t("rec.n.started"));
     else if (m.ok && m.cmd === "pack") toast(t("rec.n.packing"));
     else if (m.ok && m.cmd === "delete") toast(t("fm.deleted"));
+    else if (m.cmd === "colab") {
+      if (st.offer && st.offer.state === "sending" && st.colabAct === "connect") {
+        st.offer.state = m.ok ? "sent" : "error"; st.offer.err = m.ok ? "" : text; renderOffer();
+      }
+      if (m.ok && st.colabAct === "start") toast(t("col.n.started"));
+      else if (m.ok && st.colabAct === "connect") toast(t("col.n.connected"));
+      else if (!m.ok) toast(text, true);
+    }
     else if (!m.ok) toast(text, true);
     renderStudio();
     return;
@@ -359,7 +368,7 @@ function fmtDur(s) {
 }
 
 // ---------------------------------------------------------------- render
-function renderAll() { renderTop(); renderLock(); renderStudio(); }
+function renderAll() { renderTop(); renderLock(); renderStudio(); renderOffer(); }
 
 function renderStudio() {
   if (!isEngineer() || !st.studio) return;
@@ -710,6 +719,7 @@ function renderTrain() {
   $("t-nb-row").hidden = !T.notebook;
   if (T.notebook) $("t-nb").href = `/api/studio/notebook.ipynb?token=${qtok()}`;
   renderUpload();
+  renderColab();
   renderFiles();
 }
 
@@ -787,6 +797,110 @@ function renderUpload() {
   msg.textContent = text;
   msg.className = "small " + (!problem && tr.msg && tr.msg.ok ? "accent" : "note err");
 }
+
+// ------------------------------------------------ train in Colab (automatic)
+/* The robot (robot_server/colab.py, needs internet) packages the dataset and waits for the Colab session.
+   The notebook's "Connect to the robot" link opens this page with the session's address and key (#colab=...&k=...):
+   the page asks before sending (the offer card), and hands it to the unlocked Studio tab if this one is not. */
+const COLAB_ACTIVE = ["packing", "waiting", "sending", "training", "fetching", "installing", "lost"];
+const colab = () => (st.studio && st.studio.colab) || null;
+const colabUrl = () => train().colab || $("t-colab").href;
+const PH = { packing: "accent", waiting: "accent", sending: "accent", training: "live", fetching: "accent", installing: "accent",
+  installed: "live", lost: "warn", failed: "warn", stopped: "warn" };
+const bc = (() => { try { return new BroadcastChannel("kiro-studio"); } catch (e) { return null; } })();
+
+function colabSend(action, extra) {
+  st.colabAct = action;
+  send({ t: "studio", cmd: "colab", action, ...(extra || {}) });
+}
+$("c-go").addEventListener("click", () => {
+  const c = colab();
+  window.open(colabUrl(), "_blank", "noopener");     // at the click itself: no pop-up blocker
+  if (!(c && COLAB_ACTIVE.includes(c.state))) colabSend("start", { repo: tr.ds });
+});
+$("c-stop").addEventListener("click", () => colabSend("stop"));
+
+function colabWhy(c) {
+  const code = c.error || "", a = { detail: c.detail || "" };
+  if (STRINGS.en["col.e." + code]) return t("col.e." + code, a);
+  if (STRINGS.en["up.e." + code]) return t("up.e." + code, a);
+  return [code, c.detail].filter(Boolean).join(": ");
+}
+
+function renderColab() {
+  const c = colab(), active = !!c && COLAB_ACTIVE.includes(c.state);
+  $("c-go").disabled = active || !tr.ds;
+  $("c-go").classList.toggle("primary", !active);
+  $("c-run").hidden = !c;
+  if (!c) return;
+  const mb = (b) => fmtMB((b || 0) / 1e6);
+  const ph = $("c-phase");
+  ph.textContent = t("col.ph." + c.state);
+  ph.className = "phase " + (PH[c.state] || "accent");
+  $("c-host").textContent = c.host ? t("col.host", { host: c.host }) : "";
+  const starting = c.state === "training" && (c.step == null || ["received", "waiting", "receiving"].includes(c.remote));
+  $("c-say").textContent = c.state === "sending" ? t("col.p.sending", { a: mb(c.sent), b: mb(c.total) })
+    : c.state === "fetching" ? t("col.p.fetching", { a: mb(c.sent), b: mb(c.total) })
+    : c.state === "training" ? (starting ? t("col.p.trainstart") : t("col.p.training", { n: (c.step || 0).toLocaleString(), of: (c.steps || 20000).toLocaleString() }))
+    : c.state === "installed" ? t("col.p.installed", { name: c.model || "" })
+    : c.state === "failed" ? t("col.p.failed", { why: colabWhy(c) })
+    : t("col.p." + c.state);
+  const frac = c.state === "sending" || c.state === "fetching" ? (c.total ? c.sent / c.total : 0)
+    : c.state === "training" && c.steps ? (c.step || 0) / c.steps : c.state === "installed" ? 1 : null;
+  $("c-bar").hidden = frac == null;
+  $("c-bar").classList.toggle("live", c.state === "training" || c.state === "installed");
+  $("c-bar").querySelector("i").style.width = `${Math.round(Math.min(1, frac || 0) * 100)}%`;
+  const detail = c.state === "lost" && c.detail ? c.detail : "";
+  $("c-detail").hidden = !detail;
+  $("c-detail").textContent = detail;
+  setBtn($("c-stop"), t(active ? "col.stop" : "col.clear"));
+  $("c-colab").hidden = !active;
+  $("c-colab").href = colabUrl();
+  $("c-play").hidden = c.state !== "installed";
+}
+
+// The offer: this page was opened by the notebook's "Connect to the robot" link
+(function readOffer() {
+  const m = /^#colab=([^&]+)&k=([A-Za-z0-9_-]+)$/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);   // the key does not stay in the address bar
+  try { st.offer = { url: decodeURIComponent(m[1]), key: m[2], state: "ask" }; } catch (e) { /* ignore */ }
+})();
+function renderOffer() {
+  const o = st.offer;
+  $("offer").hidden = !o;
+  if (!o) return;
+  $("offer-t").textContent = t("col.offer.t", { host: o.url.replace(/^https?:\/\//, "") });
+  $("offer-send").disabled = o.state === "sending" || o.state === "sent";
+  const msg = $("offer-msg");
+  const text = o.state === "sent" ? t("col.offer.sent") : o.state === "unlock" ? t("col.offer.unlock") : o.state === "error" ? o.err : "";
+  msg.hidden = !text;
+  msg.textContent = text;
+  msg.className = "small " + (o.state === "sent" ? "accent" : "note err");
+}
+$("offer-send").addEventListener("click", () => {
+  const o = st.offer;
+  if (!o) return;
+  o.state = "sending";
+  if (isEngineer()) colabSend("connect", { url: o.url, key: o.key });
+  else if (bc) {                                    // hand it to the unlocked Studio tab
+    o.id = Math.random().toString(36).slice(2);
+    bc.postMessage({ t: "connect", id: o.id, url: o.url, key: o.key });
+    setTimeout(() => { if (st.offer === o && o.state === "sending") { o.state = "unlock"; renderOffer(); } }, 2000);
+  } else o.state = "unlock";
+  renderOffer();
+});
+$("offer-no").addEventListener("click", () => { st.offer = null; renderOffer(); });
+if (bc) bc.onmessage = (ev) => {
+  const m = ev.data || {};
+  if (m.t === "connect" && isEngineer()) {
+    colabSend("connect", { url: String(m.url || ""), key: String(m.key || "") });
+    bc.postMessage({ t: "ack", id: m.id });
+  } else if (m.t === "ack" && st.offer && st.offer.id === m.id) {
+    st.offer.state = "sent";
+    renderOffer();
+  }
+};
 
 // ------------------------------------------------------- training files
 /* Datasets, packages and trained models on the robot: download, package, delete (hold to confirm). */

@@ -38,6 +38,7 @@ from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 from .recorder import Recorder
 from .training import Training
+from .colab import ColabLink
 
 log = logging.getLogger("kiro.robot")
 HERE = Path(__file__).resolve().parent
@@ -135,6 +136,7 @@ class Robot:
         self.refresh_cameras()
         self.rec = Recorder(self)
         self.train = Training(self)
+        self.colab = ColabLink(self)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -951,7 +953,7 @@ class Robot:
                   "paths": {"so101": str(self.so101), "venv": str(self.venv), "datasets": str(self.rec.root),
                             "backups": str(self.rec.backups), "calibration": str(HF_CALIB),
                             "policies": str(self.train.root), "packages": str(self.train.pkg_dir)}},
-            train=self.train.snapshot())
+            train=self.train.snapshot(), colab=self.colab.snapshot())
         return out
 
     def set_guard_profile(self, profile: str, who: str) -> tuple[bool, str]:
@@ -964,6 +966,7 @@ class Robot:
     def close(self) -> None:
         self._stop.set()
         self._wave_stop.set()
+        self.colab.close()
         stopped = self.jobs.stop_all()
         log.info("server stopping; stopped: %s", ", ".join(stopped) or "nothing running")
         for cam in self.cams.values():
