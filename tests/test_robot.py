@@ -452,11 +452,16 @@ def test_estop_fold_can_be_switched_off(cfg):
 def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
     from robot_server.robot import Robot
     r = Robot(cfg, MockBase())
+    env_text = "OBSTACLE_STOP=1\n"
+    r._lidar_env_text = lambda: env_text   # never the shared mock lidar.env
     try:
         assert r.base(True, "t")[0]
         env = r.jobs.get("base").spec.env
         assert env["TOUCH_DIST"] == "0" and env["COVERED_RATIO"] == "0"     # the two strict rules are off
         assert float(env["STOP_DIST"]) > 0                                   # the distance stop is not
+        env_text = "OBSTACLE_STOP=1\nLIDAR_MASK=-35:0.06,-30:0.06\n"
+        env = r.guard_env("close")                                           # robot's own parts measured: test E4 rules on
+        assert env["TOUCH_DIST"] == "0.10" and env["COVERED_RATIO"] == "0.4" and env["STOP_DIST"] == "0.12"
     finally:
         r.close()
 

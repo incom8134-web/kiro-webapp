@@ -168,6 +168,13 @@
             <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
           </div>
         </div>
+        <div class="card">
+          <div class="row head"><h3><span data-i18n="stops.title">Stop measurements</span></h3><span class="grow"></span>
+            <a class="btn" href="/api/stops.csv" download><i class="ri-download-2-line"></i><span>CSV</span></a>
+            <button id="stops-clear" class="btn" type="button" data-op><span data-i18n="stops.clear">Clear</span></button></div>
+          <p class="small mute" data-i18n="stops.hint">Every stop while the robot moves, measured from its own data.</p>
+          <div class="stopwrap"><table class="stops" id="stops"></table></div>
+        </div>
       </section>
     </div>
     <div class="foot" id="ver"></div>

@@ -460,7 +460,16 @@ class Robot:
             cmd = ["bash", "-c", ROS_SETUP + f'exec bash "{self.so101}/run_base_teleop.sh" --inner']
         prof = profile if profile in GUARD_PROFILES else "close"
         return self._start("base", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
-                                           env=dict(GUARD_PROFILES[prof]), label=f"base ({prof})", stop_wait=8.0), who)
+                                           env=self.guard_env(prof), label=f"base ({prof})", stop_wait=8.0), who)
+
+    def guard_env(self, prof: str) -> dict[str, str]:
+        """Settings for the old lidar guard. With the robot's own parts measured (LIDAR_MASK, Studio lidar setup)
+        the guard ignores them, so its 'covered' and 'contact' stops can be on again: a hand over the lidar then
+        stops everything within 2 scans (test E4). Without a mask they stay off (the parts set them off)."""
+        env = dict(GUARD_PROFILES[prof if prof in GUARD_PROFILES else "close"])
+        if parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK")):
+            env.update(TOUCH_DIST="0.10", COVERED_RATIO="0.4")
+        return env
 
     # --------------------------------------------------------------- teleop
     def teleop(self, side: str, on: bool, who: str) -> tuple[bool, str]:

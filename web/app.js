@@ -279,6 +279,7 @@ for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("c
   voiceRestart();
 });
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
+$("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
@@ -423,6 +424,24 @@ function render() {
   renderRobot();
 }
 
+/* Stop meter: each stop with its test item and pass limit (robot_server/stopmeter.py), newest first. */
+function renderStops(rows) {
+  const tm = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour12: false });
+  const num = (v, d = 2) => (v == null ? "-" : Number(v).toFixed(d));
+  const body = rows.slice().reverse().map((x) => {
+    const unit = x.meter === "arm" ? "°" : " cm";
+    const ok = x.state === "measuring" ? t("stops.measuring") : x.state === "timeout" ? t("stops.timeout") : x.ok == null ? "" : x.ok ? "✓" : "✗";
+    const cls = x.ok === true ? "go" : x.ok === false ? "no" : "";
+    return `<tr><td>${tm(x.ts)}</td><td>${esc(x.test || "")}</td><td title="${esc(x.detail)}">${esc(t("stops.k." + x.kind))}</td>
+      <td>${num(x.cmd_s)}</td><td>${num(x.still_s)}</td><td>${x.dist == null ? "-" : num(x.dist, 1) + unit}</td>
+      <td>${x.creep ? num(x.creep, 1) + unit : "0"}</td><td class="${cls}">${esc(ok)}</td></tr>`;
+  }).join("");
+  const head = ["time", "test", "what", "cmd", "still", "dist", "creep", "ok"].map((k) => `<th>${esc(t("stops.h." + k))}</th>`).join("");
+  const html = rows.length ? `<tr>${head}</tr>${body}` : `<tr><td class="mute">${esc(t("stops.none"))}</td></tr>`;
+  const el = $("stops");
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
 /* Why a job ended, shown only when it was a surprise (not when we stopped it): its USB board went away,
    something killed it (an arm then keeps its torque), or it failed (its last lines). */
 function failTail(el, job) {
@@ -538,6 +557,7 @@ function renderRobot() {
     const tm = d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0").slice(0, 1);
     return `<li><time>${tm}</time><span class="${cls}">${esc(e.text)}</span></li>`;
   }).join("");
+  renderStops(r.stops || []);
   const vl = $("voice-log");
   if (vl.dataset.html !== vhtml) { vl.innerHTML = vhtml; vl.dataset.html = vhtml; }
   const noEn = voiceLang === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));

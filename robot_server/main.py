@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import ClientDisconnect
 
@@ -29,7 +29,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
-OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
+OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide", "stops_clear",
                     "leader", "wave", "follow", "studio", "guard_profile", "lidar_setup"}
 # Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance, lidar setup)
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile", "lidar_setup"}
@@ -84,6 +84,17 @@ class NoStalePages:
                                                     (b"content-security-policy", b"frame-ancestors 'none'")]}
             await send(msg)
         await self.app(scope, receive, send_no_cache)
+
+
+def guard_stop_kind(status: str | None) -> str | None:
+    """The old lidar guard's status line -> 'no_scan' (scans stopped), 'covered' (covered or touched), or None.
+    Its form: 'scan OK(432점) | 앞 ... | 최근접 ... | 가림 없음 | ...' ('scan 없음' when the scans stopped)."""
+    if not status:
+        return None
+    if status.startswith("scan 없음"):
+        return "no_scan"
+    parts = status.split(" | ")
+    return "covered" if len(parts) > 3 and parts[3].startswith("가림") and parts[3] != "가림 없음" else None
 
 
 def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None) -> FastAPI:
@@ -172,6 +183,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         st["n"] += 1
         n = st["n"]
         o = b.odom()
+        meter_step(st, now, b, o, cmd.publish and any(abs(v) > 1e-4 for v in (vx, vy, wz)))
         if o:  # odometer: distance driven since the server started (jumps = odometry reset)
             prev = state["last_xy"]
             d = 0.0 if prev is None else ((o["x"] - prev[0]) ** 2 + (o["y"] - prev[1]) ** 2) ** 0.5
@@ -196,6 +208,30 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             await asyncio.gather(*(send(cid, r) for cid in list(sockets)))
             await send_studio([cid for cid in list(sockets) if ctrl.is_engineer(cid)])
 
+    def meter_step(st: dict, now: float, b, o: dict | None, sent: bool) -> None:
+        """Stop meter (robot_server/stopmeter.py): where the robot is, whether a speed goes to the wheels, and
+        the stop triggers seen here (web dead-man let go, lidar lost, the old guard covered / no scans, the
+        robot gamepad's LB). E-STOP, voice, base stop and the arm link are noted by the Robot itself."""
+        r: Robot = state["robot"]
+        wc = b.wheel_cmd() if hasattr(b, "wheel_cmd") else None
+        r.base_meter.sample(now, (o["x"], o["y"]) if o else None, sent if wc is None else wc)
+        for kind, detail, at in (b.take_events() if hasattr(b, "take_events") else []):
+            r.base_meter.trigger(now, kind, detail, at=at)
+        held = ctrl.held
+        if st.get("held") and not held:
+            r.base_meter.trigger(now, "deadman", "web dead-man let go")
+        st["held"] = held
+        lost = state["guard"]["lost"]
+        if lost and not st.get("lost"):
+            r.base_meter.trigger(now, "lidar_lost", "web obstacle stop: lidar lost")
+        st["lost"] = lost
+        gs = b.latest_str("/obstacle_guard/status") if hasattr(b, "latest_str") else None
+        gk = guard_stop_kind(gs)
+        if gk and gk != st.get("gk"):
+            r.base_meter.trigger(now, gk, f"robot guard: {gs[:60]}")
+        st["gk"] = gk
+        r.meter_tick(now)
+
     async def send_studio(cids: list[str]) -> None:
         """Training data and engineer values: only to connections that are the unlocked engineer."""
         if not cids:
@@ -217,7 +253,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         starting = on and not (t == "arm" and msg.get("action") == "release")
         if t == "studio":  # only starting a recording moves an arm; next / again / stop / force stop / checks never do
             starting = msg.get("cmd") == "start"
-        elif t == "guard_profile":
+        elif t in ("guard_profile", "stops_clear"):
             starting = False
         elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
             starting = msg.get("cmd") == "apply"
@@ -265,6 +301,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 return
         elif t == "say":
             call = lambda: r.say(str(msg.get("text", "")), name)  # noqa: E731
+        elif t == "stops_clear":
+            call = lambda: r.stops_clear(name)  # noqa: E731
         elif t == "servo":
             def call():
                 return r.servo(str(msg.get("cmd")), str(msg.get("port", "")), name, int(msg.get("id") or 0),
@@ -333,6 +371,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     app.add_middleware(NoStalePages)
     app.state.ctrl = ctrl
     app.state.data = state
+
+    @app.get("/api/stops.csv")
+    def stops_csv():
+        """Every stop measured since the server started (or the last Clear): for the test report sheets."""
+        return Response(state["robot"].stops_csv(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="stops_{time.strftime("%Y%m%d_%H%M")}.csv"'})
 
     @app.get("/api/health")
     async def health() -> dict:

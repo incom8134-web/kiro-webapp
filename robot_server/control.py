@@ -242,6 +242,11 @@ class Controller:
         return True
 
     @property
+    def held(self) -> bool:
+        """The operator holds the dead-man right now (the stop meter notes when it is let go)."""
+        return self.operator is not None and self._held
+
+    @property
     def link_ok(self) -> bool:
         return self.operator is not None and (self.clock() - self._last_drive) <= self.cfg.heartbeat_timeout
 
