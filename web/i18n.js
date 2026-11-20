@@ -37,6 +37,8 @@ const STRINGS = {
     "banner.offline": "Not connected to the robot. Trying again...",
     "banner.estop": "E-STOP is on{by}. ", "banner.estop.by": " (pressed on {name})",
     "banner.estop.op": "Press RELEASE when it is safe.", "banner.estop.viewer": "Only the operator can release it.",
+    "banner.fold.pending": "The arms fold home in a moment. Press E-STOP again to keep them still.",
+    "banner.fold.running": "The arms are folding home. Press E-STOP to stop them.",
 
     "sec.control": "Control", "sec.base": "Base", "sec.arms": "Arms", "sec.skills": "Skills",
     "sec.voice": "Voice", "sec.health": "System", "sec.log": "Activity",
@@ -179,6 +181,8 @@ const STRINGS = {
     "banner.offline": "로봇과 연결되지 않았습니다. 다시 연결하는 중...",
     "banner.estop": "비상정지 상태입니다{by}. ", "banner.estop.by": " ({name}에서 누름)",
     "banner.estop.op": "안전하면 해제를 누르세요.", "banner.estop.viewer": "조종자만 해제할 수 있습니다.",
+    "banner.fold.pending": "곧 두 팔이 접힘 자세로 돌아갑니다. 그대로 두려면 비상정지를 한 번 더 누르세요.",
+    "banner.fold.running": "두 팔이 접힘 자세로 돌아가는 중입니다. 멈추려면 비상정지를 누르세요.",
 
     "sec.control": "조종", "sec.base": "베이스", "sec.arms": "팔", "sec.skills": "스킬",
     "sec.voice": "음성", "sec.health": "시스템", "sec.log": "기록",

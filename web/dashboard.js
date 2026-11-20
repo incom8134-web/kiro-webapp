@@ -318,11 +318,14 @@ function render() {
   $("estop").classList.toggle("on", stopped);
   $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");
   const banner = $("banner");
+  const fold = st.robot && st.robot.estop_fold;
+  const foldText = fold ? " " + t(fold === "pending" ? "banner.fold.pending" : "banner.fold.running") : "";
   if (!st.open) { banner.hidden = false; banner.className = "banner"; banner.textContent = t("banner.offline"); }
   else if (stopped) {
     banner.hidden = false; banner.className = "banner stop";
-    banner.textContent = t("banner.estop", { by: s.estop_by ? t("banner.estop.by", { name: s.estop_by }) : "" }) + t("banner.estop.viewer");
-  } else banner.hidden = true;
+    banner.textContent = t("banner.estop", { by: s.estop_by ? t("banner.estop.by", { name: s.estop_by }) : "" }) + t("banner.estop.viewer") + foldText;
+  } else if (fold) { banner.hidden = false; banner.className = "banner"; banner.textContent = foldText.trim(); }
+  else banner.hidden = true;
   $("ver").textContent = s ? `HAEBOT Robot v${s.version}` : "";
   renderTiles();
   drawLidar();

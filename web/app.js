@@ -353,13 +353,18 @@ function render() {
   $("estop-label").textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
 
   const banner = $("banner");
+  const fold = state.robot && state.robot.estop_fold;   // after E-STOP the arms fold home by themselves
+  const foldText = fold ? " " + t(fold === "pending" ? "banner.fold.pending" : "banner.fold.running") : "";
   if (!state.open) {
     banner.hidden = false; banner.className = "banner";
     banner.textContent = t("banner.offline");
   } else if (stopped) {
     banner.hidden = false; banner.className = "banner stop";
     banner.textContent = t("banner.estop", { by: s.estop_by ? t("banner.estop.by", { name: s.estop_by }) : "" }) +
-      t(me ? "banner.estop.op" : "banner.estop.viewer");
+      t(me ? "banner.estop.op" : "banner.estop.viewer") + foldText;
+  } else if (fold) {
+    banner.hidden = false; banner.className = "banner";
+    banner.textContent = foldText.trim();
   } else {
     banner.hidden = true;
   }

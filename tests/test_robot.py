@@ -388,3 +388,60 @@ def test_follow_offsets_shift_one_arm_without_a_jump_at_the_seam():
     assert out == {"wrist_flex": 93.0, "elbow_flex": 96.0, "gripper": 5.0}      # gripper never shifted
     assert apply_offsets({"wrist_flex": 179.0}, {"wrist_flex": 123})["wrist_flex"] == -58.0   # 302 -> -58, continuous
     assert apply_offsets(tgt, {}) == tgt
+
+
+def test_wheel_check_switches_off_a_wheel_that_still_turns():
+    from robot_server.wheel_stop import ADDR_GOAL_SPEED, ADDR_SPEED, ADDR_TORQUE, stop_wheels
+    regs = {7: {ADDR_SPEED: 0}, 8: {ADDR_SPEED: 0x8000 | 600}, 9: {ADDR_SPEED: 5}, 10: None}   # 8 turns backwards
+    writes = []
+
+    def read(i, a):
+        return None if regs[i] is None else regs[i].get(a, 0)
+
+    def write(i, a, v):
+        writes.append((i, a, v))
+        regs[i][a] = v
+        if a == ADDR_TORQUE and v == 0:
+            regs[i][ADDR_SPEED] = 0                  # torque off: the wheel stops
+    wheels, turning = stop_wheels(read, write)
+    assert turning == [8] and wheels == {7: 0, 8: 0, 9: 0, 10: "no answer"}
+    assert (8, ADDR_GOAL_SPEED, 0) in writes and (8, ADDR_TORQUE, 0) in writes
+    assert all(i == 8 for i, _, _ in writes)        # wheels standing still are not touched
+
+
+def test_estop_freezes_then_folds_home_and_a_second_press_cancels(cfg):
+    import dataclasses
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, estop_fold_s=0.3), MockBase())
+    try:
+        assert r.teleop("right", True, "t")[0]
+        r.on_estop("t")                                   # 1st press: teleop killed, fold pending
+        assert not r.jobs.running("teleop_right")
+        assert r.estop_fold_state() == "pending"
+        assert any("killed teleop_right" in e["text"] and "fold home" in e["text"] for e in r.events)
+        for _ in range(50):
+            if r.jobs.running("arm_right"):
+                break
+            time.sleep(0.05)
+        assert r.jobs.running("arm_right") and r.estop_fold_state() == "running"   # the left arm is locked: right only
+        r.on_estop("t")                                   # 2nd press while folding: fold killed, arms stay still
+        assert not r.jobs.running("arm_right")
+        assert any("fold cancelled" in e["text"] for e in r.events)
+        time.sleep(0.5)
+        assert not r.jobs.running("arm_right") and r.estop_fold_state() is None
+        r.on_estop("t")                                   # a later, new emergency folds again
+        assert r.estop_fold_state() == "pending"
+        r._fold_cancel.set()
+    finally:
+        r.close()
+
+
+def test_estop_fold_can_be_switched_off(cfg):
+    import dataclasses
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, estop_fold_s=0.0), MockBase())
+    try:
+        r.on_estop("t")
+        assert r.estop_fold_state() is None
+    finally:
+        r.close()
