@@ -222,3 +222,13 @@ def test_wrong_pins_count_per_device_address_not_per_connection():
     assert not ok and "Too many wrong PINs" in msg   # even the right PIN waits out the lockout
     c.connect("other", "Phone", ip="10.42.0.51")     # another device is not punished
     assert c.take("other", "1234")[0]
+
+
+def test_a_typed_pin_is_accepted_even_0000_but_no_pin_is_not(monkeypatch):
+    from robot_server.config import Config
+    monkeypatch.delenv("KIRO_OPERATOR_PIN", raising=False)
+    assert Config.from_env().pin_is_default                    # nothing typed: the real robot refuses
+    monkeypatch.setenv("KIRO_OPERATOR_PIN", "0000")
+    c = Config.from_env()
+    assert c.pin == "0000" and not c.pin_is_default            # typed on purpose: accepted
+    assert not Config(pin="4321").pin_is_default

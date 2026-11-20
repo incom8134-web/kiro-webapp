@@ -14,7 +14,7 @@ cd ~/Desktop/kiro-webapp && python3 -m venv --system-site-packages .venv && .ven
 
 ## 2. The robot's own Wi-Fi
 
-The Wi-Fi card supports hotspot mode (`AP`), and the profile `kiro-ap` (network **GeminiBOT**) already exists. **Turning it on ends the internet connection**, so push to GitHub first.
+The Wi-Fi card supports hotspot mode (`AP`), and the profile `kiro-ap` (network **haebotwifi**) already exists. **Turning it on ends the internet connection**, so push to GitHub first.
 
 Turn the hotspot on:
 
@@ -34,7 +34,7 @@ To create the hotspot again with a new password: `bash deploy/setup_hotspot.sh` 
 
 ## 3. SSH
 
-Already on. From a laptop on GeminiBOT: `ssh YOUR-USER@10.42.0.1`.
+Already on. From a laptop on haebotwifi: `ssh YOUR-USER@10.42.0.1`.
 
 ## 4. Try it: pretend robot
 
@@ -42,7 +42,7 @@ Already on. From a laptop on GeminiBOT: `ssh YOUR-USER@10.42.0.1`.
 cd ~/Desktop/kiro-webapp && ./run.sh
 ```
 
-Open **http://localhost:8080** on the Jetson, or **http://10.42.0.1:8080** from a laptop or phone on GeminiBOT. PIN **0000**. Buttons start harmless stand-in programs. The camera is real. Stop with Ctrl+C.
+Open **http://localhost:8080** on the Jetson, or **http://10.42.0.1:8080** from a laptop or phone on haebotwifi. PIN **0000**. Buttons start harmless stand-in programs. The camera is real. Stop with Ctrl+C.
 
 ## 4b. Leader arm on a laptop (optional)
 
@@ -150,6 +150,6 @@ The base is not started at power-on. The operator presses **Start base** on the 
 
 | File | What it is |
 |---|---|
-| `setup_hotspot.sh` | Creates the GeminiBOT hotspot with NetworkManager |
+| `setup_hotspot.sh` | Creates the haebotwifi hotspot with NetworkManager |
 | `kiro-webapp.service` | Starts the server at power-on |
 | `kiro-shutdown.sudoers` | Lets the page shut down or restart the Jetson |

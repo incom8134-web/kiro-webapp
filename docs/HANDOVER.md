@@ -29,7 +29,7 @@ The newest robot code exists **only on the Jetson**. The cloud session read an 1
 
 | Topic | Decision |
 |---|---|
-| Network | Jetson creates its own hotspot ("GeminiBOT"). Page address `http://10.42.0.1:8080` |
+| Network | Jetson creates its own hotspot ("haebotwifi", renamed from GeminiBOT on 20 Nov 2026). Page address `http://10.42.0.1:8080` |
 | Tailscale | Not used. Optional later for remote work from home |
 | SSH | Only a tool for setup and fixing. Already enabled on the Jetson on 18 Nov |
 | Operator device | Browser only. No ROS or Python on the laptop |

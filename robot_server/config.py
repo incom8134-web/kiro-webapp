@@ -19,6 +19,7 @@ class Config:
     port: int = 8080
     backend: str = "auto"  # auto | mock | ros
     pin: str = MOCK_PIN
+    pin_given: bool = False  # the operator PIN was typed / set (any value, 0000 too), not the mock default
     engineer_pin: str = ""  # servo tester and check wizard. Empty = off (mock mode uses MOCK_ENGINEER_PIN)
 
     # Safety timing
@@ -76,6 +77,7 @@ class Config:
             port=int(os.environ.get("KIRO_PORT", d.port)),
             backend=os.environ.get("KIRO_BACKEND", d.backend).lower(),
             pin=os.environ.get("KIRO_OPERATOR_PIN", "") or MOCK_PIN,
+            pin_given=bool(os.environ.get("KIRO_OPERATOR_PIN", "")),
             engineer_pin=os.environ.get("KIRO_ENGINEER_PIN", ""),
             heartbeat_timeout=_f("KIRO_HEARTBEAT_TIMEOUT", d.heartbeat_timeout),
             operator_stale_s=_f("KIRO_OPERATOR_STALE_S", d.operator_stale_s),
@@ -122,4 +124,6 @@ class Config:
 
     @property
     def pin_is_default(self) -> bool:
-        return self.pin == MOCK_PIN
+        """No operator PIN was set. The real robot refuses to start then; a PIN typed on purpose
+        (even 0000, the user's choice on 20 Nov 2026) is accepted."""
+        return self.pin == MOCK_PIN and not self.pin_given

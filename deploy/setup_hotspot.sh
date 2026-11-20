@@ -4,7 +4,7 @@
 # If 5 GHz does not work:   BAND=bg CHANNEL=6 bash deploy/setup_hotspot.sh
 set -eo pipefail
 
-SSID="${SSID:-GeminiBOT}"
+SSID="${SSID:-haebotwifi}"
 BAND="${BAND:-a}"          # a = 5 GHz, bg = 2.4 GHz
 CHANNEL="${CHANNEL:-36}"
 IFACE="${IFACE:-$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="wifi"{print $1; exit}')}"
