@@ -25,14 +25,14 @@ def code(text):
 md(r"""
 # HAEBOT · Train an AI skill in Google Colab (ACT, LeRobot 0.6.1)
 
-You need the dataset package from the robot: **Studio > Training > Download** gives `<name>_<date>.tar.gz` and `<name>_<date>.sha256`.
+You need the dataset package from the robot: **Studio > Train a skill > 1 > Download package** gives `<name>_<date>.tar.gz` and `<name>_<date>.sha256`.
 
 1. **Put both files in Google Drive**: drive.google.com > My Drive > folder `SO101` > folder `데이터셋_업로드` (make the folders if they are missing; putting the files straight into My Drive also works).
 2. **GPU**: menu **Runtime > Change runtime type > T4 GPU > Save**.
 3. **Run**: menu **Runtime > Run all** (Ctrl+F9). If Colab warns that the notebook is not from Google, press **Run anyway**. When Google asks to connect Google Drive, allow it.
 4. **Wait**: 20,000 steps take about 3 to 4 hours on a free T4 (the first robot skill took 3.5 hours, with two disconnects). Keep this tab open. If Colab disconnects, press **Run all** again: training continues from the last checkpoint saved in Drive (one every 2,000 steps).
 5. **Model**: at the end the zip is in Drive: My Drive > `SO101` > `outputs` > `<name>_act_pretrained_model.zip`. Download it from drive.google.com (right click > Download).
-6. **Install**: connect to the robot's Wi-Fi again, open **Studio > Training > Upload a trained model**, and choose the zip. The skill then appears under **Autonomous skills** on the Arms tab.
+6. **Install**: connect to the robot's Wi-Fi again, open **Studio > Train a skill > 6 Upload the model to the robot**, and choose the zip. The skill then appears under **Autonomous skills** on the Arms tab.
 
 **Without Google Drive**: untick `USE_DRIVE` in cell 1, open the **Files** panel (folder icon on the left), upload the `.tar.gz` with its upload button, wait until it has fully arrived, then **Run all**. If Colab disconnects, everything is gone and you start again. The zip download starts by itself at the end.
 
@@ -40,14 +40,14 @@ You need the dataset package from the robot: **Studio > Training > Download** gi
 
 ## 한국어 안내
 
-로봇의 **스튜디오 > 학습 > 내려받기** 로 받은 `<이름>_<날짜>.tar.gz` 와 `.sha256` 파일이 필요합니다.
+로봇의 **스튜디오 > 스킬 학습 > 1 > 묶음 내려받기** 로 받은 `<이름>_<날짜>.tar.gz` 와 `.sha256` 파일이 필요합니다.
 
 1. **Google Drive 에 두 파일 올리기**: drive.google.com > 내 드라이브 > `SO101` 폴더 > `데이터셋_업로드` 폴더 (없으면 만드세요. 내 드라이브 바로 아래에 두어도 됩니다).
 2. **GPU**: 메뉴 **런타임 > 런타임 유형 변경 > T4 GPU > 저장**.
 3. **실행**: 메뉴 **런타임 > 모두 실행** (Ctrl+F9). Google 이 만든 노트북이 아니라는 경고가 나오면 **무시하고 실행**. Google Drive 연결을 물으면 허용하세요.
 4. **기다리기**: 무료 T4 에서 20,000 스텝은 약 3~4 시간 (첫 스킬은 3.5 시간, 연결 끊김 2번). 이 탭을 열어 두세요. 연결이 끊기면 **모두 실행** 을 다시 누르면 Drive 에 저장된 마지막 체크포인트 (2,000 스텝마다) 부터 이어서 학습합니다.
 5. **모델**: 끝나면 zip 이 Drive 의 내 드라이브 > `SO101` > `outputs` > `<이름>_act_pretrained_model.zip` 에 있습니다. drive.google.com 에서 내려받으세요 (오른쪽 클릭 > 다운로드).
-6. **설치**: 로봇 Wi-Fi 에 다시 연결하고 **스튜디오 > 학습 > 학습된 모델 올리기** 에서 zip 을 고르세요. 팔 탭의 **자율 동작** 에 스킬이 나타납니다.
+6. **설치**: 로봇 Wi-Fi 에 다시 연결하고 **스튜디오 > 스킬 학습 > 6 모델을 로봇에 올리기** 에서 zip 을 고르세요. 팔 탭의 **자율 동작** 에 스킬이 나타납니다.
 
 **Google Drive 없이**: 1번 셀의 `USE_DRIVE` 를 끄고, 왼쪽 **파일** 패널(폴더 아이콘)의 업로드 버튼으로 `.tar.gz` 를 올린 뒤 다 올라갈 때까지 기다렸다가 **모두 실행**. 연결이 끊기면 모두 사라지므로 처음부터 다시 해야 합니다. 끝나면 zip 내려받기가 자동으로 시작됩니다.
 """)
@@ -266,8 +266,8 @@ else:
         files.download(zip_path)
     except ImportError:
         pass
-print("Then: robot Wi-Fi > Studio > Training > Upload a trained model > choose this zip.")
-print("그다음: 로봇 Wi-Fi > 스튜디오 > 학습 > 학습된 모델 올리기 > 이 zip 선택.")
+print("Then: robot Wi-Fi > Studio > Train a skill > 6 Upload the model to the robot > choose this zip.")
+print("그다음: 로봇 Wi-Fi > 스튜디오 > 스킬 학습 > 6 모델을 로봇에 올리기 > 이 zip 선택.")
 """)
 
 md(r"""
