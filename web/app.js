@@ -79,6 +79,7 @@ function connect() {
   };
   ws.onclose = () => {
     state.open = false; state.server = null; state.rtt = null;
+    if (leader.on) leader.paused = true;   // Wi-Fi lost: keep the leader arm open; the robot's bridge holds the arm (test R5)
     dropInputs(); render();
     setTimeout(connect, 1000);
   };
@@ -516,10 +517,14 @@ function renderRobot() {
   // Leader arm on this laptop, and the wave
   const br = r.bridge || {};
   if (leader.on && br.running && br.mode === "leader") leader.sawRunning = true;
-  if (leader.on && (estop || !me || (leader.sawRunning && !br.running))) leaderStop(estop ? t("hint.estop") : "");
+  if (leader.on && estop) leaderStop(t("hint.estop"));
+  else if (leader.on && leader.paused && me) {        // control taken back after a lost link: carry on from the arm's pose
+    leader.paused = false; leader.sawRunning = false;
+    send({ t: "leader", on: true, side: leader.side });
+  } else if (leader.on && !leader.paused && (!me || (leader.sawRunning && !br.running))) leaderStop("");
   setBtn($("leader-btn"), t(leader.on ? "leader.stop" : "leader.use"), leader.on ? "ri-stop-fill" : "ri-usb-line");
   $("leader-btn").classList.toggle("on", leader.on);
-  $("leader-st").textContent = leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
+  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
@@ -751,7 +756,7 @@ $("say-box").addEventListener("submit", (e) => {
 /* Plug the leader arm into this laptop's USB and press the button. The browser finds the
  * servo board, reads the six joints 30 times per second and sends them to the robot, which
  * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
-const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false };
+const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
 
 async function leaderStart() {
   if (!LeaderArm.supported()) {
@@ -794,7 +799,7 @@ async function leaderLoop() {
 
 async function leaderStop(reason) {
   const was = leader.on;
-  leader.on = false;
+  leader.on = false; leader.paused = false;
   if (was) send({ t: "leader", on: false, side: leader.side });
   const a = leader.arm;
   leader.arm = null;
