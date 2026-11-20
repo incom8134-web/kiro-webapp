@@ -30,6 +30,15 @@
 <div id="banner" class="banner" hidden></div>
 
 <main class="swrap">
+  <!-- A Colab session's "Connect to the robot" link opens this page with its address: send the dataset there? -->
+  <section id="offer" class="card offer" hidden>
+    <div class="row head"><h3><i class="ri-links-line"></i><span data-i18n="col.offer">A Colab session asks for the dataset</span></h3></div>
+    <p id="offer-t" class="small"></p>
+    <div class="stepfoot"><button id="offer-send" class="btn primary" type="button"><i class="ri-send-plane-line"></i><span data-i18n="col.offer.send">Send</span></button>
+      <button id="offer-no" class="btn" type="button"><span data-i18n="col.offer.no">Ignore</span></button></div>
+    <p id="offer-msg" class="small" hidden></p>
+  </section>
+
   <!-- LOCKED: nothing of the Studio is sent to this page until the engineer PIN unlocks it -->
   <section id="lock" class="lockcard" hidden>
     <span class="lockicon" aria-hidden="true"><i class="ri-lock-2-line"></i></span>
@@ -184,10 +193,27 @@
     <div class="sect"><h2 data-i18n="tr.title">Train a skill</h2>
       <p class="small mute" data-i18n="tr.sub">The robot cannot train. Google Colab trains on a free Google graphics card, then the model comes back here.</p></div>
     <section class="card" id="train">
+      <div class="cauto">
+        <p class="small mute" data-i18n="col.what">The robot sends the dataset to Google Colab, which trains it on a free GPU, and brings the trained model back by itself. The robot needs internet (its LAN cable).</p>
+        <label class="field needs-robot"><span data-i18n="tr.ds">Dataset</span><select id="t-ds"></select></label>
+        <div class="stepfoot needs-robot"><button id="c-go" class="btn primary" type="button"><i class="ri-rocket-2-line"></i><span data-i18n="col.go">Train in Colab</span></button>
+          <span class="small mute" data-i18n="col.time">About 3 to 4 hours. Keep the Colab tab open.</span></div>
+        <div id="c-run" class="crun needs-robot" hidden>
+          <div class="recstate"><span class="phase" id="c-phase"></span><span class="small mute mono" id="c-host"></span></div>
+          <p id="c-say" class="rechint"></p>
+          <div class="pbar" id="c-bar"><i></i></div>
+          <p id="c-detail" class="small mute" hidden></p>
+          <div class="stepfoot"><button id="c-stop" class="btn" type="button"><span></span></button>
+            <a id="c-colab" class="btn" target="_blank" rel="noopener noreferrer"><i class="ri-external-link-line"></i><span data-i18n="col.again">Open Colab again</span></a>
+            <a id="c-play" class="btn" href="./" hidden><i class="ri-play-line"></i><span data-i18n="tr.s7.go">Open the control page</span></a></div>
+        </div>
+        <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
+      </div>
+      <details class="adv tmanual" id="t-manual">
+      <summary data-i18n="col.manual">Manual way (when the robot has no internet)</summary>
       <ol class="tsteps">
         <li><b class="num">1</b><div class="tbody">
           <h3 data-i18n="tr.s1">Package the dataset and download it</h3>
-          <label class="field needs-robot"><span data-i18n="tr.ds">Dataset</span><select id="t-ds"></select></label>
           <div id="t-pkg" class="tpkg needs-robot"></div>
           <p class="small needs-robot" id="t-nb-row"><span data-i18n="tr.nbwhy">Take the notebook file too, in case the Colab link does not open:</span>
             <a id="t-nb" class="linkbtn" download data-i18n="tr.nb">Notebook file</a></p>
@@ -228,6 +254,7 @@
           <p><span data-i18n="tr.s7.t">The skill is now under Autonomous skills on the control page's Arms tab. Clear the table, keep a hand near E-STOP, and press Play.</span> <a href="./" class="linkbtn" data-i18n="tr.s7.go">Open the control page</a></p>
         </div></li>
       </ol>
+      </details>
     </section>
   </div>
 

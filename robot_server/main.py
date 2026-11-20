@@ -79,7 +79,9 @@ class NoStalePages:
         async def send_no_cache(msg):
             if msg["type"] == "http.response.start":
                 headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache")]}
+                # no other site may show these pages inside its own (a hidden frame could trick a click on Send)
+                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache"), (b"x-frame-options", b"DENY"),
+                                                    (b"content-security-policy", b"frame-ancestors 'none'")]}
             await send(msg)
         await self.app(scope, receive, send_no_cache)
 
@@ -238,6 +240,16 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
             elif cmd == "delete":   # a dataset, package or model, for good (the page asks first)
                 call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
+            elif cmd == "colab":    # train in Colab, the automatic way (robot_server/colab.py)
+                act_ = str(msg.get("action"))
+                if act_ == "start":
+                    call = lambda: r.colab.start(str(msg.get("repo", "")), name)  # noqa: E731
+                elif act_ == "connect":
+                    call = lambda: r.colab.connect(str(msg.get("url", "")), str(msg.get("key", "")), name)  # noqa: E731
+                elif act_ == "stop":
+                    call = lambda: r.colab.stop(name)  # noqa: E731
+                else:
+                    return
             elif cmd == "hello":
                 call = lambda: (True, "")  # noqa: E731
             else:

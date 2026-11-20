@@ -77,10 +77,35 @@ The camera names do not tell. The **size of the action** does:
 
 ## 2. The loop in the Studio
 
-Everything is on the Studio page (engineer PIN), section **Train a skill**.
+Everything is on the Studio page (engineer PIN), section **Train a skill**. There are two ways.
+
+### The automatic way: "Train in Colab" (the robot has internet)
+
+Plug a LAN cable from the router into the Jetson. Its hotspot is set up in "shared" mode, so the robot and every laptop on its Wi-Fi then have internet. Only Colab signs in to Google; the robot signs in to nothing.
+
+| # | You | What happens |
+|---|---|---|
+| 1 | Studio: pick the dataset, press **Train in Colab** | The robot packages it (or reuses a fresh package); Colab opens in a new tab |
+| 2 | Colab: sign in, **Runtime > Run all** (first time: "Run anyway", allow Drive with every box ticked) | Cell 1 opens a temporary address for this Colab session and shows **Connect to the robot** |
+| 3 | Click **Connect to the robot**, then **Send** on the robot page that opens | The robot sends the dataset into Colab; training starts by itself |
+| 4 | Wait 3-4 hours with the Colab tab open | The Studio shows the step count |
+| 5 | Close the Colab tab, log out of Google | The robot fetched the model, checked it and installed it as `<package>_act`: it is in Autonomous skills |
+
+How the two talk (`robot_server/colab.py`, notebook cell 1):
+
+- The notebook runs a small file server on its own computer and opens a **Cloudflare quick tunnel** to it (free, no account). `cloudflared` is a pinned release, checked against its SHA-256 before it runs. The session gets a random one-time key.
+- The link carries the address and the key to the Studio page, which asks before sending (the **Send** card). If that tab is not the unlocked Studio, it hands them to the Studio tab that is.
+- The robot only makes outgoing HTTPS calls, only to `https://<name>.trycloudflare.com` (in mock mode also `http://127.0.0.1:<port>` for tests), never follows a redirect, and sends the key in a header. The dataset goes in pieces of 32 MB (Cloudflare takes at most 100 MB per request) with its SHA-256 at the end. The model comes back with its size and SHA-256 and goes through every check of a manual upload.
+- If Colab disconnects, the Studio shows "No answer". Run all again in Colab, then Connect and Send again: the notebook continues from its checkpoint in Drive.
+- The robot keeps the run (including the key) in `~/.cache/kiro-webapp/colab_run.json` (readable only by the user), so a server restart during the hours of training goes on.
+- Cloudflare offers quick tunnels without guarantees. If they stop working, the manual way below still works.
+
+### The manual way (the robot has no internet)
+
+Folded under "Manual way" on the page:
 
 ```
-record (steps 1-4) -> package -> download -> Google Drive -> Colab (T4, Run all, 3-4 h)
+package -> download -> Google Drive -> Colab (SOURCE = drive, T4, Run all, 3-4 h)
    -> download the model zip -> upload in Studio -> Autonomous skills -> Play
 ```
 
@@ -89,7 +114,7 @@ record (steps 1-4) -> package -> download -> Google Drive -> Colab (T4, Run all,
 | 1 Package and download | Studio | The old `pack_dataset.sh` checks the dataset reads back and makes `<name>_<date>.tar.gz` + `.sha256`. Two download buttons |
 | 2 Go online, Google Drive | laptop | The robot's Wi-Fi has no internet. Switch Wi-Fi, put both files in My Drive > `SO101` > `데이터셋_업로드` |
 | 3 Open Colab | Studio button | Opens `colab/so101_train_colab.ipynb` from the public GitHub repo in Colab. "Notebook file" downloads the same notebook from the robot, for File > Upload notebook |
-| 4 Run | Colab | Runtime > Change runtime type > T4 GPU, then Runtime > Run all. After a disconnect: Run all again |
+| 4 Run | Colab | Set `SOURCE` to `drive` in cell 1. Runtime > Change runtime type > T4 GPU, then Runtime > Run all. After a disconnect: Run all again |
 | 5 Download the model | Google Drive | My Drive > `SO101` > `outputs` > `<name>_act_pretrained_model.zip` |
 | 6 Upload | Studio | Back on the robot's Wi-Fi. The robot checks the zip and installs it as `~/policies/<name>/pretrained_model` |
 | 7 Play | Control page, Arms tab | The skill is in Autonomous skills |
@@ -130,9 +155,10 @@ They are listed, but Play stays off with the message "Trained on both arms: it c
 | File | What |
 |---|---|
 | `robot_server/training.py` | models, packages, upload checks and install, zip download, delete |
-| `robot_server/main.py` | `GET /api/studio/packages/<file>`, `GET /api/studio/models/<name>.zip`, `GET /api/studio/notebook.ipynb`, `POST /api/studio/models`, WebSocket `studio` / `delete`. All need the engineer token |
+| `robot_server/colab.py` | Train in Colab: package, wait for the Colab session, send, follow, fetch, install |
+| `robot_server/main.py` | `GET /api/studio/packages/<file>`, `GET /api/studio/models/<name>.zip`, `GET /api/studio/notebook.ipynb`, `POST /api/studio/models`, WebSocket `studio` / `delete` and `colab` (start, connect, stop). All need the engineer token |
 | `colab/make_notebook.py` | writes `colab/so101_train_colab.ipynb` (run it after a change; a test checks they match) |
-| `tests/test_training.py`, `tests/test_notebook.py` | the checks above; the notebook cells run here without Colab and their zip installs |
+| `tests/test_training.py`, `tests/test_colab.py`, `tests/test_notebook.py` | the checks above; the notebook cells run here without Colab, with the robot end to end (no tunnel, a stand-in for the GPU training) |
 
 Settings: `KIRO_POLICIES_DIR` (mock mode uses `~/.cache/kiro-webapp/mock_policies`, so mock tests never touch real skills), `KIRO_PACKAGES_DIR` (default `~/Desktop/데이터셋_업로드`), `KIRO_COLAB_URL`.
 
@@ -140,8 +166,9 @@ Settings: `KIRO_POLICIES_DIR` (mock mode uses `~/.cache/kiro-webapp/mock_policie
 
 | Test | Why |
 |---|---|
+| **Train in Colab with the LAN cable in**: Train in Colab, Run all, Connect, Send, 3-4 h, skill installed | Tested on this computer with the real notebook cells, but never through Cloudflare and real Colab |
 | Package a real dataset from the Studio and download it to a laptop over the hotspot | Only the pretend recorder was used |
 | One full Colab run with the new notebook (3-4 h) | Cells 1, 2, 4 and 5 ran here without a GPU; installing LeRobot and training ran only in the old notebook |
 | Upload the real 191 MB zip over the hotspot | Tested with small zips in the browser and in tests |
 | Play the uploaded skill on the robot | Never done from an uploaded model. Clear the table, hand near E-STOP |
-| The Colab link | Works only after the branch is merged into `main` |
+| The Colab link | Points at `main`: works once this branch is merged and pushed |
