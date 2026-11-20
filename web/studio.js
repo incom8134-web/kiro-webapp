@@ -750,12 +750,12 @@ function uploaded(r, status) {
   tr.xhr = null; tr.checking = false;
   if (r.ok && r.model) {
     const m = r.model;
-    tr.msg = { ok: true, text: t("up.ok", { name: m.name }) + (m.playable ? "" : " " + t("fm.noplay." + m.arms)) };
+    tr.msg = { ok: true, key: "up.ok", args: { name: m.name }, extra: m.playable ? "" : "fm.noplay." + m.arms };
     tr.file = null; tr.name = ""; tr.nameTouched = false; $("t-file").value = ""; $("t-name").value = "";
     toast(t("up.okshort", { name: m.name }));
   } else {
     const code = status === 403 ? "LOCKED" : UP_CODES.includes(r.code) ? r.code : "OTHER";
-    tr.msg = { ok: false, text: t("up.e." + code, { detail: r.detail || r.code || status }) };
+    tr.msg = { ok: false, key: "up.e." + code, args: { detail: r.detail || r.code || status } };
   }
   renderUpload();
 }
@@ -776,7 +776,8 @@ function renderUpload() {
   $("t-up-pct").textContent = sending ? (tr.checking ? t("up.checking")
     : t("up.sending", { p: Math.round(tr.pct * 100), a: fmtMB(tr.pct * f.size / 1e6), b: fmtMB(f.size / 1e6) })) : f ? fmtMB(f.size / 1e6) : "";
   const msg = $("t-up-msg");
-  const text = sending ? "" : problem || (other ? t("up.e.BUSY", { detail: other.by }) : tr.msg ? tr.msg.text : "");
+  const done = tr.msg ? t(tr.msg.key, tr.msg.args) + (tr.msg.extra ? " " + t(tr.msg.extra) : "") : "";   // translated now: the language may change
+  const text = sending ? "" : problem || (other ? t("up.e.BUSY", { detail: other.by }) : done);
   msg.hidden = !text;
   msg.textContent = text;
   msg.className = "small " + (!problem && tr.msg && tr.msg.ok ? "accent" : "note err");
