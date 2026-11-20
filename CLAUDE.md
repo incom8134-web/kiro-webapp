@@ -41,6 +41,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
 | `robot_server/camera.py` | MJPEG preview, device lookup through the old `cams_config.py` |
+| `robot_server/leader_relay.py`, `leadermath.py` | One leader arm plugged into the Jetson moves BOTH follower arms the same way (copy): the relay reads the leader 30 times a second and feeds the old `twin_bridge.py` (its joint limits, speed limit and hold). Needs the left arm unlocked (`KIRO_LEFT_ARM_OK=1`) |
 | `robot_server/servo_probe.py` | Read-only servo voltage / temperature / current, run as a short subprocess |
 | `robot_server/servo_tool.py` | Servo tester commands, reusing the old `so101_servo_tester.Bus` |
 | `robot_server/wizard_runner.py` | Runs one step of the old `hw_test_wizard.py` without a screen |

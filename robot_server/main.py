@@ -27,7 +27,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
 OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
-                    "leader", "wave"}
+                    "leader", "wave", "follow"}
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide"}  # also need the engineer PIN
 
 
@@ -188,6 +188,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             call = lambda: r.leader(on, str(msg.get("side", "right")), name)  # noqa: E731
         elif t == "wave":
             call = lambda: r.wave(str(msg.get("side", "right")), name)  # noqa: E731
+        elif t == "follow":
+            call = lambda: r.follow(on, name)  # noqa: E731
         elif t == "teleop":
             call = lambda: r.teleop(str(msg.get("side")), on, name)  # noqa: E731
         elif t == "arm":

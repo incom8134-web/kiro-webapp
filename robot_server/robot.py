@@ -34,6 +34,7 @@ from pathlib import Path
 
 from .camera import Camera, find_cameras
 from .config import Config
+from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 
 log = logging.getLogger("kiro.robot")
@@ -62,8 +63,7 @@ WIZARD_USES = {
     "camera_uvc": {"cam:top"}, "gamepad": {"/dev/input/js0"}, "wheels": {"/dev/so101_base"}, "mecanum_floor": {"/dev/so101_base"},
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
-ARM_JOBS = ("skill", "bridge", "arm_right", "arm_left")  # programs that move a follower arm by themselves
-JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]  # servo IDs 1..6
+ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left")  # programs that move a follower arm by themselves (relay feeds the bridge)
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
@@ -78,21 +78,6 @@ def cpu_percent(prev: dict[str, list[int]], cur: dict[str, list[int]]) -> dict[s
         total = sum(c) - sum(p)
         idle = (c[3] + c[4]) - (p[3] + p[4])
         out[k] = round(100.0 * (total - idle) / total, 1) if total > 0 else 0.0
-    return out
-
-
-def leader_to_target(cal: dict, raw: list) -> dict:
-    """Leader servo positions (raw ticks, IDs 1..6) -> twin_bridge target, the same maths as LeRobot
-    (motors_bus._normalize): joints in degrees, 0 = middle of the calibrated range; gripper 0..100 %."""
-    out = {}
-    for i, j in enumerate(JOINTS):
-        c, v = cal[j], float(raw[i])
-        lo, hi = c["range_min"], c["range_max"]
-        if j == "gripper":
-            n = (min(hi, max(lo, v)) - lo) / (hi - lo) * 100.0
-            out[j] = round(100.0 - n if c.get("drive_mode") else n, 2)
-        else:
-            out[j] = round((v - (lo + hi) / 2.0) * 360.0 / 4095.0, 2)
     return out
 
 
@@ -488,7 +473,7 @@ class Robot:
 
     # ------------------------------------------- leader arm on the laptop, wave
     def _bridge_start(self, side: str, mode: str, who: str) -> tuple[bool, str]:
-        if side not in ("right", "left"):
+        if side not in ("right", "left", "both"):
             return False, "Unknown arm."
         if self.jobs.running("bridge"):
             if self.bridge_side == side and self.bridge_mode == mode:
@@ -497,17 +482,18 @@ class Robot:
         why = self._arm_ok(side)
         if why:
             return False, why
-        missing = self._missing([f"{side}_follower"])
+        missing = self._missing([f"{s}_follower" for s in _sides(side)])
         if missing:
             return False, "Not connected: " + ", ".join(missing)
         if self.mock:
             cmd = self._mock_cmd(f"twin_bridge {side} ({mode})")
         else:
-            cmd = [str(self.venv / "bin" / "python"), str(self.so101 / "twin_bridge.py"), "--arms", side,
+            cmd = [str(self.venv / "bin" / "python"), str(self.so101 / "twin_bridge.py"), "--arms", ",".join(_sides(side)),
                    "--to", "127.0.0.1:5005", "--listen", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}", "--allow-from", "127.0.0.1",
                    "--ramp", "90", "--deadman", "0.5", "--status-json", "--quiet"]
-        ok, msg = self._start("bridge", JobSpec(cmd, frozenset({PORT[f"{side}_follower"]}), cwd=str(self.so101) if not self.mock else None,
-                                                env=self._venv_env(), label=f"{mode} {side} arm", stop_wait=8.0), who)
+        uses = frozenset(PORT[f"{s}_follower"] for s in _sides(side))
+        ok, msg = self._start("bridge", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None, env=self._venv_env(),
+                                                label=f"{mode} both arms" if side == "both" else f"{mode} {side} arm", stop_wait=8.0), who)
         if ok:
             self.bridge_side, self.bridge_mode = side, mode
             self.leader_rx, self.leader_last = 0, 0.0
@@ -550,6 +536,42 @@ class Robot:
         if bad:
             return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
         return self._bridge_start(side, "leader", who)
+
+    def follow(self, on: bool, who: str) -> tuple[bool, str]:
+        """The leader arm plugged into the Jetson moves BOTH follower arms the same way (copy). The relay
+        reads the leader; the twin bridge moves the arms with its safety limits and holds them on stop."""
+        if not on:
+            ok, msg = self._stop_job("relay", who) if self.jobs.running("relay") else (True, "")
+            if self.bridge_mode == "follow" and self.jobs.running("bridge"):
+                return self._stop_job("bridge", who)
+            return ok, msg
+        leader = next((s for s in ("right", "left") if os.path.exists(PORT[f"{s}_leader"])), None)
+        if leader is None and not self.mock:
+            return False, "No leader arm is plugged into the Jetson."
+        leader = leader or "right"
+        f = HF_CALIB / "teleoperators" / "so_leader" / f"{leader}_leader.json"
+        if not self.mock:
+            try:
+                cal = json.loads(f.read_text())
+                bad = [j for j in JOINTS if cal[j]["range_max"] - cal[j]["range_min"] < 100]
+            except (OSError, ValueError, KeyError, TypeError):
+                return False, f"Leader calibration not found or unreadable: {f}"
+            if bad:
+                return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
+        ok, msg = self._bridge_start("both", "follow", who)
+        if not ok:
+            return ok, msg
+        lport = PORT[f"{leader}_leader"]
+        if self.mock:
+            cmd = self._mock_cmd(f"leader_relay {leader} -> both arms")
+        else:
+            cmd = [sys.executable, str(HERE / "leader_relay.py"), "--port", lport, "--calib", str(f), "--arms", "right,left",
+                   "--to", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}"]
+        ok, msg = self._start("relay", JobSpec(cmd, frozenset({lport}), label=f"{leader} leader -> both arms", stop_wait=3.0), who)
+        if not ok:
+            self._stop_job("bridge", who)
+            return ok, msg
+        return True, "Both arms follow the leader arm."
 
     def leader_pos(self, side: str, raw: object) -> None:
         """Called about 30 times per second while the leader arm streams. Never blocks."""

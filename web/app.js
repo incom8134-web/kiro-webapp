@@ -260,6 +260,8 @@ $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning(
 $("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
 $("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: LANG }));
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
+$("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
+const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
 
 // Tabs in the dock: Drive, Arms, Voice, System. The last one used is remembered.
@@ -464,7 +466,14 @@ function renderRobot() {
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
-  $("wave-btn").disabled = !me || leader.on || waving || estop;
+  const follows = following();
+  $("wave-btn").disabled = !me || leader.on || waving || follows || estop;
+  // One leader arm on the Jetson moves both arms (copy)
+  setBtn($("follow-btn"), t(follows ? "follow.stop" : "follow.start"), follows ? "ri-stop-fill" : "ri-git-fork-line");
+  $("follow-btn").classList.toggle("on", follows);
+  $("follow-btn").disabled = !me || leader.on || (estop && !follows) || (!follows && !r.left_arm_ok);
+  $("follow-st").textContent = follows ? t("follow.live") : !r.left_arm_ok ? t("follow.locked") : t("follow.hint");
+  $("follow-st").className = "small " + (follows ? "accent" : !r.left_arm_ok ? "note err" : "mute");
   $("wave-btn").classList.toggle("on", waving);
 
   // Voice
@@ -516,7 +525,7 @@ function renderRobot() {
 
   renderCams();
   renderEngineer();
-  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn"].includes(el.id)) el.disabled = !me;
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "follow-btn"].includes(el.id)) el.disabled = !me;
 
   tabDot("drive", baseOn, !$("base-err").hidden);
   tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);

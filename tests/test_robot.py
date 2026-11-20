@@ -310,3 +310,38 @@ def test_system_check_sees_gamepad_and_usb_mic(cfg, tmp_path):
         assert isinstance(snap["gamepad"], bool) and isinstance(snap["mic"], bool)
     finally:
         r.close()
+
+
+def test_one_leader_moves_both_arms_only_when_the_left_arm_is_allowed(cfg):
+    import dataclasses
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["msg"] == "LEFT_BLOCKED"        # broken left calibration: no both-arm copy
+    ok = dataclasses.replace(cfg, left_arm_ok=True)
+    with TestClient(create_app(ok, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["ok"]
+        r = robot_until(op, lambda m: m["bridge"]["running"] and "relay" in m["jobs"] and m["jobs"]["relay"]["running"])
+        assert r["bridge"]["mode"] == "follow" and r["bridge"]["side"] == "both"
+        op.send_json({"t": "wave", "side": "right"})
+        assert "busy" in note(op, "wave")["msg"]                  # one program per arm
+        op.send_json({"t": "estop", "on": True})                   # E-STOP kills the relay and the bridge
+        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
+        op.send_json({"t": "estop", "on": False})
+        op.send_json({"t": "drive", "en": False})
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["ok"]
+        robot_until(op, lambda m: m["bridge"]["running"] and m["jobs"]["relay"]["running"])
+        op.send_json({"t": "follow", "on": False})
+        assert note(op, "follow")["ok"]
+        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
+
+
+def test_leader_relay_sends_one_target_for_both_arms():
+    from robot_server.leadermath import leader_to_target
+    cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in
+           ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]}
+    tgt = leader_to_target(cal, [2000, 2000, 2000, 2000, 3000, 1500])
+    assert tgt["shoulder_pan"] == 0.0 and tgt["wrist_roll"] == round(1000 * 360 / 4095, 2) and tgt["gripper"] == 25.0
