@@ -379,3 +379,12 @@ def test_servo_sync_sets_targets_to_positions_and_refuses_bad_readings():
     assert all(i == 1 for i, _, _ in writes)                          # motor 2 was not written
     noisy = iter([100, 100, 300, 100, 100])
     assert sync_motors(lambda i, a: next(noisy) if a == ADDR_POS else 0, lambda *a: None, ids=[4]) == {4: "readings disagree"}
+
+
+def test_follow_offsets_shift_one_arm_without_a_jump_at_the_seam():
+    from robot_server.leadermath import apply_offsets
+    tgt = {"wrist_flex": -30.0, "elbow_flex": 96.0, "gripper": 5.0}
+    out = apply_offsets(tgt, {"wrist_flex": 123, "gripper": 50})
+    assert out == {"wrist_flex": 93.0, "elbow_flex": 96.0, "gripper": 5.0}      # gripper never shifted
+    assert apply_offsets({"wrist_flex": 179.0}, {"wrist_flex": 123})["wrist_flex"] == -58.0   # 302 -> -58, continuous
+    assert apply_offsets(tgt, {}) == tgt

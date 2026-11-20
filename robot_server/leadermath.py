@@ -18,3 +18,14 @@ def leader_to_target(cal: dict, raw: list) -> dict:
         else:
             out[j] = round((v - (lo + hi) / 2.0) * 360.0 / 4095.0, 2)
     return out
+
+
+def apply_offsets(target: dict, offsets: dict) -> dict:
+    """Shift some joints of one follower arm, in degrees, kept in -180..180 (no jump at the seam).
+    Arms calibrated in different ways read the same pose with different numbers; the offset maps
+    the leader's number to this arm's number for the same pose. The gripper is never shifted."""
+    out = dict(target)
+    for j, d in offsets.items():
+        if j in out and j != "gripper":
+            out[j] = round((out[j] + float(d) + 180.0) % 360.0 - 180.0, 2)
+    return out

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from robot_server.leadermath import leader_to_target  # noqa: E402
+from robot_server.leadermath import apply_offsets, leader_to_target  # noqa: E402
 
 ADDR_POS = 56  # Present_Position, 2 bytes (Feetech STS3215)
 IDS = range(1, 7)
@@ -30,7 +30,10 @@ def main() -> int:
     ap.add_argument("--arms", default="right,left", help="follower arms that copy the leader")
     ap.add_argument("--to", default="127.0.0.1:5558")
     ap.add_argument("--hz", type=float, default=30.0)
+    ap.add_argument("--offsets", default=str(Path.home() / ".config/kiro-webapp/follow_offsets.json"),
+                    help='per arm and joint, degrees added to the leader: {"left": {"wrist_flex": 123}}')
     a = ap.parse_args()
+    offsets = json.loads(Path(a.offsets).read_text()) if Path(a.offsets).exists() else {}
     cal = json.loads(Path(a.calib).read_text())
     arms = [s for s in a.arms.split(",") if s in ("right", "left")]
     host, _, port = a.to.rpartition(":")
@@ -66,7 +69,7 @@ def main() -> int:
     read, bad_sync = read_sync, 0
     seq = sent = missed = 0
     t_log = time.monotonic()
-    print(f"leader {a.port} -> {'+'.join(arms)} arm(s) via {a.to}", flush=True)
+    print(f"leader {a.port} -> {'+'.join(arms)} arm(s) via {a.to}" + (f", offsets {offsets}" if offsets else ""), flush=True)
     while not stop:
         t0 = time.monotonic()
         raw = read()
@@ -78,7 +81,8 @@ def main() -> int:
         if raw is not None and all(0 <= v <= 4095 for v in raw):
             seq += 1
             tgt = leader_to_target(cal, raw)
-            pkt = {"cmd": "target", "t": time.time(), "seq": seq, "units": "deg", "arms": {s: tgt for s in arms}}
+            pkt = {"cmd": "target", "t": time.time(), "seq": seq, "units": "deg",
+                   "arms": {s: apply_offsets(tgt, offsets.get(s, {})) for s in arms}}
             udp.sendto(json.dumps(pkt).encode(), dest)
             sent += 1
         else:
