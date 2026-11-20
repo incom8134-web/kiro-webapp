@@ -573,6 +573,13 @@ class Robot:
             return ok, msg
         return True, "Both arms follow the leader arm."
 
+    def _follow_watch(self) -> None:
+        """The relay only feeds the bridge: when the bridge ends (a motor stopped answering, E-STOP...)
+        the relay is stopped too, so the page shows the copy as off and the bridge's error stays visible."""
+        if self.jobs.running("relay") and not self.jobs.running("bridge"):
+            self.jobs.stop("relay")
+            self.event("server", "both-arm copy stopped: the arm program ended (see the Arms tab)")
+
     def leader_pos(self, side: str, raw: object) -> None:
         """Called about 30 times per second while the leader arm streams. Never blocks."""
         if self.bridge_mode != "leader" or self.bridge_side != side or not self.jobs.running("bridge"):
@@ -787,6 +794,7 @@ class Robot:
         while not self._stop.is_set():
             try:
                 h = {"jetson": self._jetson(), "t": time.time()}
+                self._follow_watch()
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})
                 self.health = h
                 if n % 2 == 0:  # a camera plugged in shows up within a few seconds

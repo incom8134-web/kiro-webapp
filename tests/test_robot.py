@@ -345,3 +345,18 @@ def test_leader_relay_sends_one_target_for_both_arms():
            ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]}
     tgt = leader_to_target(cal, [2000, 2000, 2000, 2000, 3000, 1500])
     assert tgt["shoulder_pan"] == 0.0 and tgt["wrist_roll"] == round(1000 * 360 / 4095, 2) and tgt["gripper"] == 25.0
+
+
+def test_relay_stops_when_the_arm_program_ends(cfg):
+    import dataclasses
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
+    try:
+        assert r.follow(True, "t")[0]
+        assert r.jobs.running("relay") and r.jobs.running("bridge")
+        r.jobs.kill(["bridge"])                      # the bridge dies (a motor stopped answering)
+        r._follow_watch()
+        assert not r.jobs.running("relay")
+        assert any("copy stopped" in e["text"] for e in r.events)
+    finally:
+        r.close()
