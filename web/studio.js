@@ -848,7 +848,7 @@ function renderColab() {
   const frac = c.state === "sending" || c.state === "fetching" ? (c.total ? c.sent / c.total : 0)
     : c.state === "training" && c.steps ? (c.step || 0) / c.steps : c.state === "installed" ? 1 : null;
   $("c-bar").hidden = frac == null;
-  $("c-bar").classList.toggle("live", c.state === "training" || c.state === "installed");
+  $("c-bar").classList.toggle("ok", c.state === "training" || c.state === "installed");
   $("c-bar").querySelector("i").style.width = `${Math.round(Math.min(1, frac || 0) * 100)}%`;
   const detail = c.state === "lost" && c.detail ? c.detail : "";
   $("c-detail").hidden = !detail;
