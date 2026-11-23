@@ -460,8 +460,13 @@ def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
         assert env["TOUCH_DIST"] == "0" and env["COVERED_RATIO"] == "0"     # the two strict rules are off
         assert float(env["STOP_DIST"]) > 0                                   # the distance stop is not
         env_text = "OBSTACLE_STOP=1\nLIDAR_MASK=-35:0.06,-30:0.06\n"
-        env = r.guard_env("close")                                           # robot's own parts measured: test E4 rules on
+        env = r.guard_env("close")                                           # a mask alone does not switch them on
+        assert env["TOUCH_DIST"] == "0" and env["COVERED_RATIO"] == "0"
+        env_text = "OBSTACLE_STOP=1\nLIDAR_MASK=-35:0.06,-30:0.06\nSTRICT_RULES=1\n"
+        env = r.guard_env("close")                                           # switched on by hand: test E4 rules on
         assert env["TOUCH_DIST"] == "0.10" and env["COVERED_RATIO"] == "0.4" and env["STOP_DIST"] == "0.12"
+        env_text = "OBSTACLE_STOP=1\nSTRICT_RULES=1\n"                     # never without the mask
+        assert r.guard_env("close")["TOUCH_DIST"] == "0"
     finally:
         r.close()
 

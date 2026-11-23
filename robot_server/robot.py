@@ -463,11 +463,13 @@ class Robot:
                                            env=self.guard_env(prof), label=f"base ({prof})", stop_wait=8.0), who)
 
     def guard_env(self, prof: str) -> dict[str, str]:
-        """Settings for the old lidar guard. With the robot's own parts measured (LIDAR_MASK, Studio lidar setup)
-        the guard ignores them, so its 'covered' and 'contact' stops can be on again: a hand over the lidar then
-        stops everything within 2 scans (test E4). Without a mask they stay off (the parts set them off)."""
+        """Settings for the old lidar guard. Its 'covered' and 'contact' stops stay off (user's choice, 21 Nov 2026:
+        they made the robot refuse to move). With the robot's own parts measured (LIDAR_MASK, Studio lidar setup)
+        they can be switched on by hand with STRICT_RULES=1 in lidar.env, after a real test (test E4: a hand
+        over the lidar stops everything within 2 scans)."""
         env = dict(GUARD_PROFILES[prof if prof in GUARD_PROFILES else "close"])
-        if parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK")):
+        text = self._lidar_env_text()
+        if env_get(text, "STRICT_RULES") == "1" and parse_mask(env_get(text, "LIDAR_MASK")):
             env.update(TOUCH_DIST="0.10", COVERED_RATIO="0.4")
         return env
 
