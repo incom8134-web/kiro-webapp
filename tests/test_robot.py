@@ -1,5 +1,6 @@
 """Robot actions in mock mode: who may start what, and what E-STOP stops."""
 import json
+import re
 import sys
 import time
 
@@ -10,6 +11,7 @@ from robot_server.base import MockBase
 from robot_server.config import Config
 from robot_server.jobs import Jobs, JobSpec
 from robot_server.main import create_app
+from robot_server.robot import Robot
 
 SLEEP = [sys.executable, "-c", "import time; time.sleep(30)"]
 
@@ -450,18 +452,80 @@ def test_estop_fold_can_be_switched_off(cfg):
 def test_base_passes_the_contact_distance_to_the_old_guard(cfg):
     from robot_server.robot import Robot
     r = Robot(cfg, MockBase())
+    env_text = "OBSTACLE_STOP=1\n"
+    r._lidar_env_text = lambda: env_text   # never the shared mock lidar.env
     try:
         assert r.base(True, "t")[0]
         env = r.jobs.get("base").spec.env
         assert env["TOUCH_DIST"] == "0" and env["COVERED_RATIO"] == "0"     # the two strict rules are off
         assert float(env["STOP_DIST"]) > 0                                   # the distance stop is not
+        env_text = "OBSTACLE_STOP=1\nLIDAR_MASK=-35:0.06,-30:0.06\n"
+        env = r.guard_env("close")                                           # robot's own parts measured: test E4 rules on
+        assert env["TOUCH_DIST"] == "0.10" and env["COVERED_RATIO"] == "0.4" and env["STOP_DIST"] == "0.12"
+    finally:
+        r.close()
+
+
+def test_job_log_file_has_timed_lines(tmp_path):
+    """Test records: every line of a job, with its time, is kept in web_<job>_<time>.log."""
+    from robot_server.jobs import Jobs, JobSpec
+    jobs = Jobs(log_dir=tmp_path)
+    ok, _ = jobs.start("demo", JobSpec([sys.executable, "-c", "print('hello'); print('[들림] 정지')"], label="demo"))
+    assert ok
+    for _ in range(50):
+        if not jobs.running("demo") and jobs.get("demo").ended:
+            break
+        time.sleep(0.05)
+    files = list(tmp_path.glob("web_demo_*.log"))
+    assert len(files) == 1
+    text = files[0].read_text(encoding="utf-8")
+    assert "[server] start demo" in text and "[들림] 정지" in text and "exit code 0" in text
+    assert re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} ", text.splitlines()[1])
+
+
+def test_rate_hz_counts_recent_messages():
+    from robot_server.base import rate_hz
+    stamps = [10.0 + i * 0.05 for i in range(60)]   # 20 Hz for 3 s
+    assert rate_hz(stamps, 12.95) == 20.0
+    assert rate_hz(stamps, 20.0) == 0.0               # nothing in the last 2 s
+
+
+def test_end_reason_tells_why_a_program_ended():
+    from robot_server.robot import end_reason
+    assert end_reason({"running": True, "code": None}, []) is None
+    assert end_reason({"running": False, "code": 0, "asked": False}, []) is None
+    assert end_reason({"running": False, "code": -9, "asked": True}, []) == "STOPPED"     # E-STOP or a button
+    assert end_reason({"running": False, "code": -9, "asked": False}, []) == "KILLED"     # test R8: SIGKILL from outside
+    lines = ["Traceback ...", "serial.serialutil.SerialException: [Errno 5] Input/output error"]
+    assert end_reason({"running": False, "code": 1, "asked": False}, lines) == "USB_LOST"  # test R1: board unplugged
+    assert end_reason({"running": False, "code": 1, "asked": False}, ["ValueError: bad"]) == "ERROR"
+
+
+def test_job_stopped_by_the_server_is_marked_asked():
+    jobs = Jobs()
+    assert jobs.start("s", JobSpec(SLEEP, stop_wait=1.0))[0]
+    jobs.stop("s")
+    assert jobs.get("s").info()["asked"] is True
+
+
+def test_voice_record_keeps_tagged_lines(cfg):
+    """The page shows what the voice node heard and did, with the time (voice test records)."""
+    r = Robot(cfg, MockBase())
+    try:
+        r._voice_line("[INFO] [1763.1] [voice_cmd]:   ... 앞으로  (음량 900, 소음 400)")
+        r._voice_line("[INFO] [1763.2] [voice_cmd]: [들림] '앞으로 가' (신뢰도 0.98) -> 전진 0.20 m")
+        r._voice_line("\x1b[0m[INFO] [1763.3] [voice_cmd]: [실행] 전진 0.20 m (속도 x1.0)")
+        log = r.voice_text()["log"]
+        assert [e["text"] for e in log] == ["[들림] '앞으로 가' (신뢰도 0.98) -> 전진 0.20 m", "[실행] 전진 0.20 m (속도 x1.0)"]
+        assert all(e["ts"] > 0 for e in log)
     finally:
         r.close()
 
 
 def test_voice_switches_language_and_takes_bigger_steps(cfg):
-    from robot_server.robot import VOICE_ARGS, Robot
-    assert "default_dist:=0.5" in VOICE_ARGS and "default_angle:=90.0" in VOICE_ARGS
+    from robot_server.robot import VOICE_STEPS, Robot
+    assert "default_dist:=0.5" in VOICE_STEPS["big"] and "default_angle:=90.0" in VOICE_STEPS["big"]
+    assert "default_dist:=0.2" in VOICE_STEPS["test"] and "default_angle:=45.0" in VOICE_STEPS["test"]  # voice test form 4.1
     r = Robot(cfg, MockBase())
     try:
         assert r.voice(True, "t", "ko")[0] and r.voice_lang == "ko"
@@ -470,5 +534,8 @@ def test_voice_switches_language_and_takes_bigger_steps(cfg):
         assert r.jobs.get("voice") is first
         assert r.voice(True, "t", "en")[0] and r.voice_lang == "en"  # other language: restarted with it
         assert r.jobs.get("voice") is not first and r.jobs.running("voice")
+        second = r.jobs.get("voice")
+        assert r.voice(True, "t", "en", "test")[0] and r.voice_step == "test"  # test steps: restarted with them
+        assert r.jobs.get("voice") is not second and r.jobs.running("voice")
     finally:
         r.close()

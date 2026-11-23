@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import ClientDisconnect
 
@@ -29,7 +29,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
-OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide",
+OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide", "stops_clear",
                     "leader", "wave", "follow", "studio", "guard_profile", "lidar_setup"}
 # Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance, lidar setup)
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile", "lidar_setup"}
@@ -86,6 +86,17 @@ class NoStalePages:
         await self.app(scope, receive, send_no_cache)
 
 
+def guard_stop_kind(status: str | None) -> str | None:
+    """The old lidar guard's status line -> 'no_scan' (scans stopped), 'covered' (covered or touched), or None.
+    Its form: 'scan OK(432점) | 앞 ... | 최근접 ... | 가림 없음 | ...' ('scan 없음' when the scans stopped)."""
+    if not status:
+        return None
+    if status.startswith("scan 없음"):
+        return "no_scan"
+    parts = status.split(" | ")
+    return "covered" if len(parts) > 3 and parts[3].startswith("가림") and parts[3] != "가림 없음" else None
+
+
 def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None) -> FastAPI:
     cfg = cfg or Config.from_env()
     ctrl = Controller(cfg)
@@ -96,7 +107,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     # Obstacle stop: on unless KIRO_GUARD=0; the operator can switch it on the Drive tab.
     gcfg = guard.GuardCfg(half_len=cfg.robot_len / 2, half_wid=cfg.robot_wid / 2, stop=cfg.guard_stop,
                           slow=max(cfg.guard_slow, cfg.guard_stop))
-    state["guard"] = {"on": cfg.guard, "lidar": False, "block": []}
+    # seen = when the last lidar scan arrived (None = no lidar since the base started: drive without it)
+    state["guard"] = {"on": cfg.guard, "lidar": False, "lost": False, "block": [], "seen": None}
 
     async def send(cid: str, msg: dict) -> None:
         """Never lets one device stall the server: a page that stops reading (left the Wi-Fi,
@@ -120,11 +132,11 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     def snapshot(cid: str) -> dict:
         b = state["base"]
         s = ctrl.snapshot(cid)
-        s.update(t="state", backend=b.name, odom=b.odom(), version=__version__,
+        s.update(t="state", backend=b.name, odom=b.odom(), rates=b.rates() if hasattr(b, "rates") else None, version=__version__,
                  default_pin=cfg.pin_is_default and b.name == "mock",
                  mock_engineer_pin=b.name == "mock" and ctrl.engineer_pin == MOCK_ENGINEER_PIN,
                  odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]),
-                 guard={**state["guard"], "stop_m": gcfg.stop})
+                 guard={**{k: v for k, v in state["guard"].items() if k != "seen"}, "stop_m": gcfg.stop})
         return s
 
     def who(cid: str) -> str:
@@ -151,20 +163,27 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         dt, st["last"] = now - st["last"], now
         cmd = ctrl.tick()
         b = state["base"]
-        vx, vy = cmd.vx, cmd.vy
+        vx, vy, wz = cmd.vx, cmd.vy, cmd.wz
         g = state["guard"]
         sc = b.scan(cfg.scan_points) if g["on"] and hasattr(b, "scan") else None
         g["lidar"] = bool(sc)
-        if sc:  # obstacle stop: an obstacle close in the way stops that direction; turning stays free
+        if sc:
+            g["seen"] = sc.get("at", now)  # when the scan really arrived (the map may show one up to 1 s old)
+        g["lost"] = guard.lidar_lost(g["on"], g["seen"], now)
+        if g["lost"]:  # the lidar was working and its scans stopped: nothing may move, turning included
+            g["block"] = ["lidar"] if cmd.publish and (vx or vy or wz) else []
+            vx = vy = wz = 0.0
+        elif sc:  # obstacle stop: an obstacle close in the way stops that direction; turning stays free
             lim = guard.limits(sc["xy"], gcfg)
             g["block"] = guard.blocked(vx, vy, lim) if cmd.publish else []
             vx, vy = guard.apply(vx, vy, lim)
         else:
             g["block"] = []
-        b.apply(vx, vy, cmd.wz, cmd.publish, dt)
+        b.apply(vx, vy, wz, cmd.publish, dt)
         st["n"] += 1
         n = st["n"]
         o = b.odom()
+        meter_step(st, now, b, o, cmd.publish and any(abs(v) > 1e-4 for v in (vx, vy, wz)))
         if o:  # odometer: distance driven since the server started (jumps = odometry reset)
             prev = state["last_xy"]
             d = 0.0 if prev is None else ((o["x"] - prev[0]) ** 2 + (o["y"] - prev[1]) ** 2) ** 0.5
@@ -175,7 +194,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             b.set_estop(ctrl.estop)
             sc = b.scan(cfg.scan_points) if hasattr(b, "scan") else None
             if sc and sockets:
-                msg = {"t": "scan", **sc}
+                msg = {"t": "scan", "xy": sc["xy"], "src": sc.get("src")}
                 await asyncio.gather(*(send(cid, msg) for cid in list(sockets)))
             new = logs.since(st["log_n"]) if log_subs else []
             st["log_n"] = new[-1]["n"] if new else (st["log_n"] if log_subs else logs.n)
@@ -188,6 +207,30 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             r = state["robot"].snapshot()
             await asyncio.gather(*(send(cid, r) for cid in list(sockets)))
             await send_studio([cid for cid in list(sockets) if ctrl.is_engineer(cid)])
+
+    def meter_step(st: dict, now: float, b, o: dict | None, sent: bool) -> None:
+        """Stop meter (robot_server/stopmeter.py): where the robot is, whether a speed goes to the wheels, and
+        the stop triggers seen here (web dead-man let go, lidar lost, the old guard covered / no scans, the
+        robot gamepad's LB). E-STOP, voice, base stop and the arm link are noted by the Robot itself."""
+        r: Robot = state["robot"]
+        wc = b.wheel_cmd() if hasattr(b, "wheel_cmd") else None
+        r.base_meter.sample(now, (o["x"], o["y"]) if o else None, sent if wc is None else wc)
+        for kind, detail, at in (b.take_events() if hasattr(b, "take_events") else []):
+            r.base_meter.trigger(now, kind, detail, at=at)
+        held = ctrl.held
+        if st.get("held") and not held:
+            r.base_meter.trigger(now, "deadman", "web dead-man let go")
+        st["held"] = held
+        lost = state["guard"]["lost"]
+        if lost and not st.get("lost"):
+            r.base_meter.trigger(now, "lidar_lost", "web obstacle stop: lidar lost")
+        st["lost"] = lost
+        gs = b.latest_str("/obstacle_guard/status") if hasattr(b, "latest_str") else None
+        gk = guard_stop_kind(gs)
+        if gk and gk != st.get("gk"):
+            r.base_meter.trigger(now, gk, f"robot guard: {gs[:60]}")
+        st["gk"] = gk
+        r.meter_tick(now)
 
     async def send_studio(cids: list[str]) -> None:
         """Training data and engineer values: only to connections that are the unlocked engineer."""
@@ -210,7 +253,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         starting = on and not (t == "arm" and msg.get("action") == "release")
         if t == "studio":  # only starting a recording moves an arm; next / again / stop / force stop / checks never do
             starting = msg.get("cmd") == "start"
-        elif t == "guard_profile":
+        elif t in ("guard_profile", "stops_clear"):
             starting = False
         elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
             starting = msg.get("cmd") == "apply"
@@ -240,6 +283,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 call = lambda: r.rec.pack(str(msg.get("repo", "")), name)  # noqa: E731
             elif cmd == "delete":   # a dataset, package or model, for good (the page asks first)
                 call = lambda: r.train.delete(str(msg.get("kind")), str(msg.get("name", "")), name)  # noqa: E731
+            elif cmd == "cam_repair":  # re-plugs the top camera's USB in software; never moves anything
+                call = lambda: r.cam_repair(name)  # noqa: E731
             elif cmd == "colab":    # train in Colab, the automatic way (robot_server/colab.py)
                 act_ = str(msg.get("action"))
                 if act_ == "start":
@@ -256,6 +301,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 return
         elif t == "say":
             call = lambda: r.say(str(msg.get("text", "")), name)  # noqa: E731
+        elif t == "stops_clear":
+            call = lambda: r.stops_clear(name)  # noqa: E731
         elif t == "servo":
             def call():
                 return r.servo(str(msg.get("cmd")), str(msg.get("port", "")), name, int(msg.get("id") or 0),
@@ -277,7 +324,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         elif t == "skill":
             call = lambda: r.skill(str(msg.get("name", "")), on, name)  # noqa: E731
         elif t == "voice":
-            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")))  # noqa: E731
+            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")), str(msg.get("step", "big")))  # noqa: E731
         elif t == "system":
             call = lambda: r.system(str(msg.get("action")), name)  # noqa: E731
         else:
@@ -287,6 +334,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         except Exception as e:  # noqa: BLE001
             log.exception("action %s failed", t)
             ok, text = False, f"Error: {e}"
+        if t == "base" and ok:  # a new base run: the lidar has to show itself again before its loss stops the robot
+            state["guard"]["seen"] = None
         if starting and ctrl.estop:  # E-STOP was pressed while this was starting: stop it now
             await asyncio.to_thread(r.on_estop, ctrl.estop_by or name)
         await send(cid, {"t": "note", "ok": ok, "msg": text, "about": t, "cmd": msg.get("cmd")})
@@ -322,6 +371,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     app.add_middleware(NoStalePages)
     app.state.ctrl = ctrl
     app.state.data = state
+
+    @app.get("/api/stops.csv")
+    def stops_csv():
+        """Every stop measured since the server started (or the last Clear): for the test report sheets."""
+        return Response(state["robot"].stops_csv(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="stops_{time.strftime("%Y%m%d_%H%M")}.csv"'})
 
     @app.get("/api/health")
     async def health() -> dict:

@@ -1,0 +1,4 @@
+# Lets the command center re-plug the top camera's USB port in software (Studio "Repair top camera"), nothing else.
+# Exactly one command, with no arguments (the "" means: no arguments allowed).
+# Install: see deploy/README.md step 6b. YOUR_USER is filled in by the install command.
+YOUR_USER ALL=(root) NOPASSWD: /usr/local/sbin/kiro-gemini-rebind ""

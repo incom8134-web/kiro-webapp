@@ -232,3 +232,32 @@ def test_a_typed_pin_is_accepted_even_0000_but_no_pin_is_not(monkeypatch):
     c = Config.from_env()
     assert c.pin == "0000" and not c.pin_is_default            # typed on purpose: accepted
     assert not Config(pin="4321").pin_is_default
+
+
+def test_silent_while_the_deadman_is_let_go(env):
+    """The page sends its heartbeat 20 times a second while nobody drives. The server must not
+    publish those zeros: they would fight the voice node and the robot's gamepad on /cmd_vel_raw."""
+    c, clock = env
+    arm(c)
+    cmd = run(c, clock, "a", 2, x=0, y=0, z=0, en=False)
+    assert not cmd.publish and c.link_ok
+    assert run(c, clock, "a", 1, x=1, y=0, z=0, en=True).publish  # holding the dead-man drives again
+    clock.step(0.05)
+    c.drive("a", 1, 0, 0, en=False)
+    sent = []
+    for _ in range(ZERO_TICKS + 20):
+        cmd = c.tick()
+        sent.append(cmd.publish)
+        assert cmd.vx == 0
+        clock.step(0.05)
+        c.drive("a", 0, 0, 0, en=False)
+    assert sent[:ZERO_TICKS] == [True] * ZERO_TICKS and not any(sent[ZERO_TICKS:])
+
+
+def test_held_deadman_with_estop_is_silent_after_zeros(env):
+    c, clock = env
+    arm(c)
+    run(c, clock, "a", 1, x=1, y=0, z=0, en=True)
+    c.set_estop("b", True)
+    cmd = run(c, clock, "a", 1, x=1, y=0, z=0, en=True)
+    assert cmd.vx == 0 and not cmd.publish

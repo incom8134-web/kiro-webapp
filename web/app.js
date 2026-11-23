@@ -79,6 +79,7 @@ function connect() {
   };
   ws.onclose = () => {
     state.open = false; state.server = null; state.rtt = null;
+    if (leader.on) leader.paused = true;   // Wi-Fi lost: keep the leader arm open; the robot's bridge holds the arm (test R5)
     dropInputs(); render();
     setTimeout(connect, 1000);
   };
@@ -260,14 +261,26 @@ $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning(
 $("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
 // Speech language: the operator's choice (remembered in this browser), not the page language
 let voiceLang = (() => { try { return localStorage.getItem("kiro-voice-lang"); } catch (e) { return null; } })() || (LANG === "en" ? "en" : "ko");
-$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: voiceLang }));
+// Step per command: "big" 0.5 m / 90 degrees, or "test" 0.2 m / 45 degrees as the voice test form asks
+let voiceStep = (() => { try { return localStorage.getItem("kiro-voice-step"); } catch (e) { return null; } })() || "big";
+$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: voiceLang, step: voiceStep }));
+const voiceRestart = () => {
+  const r = state.robot;
+  if (jobRunning("voice") && r && (r.voice_lang !== voiceLang || r.voice_step !== voiceStep)) send({ t: "voice", on: true, lang: voiceLang, step: voiceStep });
+  renderRobot();
+};
 for (const b of document.querySelectorAll("[data-vlang]")) b.addEventListener("click", () => {
   voiceLang = b.dataset.vlang;
   try { localStorage.setItem("kiro-voice-lang", voiceLang); } catch (e) { /* private window */ }
-  if (jobRunning("voice") && state.robot && state.robot.voice_lang !== voiceLang) send({ t: "voice", on: true, lang: voiceLang });
-  renderRobot();
+  voiceRestart();
+});
+for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("click", () => {
+  voiceStep = b.dataset.vstep;
+  try { localStorage.setItem("kiro-voice-step", voiceStep); } catch (e) { /* private window */ }
+  voiceRestart();
 });
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
+$("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
@@ -316,7 +329,8 @@ holdButton($("reboot"), () => send({ t: "system", action: "reboot" }));
 
 function showNote(text, isError) {
   if (!text) return;
-  const known = { "LEFT_BLOCKED": "arm.leftblocked", "TWO_ARM": "fm.noplay.both", "LEFT_ARM": "fm.noplay.left", "NO_FIT": "fm.noplay.other" };
+  const known = { "LEFT_BLOCKED": "arm.leftblocked", "TWO_ARM": "fm.noplay.both", "LEFT_ARM": "fm.noplay.left", "NO_FIT": "fm.noplay.other",
+    "LIDAR_MISSING": "base.nolidar", "NO_MIC": "voice.nomic" };
   const n = $("note");
   n.textContent = known[text] ? t(known[text]) : text;
   n.className = "note" + (isError ? " err" : "");
@@ -384,11 +398,14 @@ function render() {
 
   // Obstacle stop of the server: on / off, and whether it is holding the robot right now
   const gd = (s && s.guard) || { on: false, lidar: false, block: [] };
-  const held = gd.block && gd.block.length ? t("guard.held", { where: gd.block.map((d) => t("dir." + d)).join(", ") }) : "";
+  const held = gd.lost ? t("guard.lost")
+    : gd.block && gd.block.length ? t("guard.held", { where: gd.block.map((d) => t("dir." + d)).join(", ") }) : "";
   $("guard-sw").checked = !!gd.on;
-  $("guard-st").textContent = !s ? "" : !gd.on ? t("guard.off") : !gd.lidar ? t("guard.nolidar") : held || t("guard.on", { cm: Math.round((gd.stop_m || 0) * 100) });
+  $("guard-st").textContent = !s ? "" : !gd.on ? t("guard.off") : gd.lost ? held : !gd.lidar ? t("guard.nolidar") : held || t("guard.on", { cm: Math.round((gd.stop_m || 0) * 100) });
   $("guard-st").className = "st grow" + (!s ? "" : gd.on && gd.lidar && !held ? " live" : " warn");
-  $("guard-note").textContent = !s ? "" : !gd.on ? t("guard.offnote") : !gd.lidar ? t("guard.nolidarnote") : "";
+  const rg = state.robot && state.robot.voice && state.robot.voice.guard;  // the old lidar guard on the robot (gamepad, voice, page)
+  $("guard-note").textContent = !s ? "" : !gd.on ? t("guard.offnote") : gd.lost ? t("guard.lostnote") : !gd.lidar ? t("guard.nolidarnote")
+    : rg && jobRunning("base") ? t("guard.robot", { st: rg }) : "";
 
   const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
     : held ? held
@@ -408,11 +425,34 @@ function render() {
   renderRobot();
 }
 
-/* A job's last lines, shown only when it ended with an error (not when we stopped it). */
+/* Stop meter: each stop with its test item and pass limit (robot_server/stopmeter.py), newest first. */
+function renderStops(rows) {
+  const tm = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour12: false });
+  const num = (v, d = 2) => (v == null ? "-" : Number(v).toFixed(d));
+  const body = rows.slice().reverse().map((x) => {
+    const unit = x.meter === "arm" ? "°" : " cm";
+    const ok = x.state === "measuring" ? t("stops.measuring") : x.state === "timeout" ? t("stops.timeout") : x.ok == null ? "" : x.ok ? "✓" : "✗";
+    const cls = x.ok === true ? "go" : x.ok === false ? "no" : "";
+    return `<tr><td>${tm(x.ts)}</td><td>${esc(x.test || "")}</td><td title="${esc(x.detail)}">${esc(t("stops.k." + x.kind))}</td>
+      <td>${num(x.cmd_s)}</td><td>${num(x.still_s)}</td><td>${x.dist == null ? "-" : num(x.dist, 1) + unit}</td>
+      <td>${x.creep ? num(x.creep, 1) + unit : "0"}</td><td class="${cls}">${esc(ok)}</td></tr>`;
+  }).join("");
+  const head = ["time", "test", "what", "cmd", "still", "dist", "creep", "ok"].map((k) => `<th>${esc(t("stops.h." + k))}</th>`).join("");
+  const html = rows.length ? `<tr>${head}</tr>${body}` : `<tr><td class="mute">${esc(t("stops.none"))}</td></tr>`;
+  const el = $("stops");
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
+/* Why a job ended, shown only when it was a surprise (not when we stopped it): its USB board went away,
+   something killed it (an arm then keeps its torque), or it failed (its last lines). */
 function failTail(el, job) {
-  const failed = !!job && !job.running && job.code > 0 && job.code !== 130;
+  const why = job && !job.running ? job.why : null;
+  const failed = why === "USB_LOST" || why === "KILLED" || why === "ERROR";
   el.hidden = !failed;
-  if (failed) el.textContent = job.tail.slice(-5).join("\n");
+  if (failed) {
+    const head = t("why." + why, { name: job.label || job.name });
+    el.textContent = why === "ERROR" ? head + "\n" + job.tail.slice(-5).join("\n") : head;
+  }
   return failed;
 }
 
@@ -429,9 +469,14 @@ function renderRobot() {
   setBtn($("base-btn"), t(baseOn ? "btn.stop" : "btn.start"), baseOn ? "ri-stop-fill" : "ri-play-fill");
   $("base-btn").classList.toggle("on", baseOn);
   const be = $("base-err");
-  if (failTail(be, J.base)) be.textContent = t("base.exited", { code: J.base.code }) + "\n" + be.textContent;
+  if (failTail(be, J.base)) be.textContent = t("base.exited", { code: J.base.code }) + "\n" + J.base.tail.slice(-5).join("\n");
   else if (baseOn && r.wheels === "off") { be.hidden = false; be.textContent = t("base.nowheels"); }
   $("base-st").textContent = baseOn ? (r.wheels === "off" ? t("st.nowheels") : r.wheels === "ok" ? t("st.on") : t("st.starting")) : "";
+  if (be.hidden && baseOn && r.base_guard === "pass" && r.obstacle_stop) { be.hidden = false; be.textContent = t("base.pass"); }
+  const rates = s && s.rates, br0 = $("base-rates");   // test R2: wheel odometry back to 20 Hz after a restart
+  br0.hidden = !(baseOn && rates);
+  if (!br0.hidden) br0.textContent = rates.odom_age != null && rates.odom_age > 1 ? t("base.noodom", { s: Math.round(rates.odom_age) })
+    : t("base.rates", { odom: Math.round(rates.odom_hz), scan: Math.round(rates.scan_hz) });
   $("base-st").className = "st" + (baseOn && r.wheels === "ok" ? " live" : "");
 
   // Arms: right and left, each with teleop and the three poses
@@ -472,10 +517,14 @@ function renderRobot() {
   // Leader arm on this laptop, and the wave
   const br = r.bridge || {};
   if (leader.on && br.running && br.mode === "leader") leader.sawRunning = true;
-  if (leader.on && (estop || !me || (leader.sawRunning && !br.running))) leaderStop(estop ? t("hint.estop") : "");
+  if (leader.on && estop) leaderStop(t("hint.estop"));
+  else if (leader.on && leader.paused && me) {        // control taken back after a lost link: carry on from the arm's pose
+    leader.paused = false; leader.sawRunning = false;
+    send({ t: "leader", on: true, side: leader.side });
+  } else if (leader.on && !leader.paused && (!me || (leader.sawRunning && !br.running))) leaderStop("");
   setBtn($("leader-btn"), t(leader.on ? "leader.stop" : "leader.use"), leader.on ? "ri-stop-fill" : "ri-usb-line");
   $("leader-btn").classList.toggle("on", leader.on);
-  $("leader-st").textContent = leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
+  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
@@ -494,6 +543,10 @@ function renderRobot() {
   setBtn($("voice-btn"), t(vOn ? "btn.stop" : "btn.start"), vOn ? "ri-stop-fill" : "ri-play-fill");
   $("voice-btn").classList.toggle("on", vOn);
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
+  for (const b of document.querySelectorAll("[data-vstep]")) {
+    b.classList.toggle("on", b.dataset.vstep === voiceStep);
+    b.disabled = !me;
+  }
   for (const b of document.querySelectorAll("[data-vlang]")) {
     b.classList.toggle("on", b.dataset.vlang === voiceLang);
     b.disabled = !me || (b.dataset.vlang === "en" && !(r.voice_models || []).some((m) => m.includes("-en-")));
@@ -502,6 +555,16 @@ function renderRobot() {
   $("voice-on").hidden = !vOn;
   $("talk").disabled = !me || !vOn;
   $("voice-text").textContent = (r.voice && r.voice.text) || "-";
+  // The voice node's own record, newest first: what it heard (with confidence) and what it did, with the time
+  const vlog = ((r.voice && r.voice.log) || []).slice().reverse();
+  const vhtml = vlog.map((e) => {
+    const d = new Date(e.ts * 1000), cls = /^\[(실행|완료)\]/.test(e.text) ? "go" : /^\[(무시|중단|취소|오류)\]/.test(e.text) ? "no" : "";
+    const tm = d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0").slice(0, 1);
+    return `<li><time>${tm}</time><span class="${cls}">${esc(e.text)}</span></li>`;
+  }).join("");
+  renderStops(r.stops || []);
+  const vl = $("voice-log");
+  if (vl.dataset.html !== vhtml) { vl.innerHTML = vhtml; vl.dataset.html = vhtml; }
   const noEn = voiceLang === "en" && !(r.voice_models || []).some((m) => m.includes("-en"));
   $("voice-note").hidden = vOn || !noEn;
   $("voice-note").textContent = noEn ? t("voice.koonly") : "";
@@ -693,7 +756,7 @@ $("say-box").addEventListener("submit", (e) => {
 /* Plug the leader arm into this laptop's USB and press the button. The browser finds the
  * servo board, reads the six joints 30 times per second and sends them to the robot, which
  * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
-const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false };
+const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
 
 async function leaderStart() {
   if (!LeaderArm.supported()) {
@@ -736,7 +799,7 @@ async function leaderLoop() {
 
 async function leaderStop(reason) {
   const was = leader.on;
-  leader.on = false;
+  leader.on = false; leader.paused = false;
   if (was) send({ t: "leader", on: false, side: leader.side });
   const a = leader.arm;
   leader.arm = null;

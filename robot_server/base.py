@@ -15,6 +15,11 @@ from .config import Config
 from .lidar_setup import Scan, is_self, parse_mask
 
 
+def rate_hz(stamps, now: float, window: float = 2.0) -> float:
+    """Messages per second over the last `window` seconds, from their arrival times."""
+    return round(sum(1 for t in stamps if now - t < window) / window, 1)
+
+
 def scan_points(ranges, angle_min: float, angle_inc: float, rmin: float, rmax: float,
                 yaw: float, lx: float, n_out: int, mask: dict[int, float] | None = None) -> list[int]:
     """Laser ranges -> flat [x0, y0, x1, y1, ...] in cm in the robot frame (x forward, y left).
@@ -137,6 +142,15 @@ class MockBase:
     def latest_str(self, topic: str) -> str | None:
         return None
 
+    def rates(self) -> dict | None:
+        return None  # pretend robot: no topics to measure
+
+    def wheel_cmd(self) -> bool | None:
+        return None  # the server's own command is the only one: the caller knows it
+
+    def take_events(self) -> list[tuple[str, str, float]]:
+        return []
+
     def odom(self) -> dict:
         return {"x": round(self.x, 3), "y": round(self.y, 3), "th": round(self.th, 3),
                 "vx": round(self.v[0], 3), "vy": round(self.v[1], 3), "wz": round(self.v[2], 3)}
@@ -168,6 +182,17 @@ class RosBase:
         self._estop_pub = self._node.create_publisher(Bool, cfg.estop_topic, 10)
         self._lock = threading.Lock()
         self._odom: dict | None = None
+        # Arrival times, for the message rates the page shows (test R2: /odom 20 Hz after a restart)
+        self._odom_ts: collections.deque[float] = collections.deque(maxlen=200)
+        self._scan_ts: collections.deque[float] = collections.deque(maxlen=100)
+        # For the stop meter: what really goes to the wheels (/cmd_vel, after the old guard), and the
+        # robot gamepad's dead-man (LB) being let go
+        from sensor_msgs.msg import Joy
+        self._wheel_nonzero, self._wheel_t = False, 0.0
+        self._lb = False
+        self._events: collections.deque[tuple[str, str, float]] = collections.deque(maxlen=20)
+        self._node.create_subscription(Twist, "/cmd_vel", self._on_wheel_cmd, 20)
+        self._node.create_subscription(Joy, "/joy", self._on_joy, 20)
         self._node.create_subscription(Odometry, cfg.odom_topic, self._on_odom, 10)
         # Lidar: points around the robot for the page map (same mounting as the old guard)
         from rclpy.qos import qos_profile_sensor_data
@@ -199,7 +224,28 @@ class RosBase:
     def _ok(self) -> bool:
         return self._rclpy.ok()
 
+    def _on_wheel_cmd(self, msg) -> None:
+        self._wheel_nonzero = any(abs(v) > 1e-4 for v in (msg.linear.x, msg.linear.y, msg.angular.z))
+        self._wheel_t = time.monotonic()
+
+    def _on_joy(self, msg) -> None:
+        lb = len(msg.buttons) > 4 and msg.buttons[4] == 1
+        if self._lb and not lb:
+            self._events.append(("gamepad", "robot gamepad LB let go", time.monotonic()))
+        self._lb = lb
+
+    def wheel_cmd(self) -> bool:
+        """A non-zero speed is going to the wheels now (the wheel node stops by itself 0.5 s after the last one)."""
+        return self._wheel_nonzero and time.monotonic() - self._wheel_t < 0.5
+
+    def take_events(self) -> list[tuple[str, str, float]]:
+        out = []
+        while self._events:
+            out.append(self._events.popleft())
+        return out
+
     def _on_odom(self, msg) -> None:
+        self._odom_ts.append(time.monotonic())
         q = msg.pose.pose.orientation
         th = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         t = msg.twist.twist
@@ -210,6 +256,7 @@ class RosBase:
 
     def _on_scan(self, msg) -> None:
         now = time.monotonic()
+        self._scan_ts.append(now)
         with self._lock:
             self._raw.append(Scan(msg.angle_min, msg.angle_increment, list(msg.ranges), msg.range_min, msg.range_max))
             self._raw_n += 1
@@ -219,7 +266,7 @@ class RosBase:
         pts = scan_points(msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
                           self._yaw, self._lx, self._n_scan, self._mask)
         with self._lock:
-            self._scan, self._scan_t = {"xy": pts, "src": "lidar"}, now
+            self._scan, self._scan_t = {"xy": pts, "src": "lidar", "at": now}, now
 
     def grab_scans(self, step: str, n: int, timeout: float) -> list[Scan] | None:
         """The next n raw scans (lidar frame), or None if they do not come in time."""
@@ -279,7 +326,15 @@ class RosBase:
 
     def odom(self) -> dict | None:
         with self._lock:
+            if self._odom and self._odom_ts and time.monotonic() - self._odom_ts[-1] > 1.0:
+                return None  # the wheel node stopped: show nothing rather than an old position
             return dict(self._odom) if self._odom else None
+
+    def rates(self) -> dict:
+        now = time.monotonic()
+        odom, scan = list(self._odom_ts), list(self._scan_ts)
+        return {"odom_hz": rate_hz(odom, now), "scan_hz": rate_hz(scan, now),
+                "odom_age": round(now - odom[-1], 1) if odom else None}
 
     def close(self) -> None:
         try:

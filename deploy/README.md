@@ -106,6 +106,7 @@ ros2 topic echo /cmd_vel
 | `/cmd_vel_raw` has values, `/cmd_vel` has none | The base (with its guard) is not running. Press Start base |
 | Page shows MOCK instead of ROBOT | Use `./run.sh robot` |
 | Camera says "in use" | A skill or recording holds it. It comes back when that ends |
+| Top camera "Not connected", reason says the colour node is missing | Studio, step 2, **Repair top camera** (needs step 6b). Without step 6b: `~/so101/gemini_uvc_fix.sh` in a terminal on the Jetson's desktop |
 | "Refusing to drive a real robot with the default PIN" | Set `KIRO_OPERATOR_PIN` |
 
 ## 6. Shut down and restart buttons (optional, sudo)
@@ -115,6 +116,32 @@ sed "s/YOUR_USER/$USER/" ~/Desktop/kiro-webapp/deploy/kiro-shutdown.sudoers | su
 ```
 
 This allows exactly two commands, `systemctl poweroff` and `systemctl reboot`, without a password.
+
+## 6b. Repair top camera button (optional, sudo)
+
+After the Orbbec ROS node was used, the top camera (Gemini 335) can lose its colour picture. The old fix (`~/so101/gemini_uvc_fix.sh`) asks for the password in a desktop window, which the web server cannot do. This small helper does the same USB re-plug without a window. The Studio button **Repair top camera** calls it.
+
+Install the helper. It must belong to root, or anyone could edit what runs as root:
+
+```bash
+sudo install -o root -g root -m 755 ~/Desktop/kiro-webapp/deploy/kiro-gemini-rebind /usr/local/sbin/kiro-gemini-rebind
+```
+
+Allow the server to run exactly this one command, with no arguments, without a password:
+
+```bash
+sed "s/YOUR_USER/$USER/" ~/Desktop/kiro-webapp/deploy/kiro-camera.sudoers | sudo tee /etc/sudoers.d/kiro-camera >/dev/null && sudo chmod 440 /etc/sudoers.d/kiro-camera && sudo visudo -c
+```
+
+`visudo -c` must say `parsed OK` for every file. If it complains, remove the file at once (`sudo rm /etc/sudoers.d/kiro-camera`), because a broken sudoers file can lock you out of sudo.
+
+Check both parts. The first line must show `-rwxr-xr-x 1 root root`. The second must print the helper's path and must not ask for a password:
+
+```bash
+ls -l /usr/local/sbin/kiro-gemini-rebind && sudo -n -l /usr/local/sbin/kiro-gemini-rebind
+```
+
+The helper refuses to run while the Orbbec ROS node (`component_container`, the camera viewer or the driving stack) is running: stop it first. It never touches any USB device except the one with vendor id `2bc5`.
 
 ## 7. Start at power-on (sudo)
 
@@ -153,3 +180,5 @@ The base is not started at power-on. The operator presses **Start base** on the 
 | `setup_hotspot.sh` | Creates the haebotwifi hotspot with NetworkManager |
 | `kiro-webapp.service` | Starts the server at power-on |
 | `kiro-shutdown.sudoers` | Lets the page shut down or restart the Jetson |
+| `kiro-gemini-rebind` | Root helper: re-plugs the top camera's USB device in software (step 6b) |
+| `kiro-camera.sudoers` | Lets the page run that one helper without a password |

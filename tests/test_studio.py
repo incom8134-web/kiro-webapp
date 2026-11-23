@@ -1,17 +1,23 @@
 """Studio page: engineer-only access, and recording datasets with the pretend recorder (mock mode)."""
 import json
+import stat
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from robot_server import camera as cam_mod
 from robot_server import recorder as rec_mod
+from robot_server import robot as robot_mod
 from robot_server.base import MockBase
 from robot_server.config import Config
 from robot_server.control import Controller
 from robot_server.main import create_app
+from robot_server.record_runner import MockDataset, files_check
 from robot_server.robot import Robot
 
 FAKE_SO101 = str(Path(__file__).parent / "fake_so101")
@@ -123,6 +129,7 @@ STUDIO_MESSAGES = [
     {"t": "studio", "cmd": "hello"}, {"t": "studio", "cmd": "check", "settings": settings()},
     {"t": "studio", "cmd": "start", "settings": settings()}, {"t": "studio", "cmd": "stop"},
     {"t": "studio", "cmd": "kill"}, {"t": "studio", "cmd": "pack", "repo": "tester/pick_cube"},
+    {"t": "studio", "cmd": "cam_repair"},
     {"t": "guard_profile", "profile": "safe"}, {"t": "lidar_setup", "cmd": "start"},
 ]
 
@@ -331,6 +338,213 @@ def test_recording_holds_the_arm_ports_and_cameras(robot, fast):
     robot.rec.control("kill", None, None, "Laptop")
     phase(robot, "stopped")
     wait(lambda: robot.cams["top"].paused_by is None)
+
+
+# ------------------------------------------------ top camera repair (needs Robot.cam_repair, see the report)
+needs_hook = pytest.mark.skipif(not hasattr(Robot, "cam_repair"), reason="Robot.cam_repair and the studio cmd cam_repair are not added yet")
+
+
+def fake_repair(monkeypatch, result):
+    """The real repair re-plugs a USB device: never in tests."""
+    calls = []
+
+    def repair(so101):
+        calls.append(str(so101))
+        return result
+    monkeypatch.setattr(cam_mod, "repair_top", repair)
+    monkeypatch.setattr(robot_mod, "repair_top", repair, raising=False)
+    return calls
+
+
+@needs_hook
+@pytest.mark.parametrize("result, ok, msg", [
+    ((True, "REPAIRED", "OK 2-1.1"), True, "REPAIRED"), ((True, "OK_ALREADY", ""), True, "OK_ALREADY"),
+    ((False, "NO_HELPER", "not installed"), False, "NO_HELPER: not installed"), ((False, "ORBBEC_RUNNING", ""), False, "ORBBEC_RUNNING")])
+def test_camera_repair_answers_with_the_code_and_looks_at_the_cameras_again(robot, monkeypatch, result, ok, msg):
+    calls = fake_repair(monkeypatch, result)
+    monkeypatch.setattr(robot, "mock", False)   # the pretend robot never re-plugs: test the real path with a fake repair
+    looked = []
+    robot.refresh_cameras = lambda: looked.append(1)
+    assert robot.cam_repair("Laptop") == (ok, msg)
+    assert calls == [str(robot.so101)] and bool(looked) == ok            # new devices are only looked for after a repair
+    assert any("camera repair" in e["text"] and result[1] in e["text"] for e in robot.events)
+
+
+@needs_hook
+def test_camera_repair_over_the_websocket_for_the_engineer_only(cfg, monkeypatch):
+    calls = fake_repair(monkeypatch, (True, "REPAIRED", "OK 2-1.1"))
+    app = create_app(cfg, MockBase())
+    with TestClient(app) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        app.state.data["robot"].mock = False    # as on the robot; the repair itself is the fake above
+        take(op)
+        unlock(op)
+        op.send_json({"t": "studio", "cmd": "cam_repair"})
+        m = note_any(op, "studio")
+        assert (m["cmd"], m["ok"], m["msg"]) == ("cam_repair", True, "REPAIRED") and len(calls) == 1
+
+
+# ------------------------------------------- R7: continue after a force stop, and the read check
+def checked(robot, timeout=15.0):
+    """The finished session once its dataset read check has an answer."""
+    def ok():
+        s = robot.rec.snapshot()["session"]
+        v = s and s["result"] and s["result"]["verify"]
+        return s if v and v["state"] != "checking" else None
+    return wait(ok, timeout)
+
+
+def test_continue_recording_after_a_force_stop_keeps_the_episodes_and_adds_one(robot, fast, cfg):
+    """R7: force stop, then 'continue recording' (add to the existing dataset): the episodes of before stay,
+    one new episode is added, the dataset reads back OK."""
+    assert robot.rec.start(settings(episodes=3, episode_s=1, reset_s=0), "Laptop")[0]
+    phase(robot, "rec", 1)                                                # episode 0 is saved, episode 1 is being recorded
+    assert robot.rec.control("kill", None, None, "Laptop")[0]
+    first = checked(robot)
+    assert first["result"]["state"] == "stopped" and first["result"]["info"]["episodes"] == 1
+    v = first["result"]["verify"]
+    assert (v["state"], v["episodes"], v["how"]) == ("ok", 1, "files") and v["frames"] > 0 and v["problems"] == []
+    assert first["backup"] is None                                        # a new dataset has no copy
+
+    assert robot.rec.start(settings(mode="add", episodes=1, episode_s=1), "Laptop")[0]
+    second = checked(robot)
+    res = second["result"]
+    assert res["state"] == "done" and res["added"] == 1                    # exactly the new episode
+    assert res["info"]["episodes"] == 2 and res["info"]["frames"] > v["frames"]
+    assert res["verify"]["state"] == "ok" and res["verify"]["episodes"] == 2 and res["verify"]["frames"] == res["info"]["frames"]
+    assert [d["episodes"] for d in robot.rec.snapshot()["datasets"]] == [2]
+    info = json.loads((Path(cfg.datasets_dir) / "tester/pick_cube/meta/info.json").read_text())
+    assert (info["total_episodes"], info["total_frames"]) == (2, res["info"]["frames"])
+    backup = Path(second["backup"])                                        # the copy from before adding is the 1-episode dataset
+    assert json.loads((backup / "meta" / "info.json").read_text())["total_episodes"] == 1 and files_check(backup)["ok"]
+
+
+def test_force_stop_before_the_first_episode_leaves_a_readable_empty_dataset(robot, fast):
+    assert robot.rec.start(settings(episode_s=5), "Laptop")[0]
+    phase(robot, "rec", 0)
+    assert robot.rec.control("kill", None, None, "Laptop")[0]
+    s = checked(robot)
+    assert s["result"]["state"] == "stopped" and s["result"]["added"] == 0
+    assert (s["result"]["verify"]["state"], s["result"]["verify"]["episodes"]) == ("ok", 0)
+
+
+def test_estop_cuts_the_dataset_off_and_the_page_is_told_where_the_copy_is(robot, fast):
+    """kill -9 never reaches LeRobot's finalize: the saved episodes are in meta/info.json but the files are cut off."""
+    assert robot.rec.start(settings(episodes=1, episode_s=1), "Laptop")[0]
+    phase(robot, "done")
+    assert checked(robot)["result"]["verify"]["state"] == "ok"
+    assert robot.rec.start(settings(mode="add", episodes=3, episode_s=1, reset_s=0), "Laptop")[0]
+    phase(robot, "rec", 2)                                                 # one more episode is saved, the next one runs
+    robot.on_estop("Phone")
+    s = checked(robot)
+    assert s["result"]["state"] == "estop"
+    v = s["result"]["verify"]
+    assert v["state"] == "broken" and any("cut off" in x for x in v["problems"])
+    assert s["result"]["info"]["episodes"] == 2                            # info.json says 2: it does not know the files are cut off
+    backup = Path(s["backup"])
+    assert files_check(backup)["ok"] and files_check(backup)["episodes"] == 1    # the way back
+    assert any("BROKEN" in e["text"] for e in robot.events)
+
+
+def test_estop_in_a_new_dataset_before_any_episode_is_saved_cuts_nothing(robot, fast):
+    assert robot.rec.start(settings(episode_s=5), "Laptop")[0]
+    phase(robot, "rec", 0)
+    robot.on_estop("Phone")
+    s = checked(robot)
+    assert s["result"]["state"] == "estop" and s["result"]["verify"]["state"] == "ok" and s["result"]["verify"]["episodes"] == 0
+
+
+def test_a_new_recording_waits_for_the_read_check_of_the_last_one(robot, fast, monkeypatch):
+    monkeypatch.setattr(rec_mod, "VERIFY_WAIT_S", 0.1)
+    release = threading.Event()
+    slow = threading.Thread(target=release.wait, daemon=True)
+    slow.start()
+    robot.rec._verify_thread = slow
+    assert robot.rec.start(settings(episode_s=5), "Laptop") == (False, "VERIFYING")
+    release.set()
+    slow.join()
+    assert robot.rec.start(settings(episode_s=5), "Laptop")[0]
+    phase(robot, "rec", 0)
+    robot.rec.control("kill", None, None, "Laptop")
+    checked(robot)
+
+
+def make_dataset(root, episodes=2, cams=("top",), finish=True):
+    info = {"codebase_version": "v3.0", "robot_type": "so_follower", "total_episodes": 0, "total_frames": 0, "fps": 30,
+            "features": {"action": {"dtype": "float32"}, **{f"observation.images.{k}": {"dtype": "video"} for k in cams}}}
+    ds = MockDataset(Path(root), info)
+    ds.write_info()
+    for _ in range(episodes):
+        ds.save_episode(30)
+    if finish:
+        ds.finalize()
+    return Path(root)
+
+
+def test_files_check_sees_what_a_cut_off_recorder_leaves(tmp_path):
+    ok = files_check(make_dataset(tmp_path / "ok"))
+    assert ok == {"ok": True, "episodes": 2, "frames": 60, "problems": []}
+    assert files_check(make_dataset(tmp_path / "empty", episodes=0))["ok"]          # nothing saved: nothing to read
+    cut = files_check(make_dataset(tmp_path / "cut", finish=False))
+    assert not cut["ok"] and cut["episodes"] == 2
+    assert any("data/chunk-000/file-000.parquet" in x and "cut off" in x for x in cut["problems"])
+    assert any("episodes" in x and "cut off" in x for x in cut["problems"]) and any(".mp4" in x and "no index" in x for x in cut["problems"])
+    # one thing at a time
+    base = make_dataset(tmp_path / "base", cams=("top", "right_wrist"))
+    (base / "videos/observation.images.right_wrist/chunk-000/file-000.mp4").write_bytes(b"\0" * 8)
+    assert [x.split(":")[0] for x in files_check(base)["problems"]] == ["videos/observation.images.right_wrist/chunk-000/file-000.mp4"]
+    for gone, text in (("data/chunk-000/file-000.parquet", "no data files"), ("meta/stats.json", "stats.json"),
+                       ("videos/observation.images.top/chunk-000/file-000.mp4", "no video files for top")):
+        d = make_dataset(tmp_path / gone.replace("/", "_"))
+        (d / gone).unlink()
+        assert any(text in x for x in files_check(d)["problems"]), gone
+    broken = make_dataset(tmp_path / "info")
+    (broken / "meta" / "info.json").write_text("{not json")
+    assert files_check(broken)["problems"] == ["meta/info.json is not valid JSON"]
+    (broken / "meta" / "info.json").unlink()
+    assert files_check(broken)["problems"] == ["meta/info.json is missing"]
+    assert files_check(tmp_path / "nothing")["ok"] is False
+
+
+def test_the_lerobot_read_check_and_what_it_may_not_claim(tmp_path, monkeypatch):
+    """On the robot LeRobot loads the dataset in the LeRobot venv. Here a pretend python answers."""
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    py = venv / "bin" / "python"
+    answer, called = tmp_path / "answer", tmp_path / "called"
+    py.write_text(f"#!/bin/bash\ntouch {called}\ncat {answer}\n")
+    py.chmod(py.stat().st_mode | stat.S_IXUSR)
+    root = tmp_path / "datasets"
+    make_dataset(root / "tester/good")
+    rec = object.__new__(rec_mod.Recorder)
+    rec.r, rec.root = SimpleNamespace(mock=False, venv=venv), root
+    verify = rec.verify_dataset
+
+    answer.write_text('{"ok": true, "episodes": 2, "frames": 60}\n')
+    v = verify("tester/good")
+    assert (v["state"], v["how"], v["episodes"], v["frames"]) == ("ok", "lerobot", 2, 60) and called.exists()
+    answer.write_text('some LeRobot noise\n{"ok": false, "error": "ArrowInvalid: magic bytes"}\n')
+    v = verify("tester/good")
+    assert v["state"] == "broken" and v["problems"] == ["ArrowInvalid: magic bytes"]
+    answer.write_text('{"ok": null, "error": "LeRobot could not be loaded: ImportError"}\n')
+    v = verify("tester/good")
+    assert v["state"] == "unchecked" and "ImportError" in v["problems"][0]          # the files look fine: it does not say OK
+    answer.write_text("Traceback (most recent call last)\n")
+    assert verify("tester/good")["state"] == "unchecked"
+    py.write_text("#!/bin/bash\nexec sleep 20\n")
+    monkeypatch.setattr(rec_mod, "VERIFY_TIMEOUT_S", 0.5)
+    v = verify("tester/good")
+    assert v["state"] == "unchecked" and "no answer within" in v["problems"][0]
+    rec.r = SimpleNamespace(mock=False, venv=tmp_path / "no-venv")
+    assert verify("tester/good")["state"] == "unchecked"
+    # a cut-off dataset or an empty one never starts LeRobot
+    called.unlink()
+    answer.write_text('{"ok": true, "episodes": 2, "frames": 60}\n')
+    rec.r = SimpleNamespace(mock=False, venv=venv)
+    py.write_text(f"#!/bin/bash\ntouch {called}\ncat {answer}\n")
+    make_dataset(root / "tester/cut", finish=False)
+    make_dataset(root / "tester/empty", episodes=0)
+    assert verify("tester/cut")["state"] == "broken" and verify("tester/empty")["episodes"] == 0
+    assert verify("../x")["state"] == "broken" and not called.exists()
 
 
 def test_package_for_upload(robot, fast):

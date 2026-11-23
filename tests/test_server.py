@@ -120,3 +120,72 @@ def test_obstacle_stop_can_start_switched_off():
     with TestClient(create_app(Config(pin="4321", guard=False), MockBase())) as client:
         with client.websocket_connect("/ws?name=Laptop") as op:
             assert read_until(op, lambda m: m["t"] == "state")["guard"]["on"] is False
+
+
+class LosingLidar(MockBase):
+    """A pretend robot whose lidar stops sending scans when told to (USB pulled, driver died)."""
+    lost = False
+
+    def scan(self, n_out=360):
+        return None if self.lost else super().scan(n_out)
+
+
+def test_lidar_lost_stops_everything_turning_included():
+    b = LosingLidar()
+    with TestClient(create_app(Config(pin="4321"), b)) as client:
+        with client.websocket_connect("/ws?name=Laptop") as op:
+            op.send_json({"t": "take", "pin": "4321"})
+            assert read_until(op, lambda m: m["t"] == "note")["ok"] is True
+            op.send_json({"t": "drive", "x": 0, "y": 0, "z": 0, "en": False})
+
+            def drive(seconds):
+                end = time.time() + seconds
+                while time.time() < end:
+                    op.send_json({"t": "drive", "x": 0.5, "y": 0, "z": 1, "en": True, "src": "test"})
+                    time.sleep(0.05)
+
+            drive(0.6)
+            assert b.v[0] > 0 and b.v[2] > 0
+            b.lost = True
+            t0 = time.time()
+            while time.time() - t0 < 2.0 and (b.v[0] or b.v[2]):
+                drive(0.05)
+            assert b.v == (0.0, 0.0, 0.0) and time.time() - t0 < 1.0      # test E4': stopped within 1 s
+            s = read_until(op, lambda m: m["t"] == "state" and m["guard"]["lost"])
+            assert "lidar" in s["guard"]["block"] and "seen" not in s["guard"]
+            b.lost = False                                                # scans back: driving works again
+            drive(0.6)
+            assert b.v[0] > 0
+
+
+def test_stop_meter_measures_a_web_dead_man_stop_and_serves_csv():
+    """Test E1 (web path): letting go of the dead-man while driving is measured: time to command zero,
+    stop distance, no creep; the measurement is on the page and in /api/stops.csv."""
+    b = MockBase()
+    with TestClient(create_app(Config(pin="4321"), b)) as client:
+        with client.websocket_connect("/ws?name=Laptop") as op:
+            op.send_json({"t": "take", "pin": "4321"})
+            assert read_until(op, lambda m: m["t"] == "note")["ok"] is True
+            op.send_json({"t": "drive", "x": 0, "y": 0, "z": 0, "en": False})
+            end = time.time() + 1.2
+            while time.time() < end:
+                op.send_json({"t": "drive", "x": 1, "y": 0, "z": 0, "en": True, "src": "test"})
+                time.sleep(0.05)
+            end = time.time() + 1.0
+            while time.time() < end:                 # dead-man let go; the page keeps its heartbeat
+                op.send_json({"t": "drive", "x": 0, "y": 0, "z": 0, "en": False})
+                time.sleep(0.05)
+            r = read_until(op, lambda m: m["t"] == "robot" and any(s["kind"] == "deadman" and s["state"] != "measuring"
+                                                                   for s in m["stops"]), tries=200)
+            s = [s for s in r["stops"] if s["kind"] == "deadman"][-1]
+            assert s["test"] == "E1" and s["cmd_s"] is not None and s["cmd_s"] <= 0.1 and s["dist"] <= 1.0
+        csv = client.get("/api/stops.csv")
+        assert csv.status_code == 200 and "deadman" in csv.text and csv.text.startswith("time,meter,test")
+
+
+def test_guard_stop_kind_reads_the_old_guard_status():
+    from robot_server.main import guard_stop_kind
+    assert guard_stop_kind("scan 없음(0점) | 앞 - 좌 - 우 - 뒤 무시 m | 최근접 - | 가림 없음 | 정지 앞 0.12") == "no_scan"
+    assert guard_stop_kind("scan OK(300점) | 앞 가림 좌 2.0 우 2.0 뒤 무시 m | 최근접 0.00 | 가림 +0°가림 +30°가림 | 정지") == "covered"
+    assert guard_stop_kind("scan OK(432점) | 앞 1.0 좌 2.0 우 2.0 뒤 무시 m | 최근접 0.5 | 가림 없음 | 정지") is None
+    assert guard_stop_kind(None) is None

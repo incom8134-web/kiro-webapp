@@ -3,6 +3,9 @@
 Device lookup reuses the old code (`cams_config.load()` in the so101 folder),
 which knows how to find the Gemini 335 colour node and the wrist webcams.
 
+`repair_top()` brings back the Gemini's colour node after the Orbbec ROS node was used (the old
+`gemini_uvc_fix.sh`, but through a root helper instead of a password window).
+
 A camera is opened only while someone watches, and closed 3 s after the last
 viewer leaves. Only one program can open a camera at a time, so a job that
 needs the camera (skill, recording) makes the preview let go first.
@@ -10,6 +13,8 @@ needs the camera (skill, recording) makes the preview let go first.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -21,6 +26,21 @@ PREVIEW_W, PREVIEW_H = 480, 360
 JPEG_QUALITY = 60
 PREVIEW_FPS = 10.0
 IDLE_CLOSE_S = 3.0
+FPS_WINDOW_S = 1.0      # the real frame rate is counted over windows this long
+FPS_STALE_S = 3.0       # a rate older than this is not shown
+
+# Top camera repair (deploy/README.md step 6b installs the helper and the sudo rule)
+SUDO = "sudo"
+REBIND_HELPER = "/usr/local/sbin/kiro-gemini-rebind"
+FIX_SCRIPT = "gemini_uvc_fix.sh"       # in the old code folder; --check needs no root
+CHECK_TIMEOUT_S = 15.0
+HELPER_TIMEOUT_S = 30.0
+COLOUR_WAIT_S = 10.0                   # after the re-plug: how long the colour node may take to come back
+COLOUR_POLL_S = 0.5
+OK_ALREADY, REPAIRED, NOT_CONNECTED, ORBBEC_RUNNING, NO_HELPER, FAILED = (
+    "OK_ALREADY", "REPAIRED", "NOT_CONNECTED", "ORBBEC_RUNNING", "NO_HELPER", "FAILED")
+REPAIR_CODES = (OK_ALREADY, REPAIRED, NOT_CONNECTED, ORBBEC_RUNNING, NO_HELPER, FAILED)
+_repair_lock = threading.Lock()
 
 
 def assign_wrists(cams: list[dict], webcams: list[tuple[str, str]]) -> list[dict]:
@@ -53,6 +73,83 @@ def find_cameras(so101_dir: Path) -> list[dict]:
     except Exception as e:  # never let a camera problem stop the server
         log.warning("camera lookup failed: %s", e)
         return []
+
+
+# ------------------------------------------------------------ top camera repair
+def _orbbec_running() -> bool:
+    """The Orbbec ROS node (camera viewer or driving stack) holds the Gemini: it cannot be re-plugged then."""
+    try:
+        return subprocess.run(["pgrep", "-x", "component_conta"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _colour_check(script: Path) -> tuple[int, str]:
+    """`gemini_uvc_fix.sh --check` (needs no root): (exit code, its output). 0 = colour node there,
+    1 = missing (also while the Orbbec ROS node runs), 2 = Gemini not on USB. -1 = it could not run."""
+    try:
+        r = subprocess.run(["bash", str(script), "--check"], capture_output=True, text=True, timeout=CHECK_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return -1, f"{type(e).__name__}: {e}"
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def repair_top(so101_dir: Path | str) -> tuple[bool, str, str]:
+    """Bring the top camera's colour node back. Returns (ok, code, detail); ok is True for OK_ALREADY and
+    REPAIRED. The code (REPAIR_CODES) is what the page shows text for, detail is technical (a script line).
+
+      OK_ALREADY      the colour node is there, nothing was done
+      REPAIRED        the USB device was re-plugged in software and the colour node came back
+      NOT_CONNECTED   the Gemini is not on USB (cable, power, port)
+      ORBBEC_RUNNING  the Orbbec ROS node is running: stop it first
+      NO_HELPER       the root helper or its sudo rule is not installed (deploy/README.md step 6b)
+      FAILED          anything else (script missing, re-plug refused or failed, node did not come back)
+
+    It never moves anything and only re-plugs the one USB device with vendor id 2bc5, through the
+    root-owned helper (sudo -n, no password window). Blocks up to about HELPER_TIMEOUT_S + COLOUR_WAIT_S."""
+    if not _repair_lock.acquire(blocking=False):
+        return False, FAILED, "another repair is running"
+    try:
+        script = Path(so101_dir) / FIX_SCRIPT
+        if not script.is_file():
+            return False, FAILED, f"{script} not found"
+        rc, out = _colour_check(script)
+        last = (out.splitlines() or [""])[0][:200]
+        if rc == 0:
+            return True, OK_ALREADY, last
+        if rc == 2:
+            return False, NOT_CONNECTED, last
+        if rc != 1:
+            return False, FAILED, f"gemini_uvc_fix.sh --check gave {rc}: {last}"
+        if _orbbec_running():
+            return False, ORBBEC_RUNNING, last
+        if not os.access(REBIND_HELPER, os.X_OK):
+            return False, NO_HELPER, f"{REBIND_HELPER} is not installed"
+        try:
+            r = subprocess.run([SUDO, "-n", REBIND_HELPER], capture_output=True, text=True, timeout=HELPER_TIMEOUT_S)
+        except FileNotFoundError:
+            return False, NO_HELPER, f"{SUDO} not found"
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return False, FAILED, f"{type(e).__name__}: {e}"
+        said = (r.stdout.strip().splitlines() or [""])[-1][:200]
+        if r.stderr.lstrip().startswith("sudo:"):   # sudo itself said no (the helper writes to stdout only)
+            return False, NO_HELPER, r.stderr.strip().splitlines()[0][:200]
+        if r.returncode == 2:
+            return False, NOT_CONNECTED, said
+        if r.returncode == 3:
+            return False, ORBBEC_RUNNING, said
+        if r.returncode != 0:
+            return False, FAILED, f"helper exit {r.returncode}: {said}"
+        end = time.monotonic() + COLOUR_WAIT_S
+        while True:
+            if _colour_check(script)[0] == 0:
+                log.info("top camera repaired: %s", said)
+                return True, REPAIRED, said
+            if time.monotonic() >= end:
+                return False, FAILED, f"the colour node did not come back within {COLOUR_WAIT_S:.0f} s"
+            time.sleep(COLOUR_POLL_S)
+    finally:
+        _repair_lock.release()
 
 
 class _Pattern:
@@ -99,6 +196,8 @@ class Camera:
         self._stop = threading.Event()
         self.paused_by: str | None = None  # a job holds the camera
         self.error: str | None = None
+        self.fps_real: float | None = None  # frames really read per second (the camera's own rate), not the preview rate
+        self._fps_at = 0.0
 
     # -- viewers ------------------------------------------------------------
     def attach(self) -> None:
@@ -162,6 +261,7 @@ class Camera:
         self.error = None
         log.info("camera %s opened (%s)", self.key, self.device)
         period, next_t, fails = 1.0 / self.fps, 0.0, 0
+        n_read, t_read = 0, time.monotonic()
         try:
             while not self._stop.is_set():
                 ok, frame = cap.read()  # keep reading at full rate so the picture is never old
@@ -174,6 +274,10 @@ class Camera:
                     continue
                 fails = 0
                 now = time.monotonic()
+                n_read += 1
+                if now - t_read >= FPS_WINDOW_S:
+                    self.fps_real, self._fps_at = n_read / (now - t_read), now
+                    n_read, t_read = 0, now
                 with self._lock:
                     idle = self._viewers == 0 and now - self._last_view > IDLE_CLOSE_S
                 if idle:
@@ -191,11 +295,14 @@ class Camera:
             cap.release()
             log.info("camera %s closed", self.key)
             self._stop.set()  # ends every open stream; the page reconnects and attach() reopens
+            self.fps_real = None
             with self._lock:
                 self._jpeg = None
                 self._lock.notify_all()
 
     def info(self) -> dict:
         live = bool(self._thread and self._thread.is_alive())
+        fps = self.fps_real
+        fresh = live and fps is not None and time.monotonic() - self._fps_at < FPS_STALE_S
         return {"key": self.key, "device": self.device, "live": live, "viewers": self._viewers,
-                "paused_by": self.paused_by, "error": self.error}
+                "paused_by": self.paused_by, "error": self.error, "fps_real": round(fps, 1) if fresh else None}

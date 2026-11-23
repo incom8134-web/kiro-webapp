@@ -8,7 +8,8 @@ The recording itself is LeRobot's `lerobot-record`, set up the way the old "SO-1
   start     one recording at a time; a copy of the dataset is made before episodes are added to it
   control   next episode / record it again / stop and save (stdin of the runner), force stop (Ctrl+C)
   progress  from the runner's @REC lines: phase, episode, when the phase began
-  review    episode and frame counts read back from the dataset (meta/info.json) after it ended
+  review    episode and frame counts read back from the dataset (meta/info.json) after it ended, then a read
+            check of the files (and, on the robot, a LeRobot load): "reads OK" or "broken" with the copy to use
   pack      the old pack_dataset.sh (tar.gz + checksum + training notes for the upload)
 
 Only the unlocked engineer reaches any of this (robot_server/main.py).
@@ -27,6 +28,7 @@ import time
 from pathlib import Path
 
 from .jobs import JobSpec
+from .record_runner import files_check
 
 log = logging.getLogger("kiro.studio")
 HERE = Path(__file__).resolve().parent
@@ -42,6 +44,8 @@ MIN_FREE_GB = 2.0        # the old window's disk check
 STOP_SAVE_S = 180.0      # the old window: after "stop" the recorder has 180 s to save, then Ctrl+C
 MIN_PHASE_S = 1.0        # next / again / stop only after the phase ran this long (no empty episode, no double click)
 BACKUPS_KEPT = 3
+VERIFY_TIMEOUT_S = 150.0   # the LeRobot read check (importing LeRobot alone takes a while on the Jetson)
+VERIFY_WAIT_S = 3.0        # a new recording waits this long for a read check that is still running
 # Copy of ~/so101/record_gui.py ARMS (ports, followers, calibration files), used only in mock mode.
 MOCK_ARMS = {
     "right": {"ports": ["right_follower", "right_leader"], "followers": ["right"],
@@ -138,6 +142,8 @@ class Recorder:
         self.root = Path(cfg.datasets_dir or default).expanduser()
         self.backups = Path(cfg.backups_dir or ("~/.cache/kiro-webapp/" + ("mock_" if robot.mock else "") + "dataset_backups")).expanduser()
         self.lock = threading.Lock()
+        self._poll_lock = threading.Lock()
+        self._verify_thread: threading.Thread | None = None
         self.starting = False
         self.session: dict | None = None
         self.last_check: dict | None = None
@@ -361,6 +367,11 @@ class Recorder:
         with self.lock:   # a double click or a second device cannot start a second recording
             if self.starting or self.r.jobs.running("record"):
                 return False, "A recording is already running."
+            t = self._verify_thread   # the read check of the last recording must not see a dataset being added to
+            if t and t.is_alive():
+                t.join(VERIFY_WAIT_S)
+                if t.is_alive():
+                    return False, "VERIFYING"
             self.starting = True
         try:
             res = self.check(settings, estop)
@@ -434,16 +445,75 @@ class Recorder:
             return
         if j.code is None:      # output not fully read yet
             return
-        info = self.info(sess["settings"]["repo"])
-        added = max(0, info.get("episodes", 0) - sess["base"]) if info["ok"] else 0
-        hint = next((h for pat, h in HINTS if any(pat in e for e in sess["errors"])), "other")
-        # -9: E-STOP kills the recorder at once like teleop (robot.on_estop); it cannot finish the dataset then
-        state = "estop" if j.code == -9 else "stopped" if (sess["forced"] or j.code in (130, -2)) else "done" if j.code == 0 else "failed"
-        sess["result"] = {"state": state, "code": j.code, "info": info, "added": added, "hint": hint if state == "failed" else "",
-                          "ended": j.ended or time.time()}
-        sess["phase"] = state
+        with self._poll_lock:   # called from two places: only one of them ends the session
+            if sess["result"] is not None:
+                return
+            info = self.info(sess["settings"]["repo"])
+            check_it = info["ok"] or info["exists"]   # a folder whose info.json cannot be read is exactly what the check is for
+            added = max(0, info.get("episodes", 0) - sess["base"]) if info["ok"] else 0
+            hint = next((h for pat, h in HINTS if any(pat in e for e in sess["errors"])), "other")
+            # -9: E-STOP kills the recorder at once like teleop (robot.on_estop); it cannot finish the dataset then
+            state = "estop" if j.code == -9 else "stopped" if (sess["forced"] or j.code in (130, -2)) else "done" if j.code == 0 else "failed"
+            sess["result"] = {"state": state, "code": j.code, "info": info, "added": added, "hint": hint if state == "failed" else "",
+                              "ended": j.ended or time.time(), "verify": {"state": "checking"} if check_it else None}
+            sess["phase"] = state
+            self._ds_cache = (0.0, [])
+            self.r.event("studio", f"recording ended: {state}, {added} episode(s) saved")
+            if check_it:
+                self._verify_thread = threading.Thread(target=self._verify, args=(sess,), name="dataset-check", daemon=True)
+                self._verify_thread.start()
+
+    # ---------------------------------------------------------------- read check
+    def verify_dataset(self, repo: str) -> dict:
+        """Can the dataset be read back? {state: ok | broken | unchecked, episodes, frames, problems, how}.
+        First the files (pure Python: parquet and mp4 endings, what a cut-off recorder leaves unfinished), then on
+        the robot LeRobot itself loads it in a short subprocess (the LeRobot venv), like pack_dataset.sh."""
+        root = self.path_of(repo)
+        r = files_check(root) if root else {"ok": False, "episodes": 0, "frames": 0, "problems": ["no such dataset"]}
+        v = {"state": "ok" if r["ok"] else "broken", "episodes": r["episodes"], "frames": r["frames"],
+             "problems": r["problems"][:6], "how": "files"}
+        if not r["ok"] or self.r.mock or not r["episodes"]:
+            return v
+        read = self._lerobot_read(repo, root)
+        v["how"] = "lerobot"
+        if read.get("ok") is True:
+            v.update(episodes=read.get("episodes", v["episodes"]), frames=read.get("frames", v["frames"]))
+        elif read.get("ok") is False:
+            v.update(state="broken", problems=[str(read.get("error", "LeRobot could not read it"))[:300]])
+        else:   # LeRobot did not run or answer: the files look complete, but the claim "reads OK" is not made
+            v.update(state="unchecked", problems=[str(read.get("error", "no answer"))[:300]])
+        return v
+
+    def _lerobot_read(self, repo: str, root: Path) -> dict:
+        cmd = [str(self.r.venv / "bin" / "python"), str(HERE / "record_runner.py"), "verify", json.dumps({"repo": repo, "root": str(root)})]
+        env = {**{k: v for k, v in os.environ.items() if k != "PYTHONPATH"}, "HF_HUB_OFFLINE": "1", "HF_LEROBOT_HOME": str(self.root)}
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=VERIFY_TIMEOUT_S, env=env)
+        except subprocess.TimeoutExpired:
+            return {"ok": None, "error": f"no answer within {VERIFY_TIMEOUT_S:.0f} s"}
+        except OSError as e:
+            return {"ok": None, "error": f"LeRobot Python could not start: {e.strerror or e}"}
+        for line in reversed(r.stdout.splitlines()):
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except ValueError:
+                    break
+        return {"ok": None, "error": "no answer: " + ((r.stderr.strip().splitlines() or ["the check printed nothing"])[-1])[:200]}
+
+    def _verify(self, sess: dict) -> None:
+        res = sess["result"]
+        try:
+            v = self.verify_dataset(sess["settings"]["repo"])
+        except Exception as e:  # noqa: BLE001 - never leave the page on "checking" for ever
+            log.exception("dataset check failed")
+            v = {"state": "unchecked", "episodes": 0, "frames": 0, "problems": [f"{type(e).__name__}: {e}"[:300]], "how": "files"}
+        res["verify"] = v   # one assignment: the snapshot never sees half of it
         self._ds_cache = (0.0, [])
-        self.r.event("studio", f"recording ended: {state}, {added} episode(s) saved")
+        text = {"ok": f"dataset reads OK ({v['episodes']} episodes)", "broken": "dataset BROKEN: " + "; ".join(v["problems"][:2]) +
+                (f" (copy from before: {sess['backup']})" if sess.get("backup") else " (no copy)"),
+                "unchecked": "dataset not fully checked: " + "; ".join(v["problems"][:1])}[v["state"]]
+        self.r.event("studio", text)
 
     # --------------------------------------------------------------- control
     def control(self, cmd: str, ep: object, phase: object, who: str) -> tuple[bool, str]:
