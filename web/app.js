@@ -355,8 +355,11 @@ for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("c
 $("voice-base").addEventListener("click", () => send({ t: "base", on: true }));   // voice needs the wheel program
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
-$("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
-const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
+// Both arms at once, each with the leader of its own side (two separate teleop programs)
+$("tele-both").addEventListener("click", () => {
+  const on = !(jobRunning("teleop_right") && jobRunning("teleop_left"));
+  for (const side of ["right", "left"]) if (jobRunning("teleop_" + side) !== on) send({ t: "teleop", side, on });
+});
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
 
 // Tabs in the dock: Drive, Arms, Voice, System. The last one used is remembered.
@@ -565,9 +568,12 @@ function renderRobot() {
     const off = !me || blocked ? "disabled" : "";
     const status = blocked ? t("arm.locked") : f && f.state === "missing" ? t("arm.missing")
       : f && f.state === "ok" ? `${f.vmin ?? "-"} V` : f && f.state === "silent" ? t("arm.nopower") : "";
+    const ld = b[side + "_leader"];        // this arm's own leader on the Jetson (named by its serial: any USB port)
+    const lead = !ld ? "" : ld.state === "missing" ? t("arm.leader.missing") : t("arm.leader.ok");
     return `<div class="armcol">
       <div class="row"><b class="grow">${t("arm." + side)}</b><span class="small mute">${esc(status)}</span></div>
       <button class="btn wide${tele ? " on" : ""}" data-tele="${side}" ${off}>${t(tele ? "arm.teleop.off" : "arm.teleop.on")}</button>
+      <span class="small ${ld && ld.state === "missing" ? "err" : "mute"}">${esc(lead)}</span>
       <div class="trio">
         <button class="btn" data-arm="${side}" data-act="fold" ${off}>${t("arm.fold")}</button>
         <button class="btn" data-arm="${side}" data-act="hold" ${off}>${t("arm.hold")}</button>
@@ -609,14 +615,11 @@ function renderRobot() {
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
-  const follows = following();
-  $("wave-btn").disabled = !me || leader.on || waving || follows || estop;
-  // One leader arm on the Jetson moves both arms (copy)
-  setBtn($("follow-btn"), t(follows ? "follow.stop" : "follow.start"), follows ? "ri-stop-fill" : "ri-git-fork-line");
-  $("follow-btn").classList.toggle("on", follows);
-  $("follow-btn").disabled = !me || leader.on || (estop && !follows) || (!follows && !r.left_arm_ok);
-  $("follow-st").textContent = follows ? t("follow.live") : !r.left_arm_ok ? t("follow.locked") : t("follow.hint");
-  $("follow-st").className = "small " + (follows ? "accent" : !r.left_arm_ok ? "note err" : "mute");
+  $("wave-btn").disabled = !me || leader.on || waving || estop;
+  const both = jobRunning("teleop_right") && jobRunning("teleop_left");
+  setBtn($("tele-both"), t(both ? "arm.teleop.bothoff" : "arm.teleop.both"), both ? "ri-stop-fill" : "ri-git-merge-line");
+  $("tele-both").classList.toggle("on", both);
+  $("tele-both").disabled = !me || !r.left_arm_ok || (estop && !both);
   $("wave-btn").classList.toggle("on", waving);
 
   // Voice
@@ -714,7 +717,7 @@ function renderRobot() {
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
 
   renderCams();
-  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "follow-btn"].includes(el.id)) el.disabled = !me;
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both"].includes(el.id)) el.disabled = !me;
 
   tabDot("drive", baseOn, !$("base-err").hidden);
   tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
@@ -856,8 +859,8 @@ $("say-box").addEventListener("submit", (e) => {
  * servo board, reads the six joints 30 times per second and sends them to the robot, which
  * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
 const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
-// Which follower arm(s) the laptop's leader arm moves: right, left or both (remembered in this browser)
-try { leader.side = ["right", "left", "both"].includes(localStorage.getItem("kiro-leader-side")) ? localStorage.getItem("kiro-leader-side") : "right"; } catch (e) { /* private window */ }
+// Which leader is plugged into this laptop: it moves the follower arm of its own side (remembered in this browser)
+try { leader.side = ["right", "left"].includes(localStorage.getItem("kiro-leader-side")) ? localStorage.getItem("kiro-leader-side") : "right"; } catch (e) { /* private window */ }
 for (const b of document.querySelectorAll("[data-lside]")) b.addEventListener("click", () => {
   if (leader.on) return;                     // stop the leader arm first
   leader.side = b.dataset.lside;

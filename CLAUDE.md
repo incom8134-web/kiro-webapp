@@ -43,7 +43,7 @@ Web command center for the KIRO robot: an SO-101 dual-arm mobile robot on a meca
 | `robot_server/robot.py` | Arms, teleop, skills, voice, health, shutdown. Starts the OLD programs in `~/so101` |
 | `robot_server/jobs.py` | Child processes with device locks (one program per arm port or camera) |
 | `robot_server/camera.py` | MJPEG preview, device lookup through the old `cams_config.py` |
-| `robot_server/leader_relay.py`, `leadermath.py` | One leader arm plugged into the Jetson moves BOTH follower arms the same way (copy): the relay reads the leader 30 times a second and feeds the old `twin_bridge.py` (its joint limits, speed limit and hold). Needs the left arm unlocked (`KIRO_LEFT_ARM_OK=1`) |
+| `robot_server/leadermath.py` | Leader arm on the laptop: leader servo positions -> follower targets (the old `twin_bridge.py` moves the arm with its limits). Each leader moves the arm of its own side. The one-leader-for-both-arms copy was removed on 23 Nov 2026 (user's choice): the right leader drives the right arm, the left leader the left arm (teleop and Studio recording) |
 | `robot_server/servo_sync.py` | Before the twin bridge switches arm motors on: every target = the motor's current position (after power-up the targets are 0, and a recalibration makes old targets wrong: the arm would flip). Refuses to start if a motor does not answer |
 | `robot_server/wheel_stop.py` | E-STOP wheel check after the wheel program stopped: a wheel still turning gets speed 0 and torque off. Never starts a wheel |
 | `robot_server/servo_probe.py` | Read-only servo voltage / temperature / current, run as a short subprocess |

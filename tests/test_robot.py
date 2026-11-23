@@ -315,56 +315,6 @@ def test_system_check_sees_gamepad_and_usb_mic(cfg, tmp_path):
         r.close()
 
 
-def test_one_leader_moves_both_arms_only_when_the_left_arm_is_allowed(cfg):
-    import dataclasses
-    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
-        take(op)
-        op.send_json({"t": "follow", "on": True})
-        assert note(op, "follow")["msg"] == "LEFT_BLOCKED"        # broken left calibration: no both-arm copy
-    ok = dataclasses.replace(cfg, left_arm_ok=True)
-    with TestClient(create_app(ok, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
-        take(op)
-        op.send_json({"t": "follow", "on": True})
-        assert note(op, "follow")["ok"]
-        r = robot_until(op, lambda m: m["bridge"]["running"] and "relay" in m["jobs"] and m["jobs"]["relay"]["running"])
-        assert r["bridge"]["mode"] == "follow" and r["bridge"]["side"] == "both"
-        op.send_json({"t": "wave", "side": "right"})
-        assert "busy" in note(op, "wave")["msg"]                  # one program per arm
-        op.send_json({"t": "estop", "on": True})                   # E-STOP kills the relay and the bridge
-        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
-        op.send_json({"t": "estop", "on": False})
-        op.send_json({"t": "drive", "en": False})
-        op.send_json({"t": "follow", "on": True})
-        assert note(op, "follow")["ok"]
-        robot_until(op, lambda m: m["bridge"]["running"] and m["jobs"]["relay"]["running"])
-        op.send_json({"t": "follow", "on": False})
-        assert note(op, "follow")["ok"]
-        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
-
-
-def test_leader_relay_sends_one_target_for_both_arms():
-    from robot_server.leadermath import leader_to_target
-    cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in
-           ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]}
-    tgt = leader_to_target(cal, [2000, 2000, 2000, 2000, 3000, 1500])
-    assert tgt["shoulder_pan"] == 0.0 and tgt["wrist_roll"] == round(1000 * 360 / 4095, 2) and tgt["gripper"] == 25.0
-
-
-def test_relay_stops_when_the_arm_program_ends(cfg):
-    import dataclasses
-    from robot_server.robot import Robot
-    r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
-    try:
-        assert r.follow(True, "t")[0]
-        assert r.jobs.running("relay") and r.jobs.running("bridge")
-        r.jobs.kill(["bridge"])                      # the bridge dies (a motor stopped answering)
-        r._follow_watch()
-        assert not r.jobs.running("relay")
-        assert any("copy stopped" in e["text"] for e in r.events)
-    finally:
-        r.close()
-
-
 def test_servo_sync_sets_targets_to_positions_and_refuses_bad_readings():
     from robot_server.servo_sync import ADDR_GOAL, ADDR_POS, ADDR_TORQUE, sync_motors
     regs = {1: {ADDR_POS: 2020, ADDR_GOAL: 0, ADDR_TORQUE: 0},      # power-up: target 0, torque off
@@ -382,15 +332,6 @@ def test_servo_sync_sets_targets_to_positions_and_refuses_bad_readings():
     assert all(i == 1 for i, _, _ in writes)                          # motor 2 was not written
     noisy = iter([100, 100, 300, 100, 100])
     assert sync_motors(lambda i, a: next(noisy) if a == ADDR_POS else 0, lambda *a: None, ids=[4]) == {4: "readings disagree"}
-
-
-def test_follow_offsets_shift_one_arm_without_a_jump_at_the_seam():
-    from robot_server.leadermath import apply_offsets
-    tgt = {"wrist_flex": -30.0, "elbow_flex": 96.0, "gripper": 5.0}
-    out = apply_offsets(tgt, {"wrist_flex": 123, "gripper": 50})
-    assert out == {"wrist_flex": 93.0, "elbow_flex": 96.0, "gripper": 5.0}      # gripper never shifted
-    assert apply_offsets({"wrist_flex": 179.0}, {"wrist_flex": 123})["wrist_flex"] == -58.0   # 302 -> -58, continuous
-    assert apply_offsets(tgt, {}) == tgt
 
 
 def test_wheel_check_switches_off_a_wheel_that_still_turns():
@@ -592,26 +533,33 @@ def test_obstacle_stop_switch_writes_lidar_env_and_restarts_the_wheels(cfg, tmp_
     finally:
         r.close()
 
+def test_each_arm_follows_its_own_leader_separately_or_both_at_once(cfg):
+    """Right leader -> right arm, left leader -> left arm: two separate teleop programs, one or both running."""
+    from robot_server.robot import PORT, Robot
+    r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
+    try:
+        assert r.teleop("right", True, "t")[0] and r.jobs.running("teleop_right")
+        assert r.teleop("left", True, "t")[0] and r.jobs.running("teleop_left")      # at the same time
+        assert r.jobs.get("teleop_right").spec.uses == {PORT["right_follower"], PORT["right_leader"]}
+        assert r.jobs.get("teleop_left").spec.uses == {PORT["left_follower"], PORT["left_leader"]}
+        assert r.teleop("right", False, "t")[0] and not r.jobs.running("teleop_right")
+        assert r.jobs.running("teleop_left")                                          # the other arm goes on
+        assert not hasattr(r, "follow")                                               # one leader for both arms: removed
+    finally:
+        r.close()
 
-def test_laptop_leader_drives_one_or_both_arms_with_the_left_correction(cfg):
+
+def test_laptop_leader_moves_only_the_arm_of_its_own_side(cfg):
     from robot_server.robot import JOINTS, Robot
     r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
     sent = []
-    r._bridge_send_arms = sent.append
+    r._bridge_send = lambda side, target: sent.append(side)
     try:
-        assert r.leader(True, "both", "t")[0] and r.bridge_side == "both" and r.bridge_mode == "leader"
-        r.leader_cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
-        r.leader_offsets = {"left": {"wrist_flex": 10.0, "gripper": 50.0}}
-        r.leader_pos("both", [2000] * 6)
-        assert set(sent[-1]) == {"right", "left"}
-        assert abs(sent[-1]["right"]["wrist_flex"]) < 0.01 and abs(sent[-1]["left"]["wrist_flex"] - 10.0) < 0.01
-        assert sent[-1]["left"]["gripper"] == sent[-1]["right"]["gripper"]   # never the gripper
-        r.leader_pos("right", [2000] * 6)                                   # not the running side: ignored
-        assert len(sent) == 1
-        assert r.leader(False, "both", "t")[0] and not r.jobs.running("bridge")
+        assert not r.leader(True, "both", "t")[0]                                     # no single leader for both arms
         assert r.leader(True, "left", "t")[0] and r.bridge_side == "left"
+        r.leader_cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
         r.leader_pos("left", [2000] * 6)
-        assert set(sent[-1]) == {"left"}
-        assert not r.leader(True, "nonsense", "t")[0]
+        r.leader_pos("right", [2000] * 6)                                             # not this leader's side: ignored
+        assert sent == ["left"]
     finally:
         r.close()

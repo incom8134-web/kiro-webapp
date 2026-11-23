@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .camera import Camera, find_cameras, repair_top
 from .config import Config
-from .leadermath import JOINTS, apply_offsets, leader_to_target
+from .leadermath import JOINTS, leader_to_target
 from .jobs import Jobs, JobSpec
 from .lidar_setup import LidarSetup, Result, bin_start, env_get, env_update, mask_str, parse_mask
 from .recorder import Recorder
@@ -73,12 +73,10 @@ WIZARD_USES = {
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
 ENGINEER_JOBS = ("record", "pack", "wizard")  # their output is shown only on the Studio page
-ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves (relay feeds the bridge)
+ARM_JOBS = ("skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves
 # Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
 TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
-# Per-arm angle corrections for one leader driving the followers (leader_relay.py reads the same file)
-FOLLOW_OFFSETS = Path("~/.config/kiro-webapp/follow_offsets.json").expanduser()
 JOINTS_ADDR = ("127.0.0.1", 5005)  # twin_bridge sends the arms' measured joint angles here, 30 times a second
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
@@ -166,7 +164,6 @@ class Robot:
         self.bridge_side: str | None = None
         self.bridge_mode: str | None = None
         self.leader_cal: dict | None = None
-        self.leader_offsets: dict = {}
         self.leader_rx, self.leader_last, self.leader_deg = 0, 0.0, None
         self._seq = 0
         self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -837,11 +834,8 @@ class Robot:
         return "Arm not ready (" + "; ".join(bad) + "). Check its power and cables."
 
     def _bridge_send(self, side: str, target: dict) -> None:
-        self._bridge_send_arms({side: target})
-
-    def _bridge_send_arms(self, arms: dict) -> None:
         self._seq += 1
-        pkt = {"cmd": "target", "t": time.time(), "seq": self._seq, "units": "deg", "arms": arms}
+        pkt = {"cmd": "target", "t": time.time(), "seq": self._seq, "units": "deg", "arms": {side: target}}
         try:
             self._udp.sendto(json.dumps(pkt).encode(), BRIDGE_ADDR)
         except OSError:
@@ -861,22 +855,15 @@ class Robot:
         return None
 
     def leader(self, on: bool, side: str, who: str) -> tuple[bool, str]:
-        """The leader arm on the operator's laptop moves the right, the left or both follower arms
-        (side = the follower arm(s)). Its readings come in through leader_pos()."""
+        """The leader arm on the operator's laptop moves the follower arm of the same side (right leader ->
+        right arm, left leader -> left arm). Its readings come in through leader_pos()."""
         if not on:
             if self.bridge_mode == "leader":
                 return self._stop_job("bridge", who)
             return True, ""
-        if side not in SIDES:
+        if side not in ("right", "left"):
             return False, "Unknown arm."
-        # This robot has one leader arm: its calibration file, whatever arm it drives
-        folder = HF_CALIB / "teleoperators" / "so_leader"
-        f = next((folder / f"{s}_leader.json" for s in ("right", "left") if (folder / f"{s}_leader.json").exists()),
-                 folder / "right_leader.json")
-        try:
-            self.leader_offsets = json.loads(FOLLOW_OFFSETS.read_text()) if FOLLOW_OFFSETS.exists() else {}
-        except (OSError, ValueError):
-            self.leader_offsets = {}
+        f = HF_CALIB / "teleoperators" / "so_leader" / f"{side}_leader.json"
         try:
             self.leader_cal = json.loads(f.read_text())
             bad = [j for j in JOINTS if self.leader_cal[j]["range_max"] <= self.leader_cal[j]["range_min"]]
@@ -887,49 +874,6 @@ class Robot:
         if bad:
             return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
         return self._bridge_start(side, "leader", who)
-
-    def follow(self, on: bool, who: str) -> tuple[bool, str]:
-        """The leader arm plugged into the Jetson moves BOTH follower arms the same way (copy). The relay
-        reads the leader; the twin bridge moves the arms with its safety limits and holds them on stop."""
-        if not on:
-            ok, msg = self._stop_job("relay", who) if self.jobs.running("relay") else (True, "")
-            if self.bridge_mode == "follow" and self.jobs.running("bridge"):
-                return self._stop_job("bridge", who)
-            return ok, msg
-        leader = next((s for s in ("right", "left") if os.path.exists(PORT[f"{s}_leader"])), None)
-        if leader is None and not self.mock:
-            return False, "No leader arm is plugged into the Jetson."
-        leader = leader or "right"
-        f = HF_CALIB / "teleoperators" / "so_leader" / f"{leader}_leader.json"
-        if not self.mock:
-            try:
-                cal = json.loads(f.read_text())
-                bad = [j for j in JOINTS if cal[j]["range_max"] - cal[j]["range_min"] < 100]
-            except (OSError, ValueError, KeyError, TypeError):
-                return False, f"Leader calibration not found or unreadable: {f}"
-            if bad:
-                return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
-        ok, msg = self._bridge_start("both", "follow", who)
-        if not ok:
-            return ok, msg
-        lport = PORT[f"{leader}_leader"]
-        if self.mock:
-            cmd = self._mock_cmd(f"leader_relay {leader} -> both arms")
-        else:
-            cmd = [sys.executable, str(HERE / "leader_relay.py"), "--port", lport, "--calib", str(f), "--arms", "right,left",
-                   "--to", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}"]
-        ok, msg = self._start("relay", JobSpec(cmd, frozenset({lport}), label=f"{leader} leader -> both arms", stop_wait=3.0), who)
-        if not ok:
-            self._stop_job("bridge", who)
-            return ok, msg
-        return True, "Both arms follow the leader arm."
-
-    def _follow_watch(self) -> None:
-        """The relay only feeds the bridge: when the bridge ends (a motor stopped answering, E-STOP...)
-        the relay is stopped too, so the page shows the copy as off and the bridge's error stays visible."""
-        if self.jobs.running("relay") and not self.jobs.running("bridge"):
-            self.jobs.stop("relay")
-            self.event("server", "both-arm copy stopped: the arm program ended (see the Arms tab)")
 
     def leader_pos(self, side: str, raw: object) -> None:
         """Called about 30 times per second while the leader arm streams. Never blocks."""
@@ -945,8 +889,7 @@ class Robot:
             self.leader_deg = leader_to_target(self.leader_cal, raw)
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return
-        # The same correction per arm as the Jetson leader copy (e.g. the left wrist), never the gripper
-        self._bridge_send_arms({s: apply_offsets(self.leader_deg, self.leader_offsets.get(s, {})) for s in _sides(side)})
+        self._bridge_send(side, self.leader_deg)
 
     def wave(self, side: str, who: str) -> tuple[bool, str]:
         """A small hello from the arm's current pose: wrist waves, gripper opens and closes, back to start."""
@@ -1298,7 +1241,6 @@ class Robot:
         while not self._stop.is_set():
             try:
                 h = {"jetson": self._jetson(), "t": time.time()}
-                self._follow_watch()
                 self._lidar_watch()
                 self.rec.poll()
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})
