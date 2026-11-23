@@ -572,3 +572,13 @@ def test_two_laptop_leaders_move_each_arm_of_their_own_side(cfg):
         assert sent[-1] == ("left", 0.0) and len(sent) == 3
     finally:
         r.close()
+
+
+def test_a_broken_leader_calibration_is_refused():
+    """24 Nov 2026: the left leader's file had a 6-step gripper range and a 0..4095 elbow."""
+    from robot_server.robot import JOINTS, leader_cal_problems
+    good = {j: {"range_min": 800, "range_max": 3200} for j in JOINTS}
+    good["wrist_roll"] = {"range_min": 0, "range_max": 4095}          # a full turn is normal for the wrist roll
+    assert leader_cal_problems(good) == []
+    bad = {**good, "gripper": {"range_min": 2045, "range_max": 2051}, "elbow_flex": {"range_min": 0, "range_max": 4095}}
+    assert leader_cal_problems(bad) == ["elbow_flex", "gripper"]

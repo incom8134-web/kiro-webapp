@@ -133,6 +133,18 @@ def end_reason(info: dict, lines: list[str]) -> str | None:
     return "ERROR" if code > 0 else None
 
 
+def leader_cal_problems(cal: dict) -> list[str]:
+    """Joints of a leader calibration that cannot be right: a range of a few steps (the joint was not moved
+    while calibrating; 24 Nov 2026: the left leader's gripper had 6 steps and snapped open), or a shoulder /
+    elbow range across the whole 0..4095 circle (it crossed the sensor's wrap-around point)."""
+    bad = []
+    for j in JOINTS:
+        lo, hi = cal[j]["range_min"], cal[j]["range_max"]
+        if hi - lo < 300 or (j in ("shoulder_lift", "elbow_flex") and hi - lo > 4000):
+            bad.append(j)
+    return bad
+
+
 def _sides(side: str) -> list[str]:
     return ["right", "left"] if side == "both" else [side]
 
@@ -863,17 +875,20 @@ class Robot:
             return True, ""
         if side not in SIDES:
             return False, "Unknown arm."
+        why = self._arm_ok(side)
+        if why:
+            return False, why
         cals: dict = {}
         for s in _sides(side):
             f = HF_CALIB / "teleoperators" / "so_leader" / f"{s}_leader.json"
             try:
                 cal = json.loads(f.read_text())
-                bad = [j for j in JOINTS if cal[j]["range_max"] <= cal[j]["range_min"]]
+                bad = leader_cal_problems(cal)
             except (OSError, ValueError, KeyError, TypeError):
                 if not self.mock:
                     return False, f"Leader calibration not found or unreadable: {f}"
                 continue
-            if bad:
+            if bad and not self.mock:  # mock mode reads this computer's files but never moves an arm
                 return False, f"{s} leader calibration is broken (" + ", ".join(bad) + "). Recalibrate that leader arm."
             cals[s] = cal
         self.leader_cals = cals
