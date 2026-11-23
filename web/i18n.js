@@ -180,6 +180,8 @@ const STRINGS = {
     "voice.howto": "Say \"forward\", \"back\", \"left\", \"right\", \"turn left\", \"turn right\". The robot drives slowly until you say \"stop\" (at most 1 m).",
     "voice.https": "This device's microphone works only on the https address: {url} (accept the warning once).",
     "voice.denied": "The browser did not allow the microphone. Allow it in the address bar, then tap again.",
+    "voice.nomicapi": "This browser cannot use the microphone. Use Chrome or Edge.",
+    "voice.rxok": "Sound is reaching the robot. Speak in the chosen language.", "voice.rxnone": "No sound is reaching the robot yet.",
     "voice.nomic": "No USB microphone: voice runs for typed and quick commands only.",
     "voice.heard": "Heard", "voice.lang": "Speech language", "voice.koonly": "The English speech model is not installed yet (vosk-model-small-en-us-0.15).",
 
@@ -629,6 +631,8 @@ const STRINGS = {
     "voice.howto": "\"앞으로\", \"뒤로\", \"왼쪽\", \"오른쪽\", \"좌회전\", \"우회전\" 이라고 말하세요. \"멈춰\" 라고 할 때까지 천천히 갑니다 (최대 1 m).",
     "voice.https": "이 기기의 마이크는 https 주소에서만 됩니다: {url} (경고를 한 번 허용하세요).",
     "voice.denied": "브라우저가 마이크를 허용하지 않았습니다. 주소창에서 허용한 뒤 다시 누르세요.",
+    "voice.nomicapi": "이 브라우저는 마이크를 쓸 수 없습니다. Chrome 이나 Edge 를 쓰세요.",
+    "voice.rxok": "소리가 로봇에 들어가고 있습니다. 고른 언어로 말하세요.", "voice.rxnone": "아직 로봇에 소리가 들어가지 않습니다.",
     "voice.nomic": "USB 마이크가 없습니다: 음성은 입력 명령과 빠른 명령만 받습니다.",
     "voice.heard": "인식", "voice.lang": "음성 언어", "voice.koonly": "영어 음성 모델이 아직 설치되지 않았습니다 (vosk-model-small-en-us-0.15).",
 

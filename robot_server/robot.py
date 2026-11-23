@@ -157,6 +157,7 @@ class Robot:
         self.voice_lang = "ko"
         self.voice_step = "big"  # VOICE_STEPS: "big" (default) or "test" (0.2 m / 45 degrees, the voice test form)
         self.voice_mic = "device"  # "device" = the operator's phone / laptop (sound from the page), "robot" = USB mic
+        self.voice_rx_t = 0.0  # when the last piece of sound from the page arrived
         self.voice_log: deque[dict] = deque(maxlen=12)  # the voice node's last tagged lines, with their time
         self.servo_scan: dict | None = None
         self._wizard_steps: list[dict] | None = None
@@ -600,15 +601,17 @@ class Robot:
         model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
         if not self.mock and not model.is_dir():
             return False, f"Speech model not installed: {model}"
+        extra = ""
         if mic == "device":
             device = f"udp:{VOICE_UDP[1]}"
+            extra = " -p min_rms:=150.0"  # the browser's noise suppression makes speech quieter than the USB mic
         else:  # no USB microphone: start without one, so typed and quick commands still work (they use the node too)
             device = "auto" if self.mock or self.usb_mic() else "none"
         if self.mock:
             cmd = self._mock_cmd(f"voice ({lang}, {mic} microphone, listening)")
         else:
             cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} {VOICE_STEPS[step]} "
-                                             f"-p lang:={lang} -p model_path:={model} -p device:={device}"]
+                                             f"-p lang:={lang} -p model_path:={model} -p device:={device}{extra}"]
         self.voice_lang, self.voice_step, self.voice_mic = lang, step, mic
         self.voice_log.clear()
         ok, msg = self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}", on_line=self._voice_line), who)
@@ -618,6 +621,7 @@ class Robot:
         """Sound from the operator's phone or laptop, about 8 pieces a second. Never blocks."""
         if self.voice_mic != "device" or not data or not self.jobs.running("voice"):
             return
+        self.voice_rx_t = time.monotonic()
         try:
             self._udp.sendto(data[:16000], VOICE_UDP)
         except OSError:
@@ -1332,7 +1336,7 @@ class Robot:
                          **({"live": cam.info()["live"], "paused_by": cam.paused_by, "error": cam.error} if cam else {})})
         return {
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
-            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step, "voice_mic": self.voice_mic,
+            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step, "voice_mic": self.voice_mic, "voice_rx": {"age": round(time.monotonic() - self.voice_rx_t, 1) if self.voice_rx_t else None},
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),

@@ -267,10 +267,12 @@ let voiceStep = (() => { try { return localStorage.getItem("kiro-voice-step"); }
 let voiceMic = (() => { try { return localStorage.getItem("kiro-voice-mic"); } catch (e) { return null; } })() || "device";
 const voiceMsg = (on) => ({ t: "voice", on, lang: voiceLang, step: voiceStep, mic: voiceMic });
 // Tap to listen, tap again to stop (no holding). It keeps listening in between.
+// With "this phone / laptop": the button follows THIS device's microphone, even if voice was started elsewhere.
+const listeningHere = () => (voiceMic === "device" ? mic.on : jobRunning("voice"));
 $("voice-btn").addEventListener("click", async () => {
-  if (jobRunning("voice") || mic.on) { micStop(); send(voiceMsg(false)); return; }
+  if (listeningHere()) { micStop(); send(voiceMsg(false)); return; }
   if (voiceMic === "device" && !(await micStart())) return;
-  send(voiceMsg(true));
+  send(voiceMsg(true));                        // starts voice, or switches it to this microphone
 });
 const voiceRestart = () => {
   const r = state.robot;
@@ -291,8 +293,12 @@ for (const b of document.querySelectorAll("[data-vmic]")) b.addEventListener("cl
  * Browsers allow the microphone only on https (or localhost): https://<robot>:8443. */
 const mic = { on: false, stream: null, ctx: null, src: null, node: null, level: 0, sawVoice: false };
 async function micStart() {
-  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showNote(t("voice.https", { url: `https://${location.hostname}:8443` }), true);
+  if (!window.isSecureContext) {               // http: browsers block the microphone. Go to the https page (same robot).
+    location.href = `https://${location.hostname}:8443${location.pathname}#voice`;
+    return false;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showNote(t("voice.nomicapi"), true);
     return false;
   }
   try {
@@ -361,6 +367,7 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".tabs [data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
 let startTab = "drive";
 try { startTab = localStorage.getItem("kiro-tab") || "drive"; } catch (e) { /* ignore */ }
+if (location.hash === "#voice") startTab = "voice";   // sent here from the http page to use the microphone
 showTab(document.querySelector(`.panel[data-panel="${startTab}"]`) ? startTab : "drive");
 
 /* A dot on a tab: green when something there runs, amber when something there failed. */
@@ -616,9 +623,14 @@ function renderRobot() {
   // The page's microphone ends with the voice program, E-STOP, or losing control
   if (mic.on && vOn) mic.sawVoice = true;
   if (mic.on && ((mic.sawVoice && !vOn) || !me || (state.server && state.server.estop) || (r.voice_mic && r.voice_mic !== "device" && vOn))) micStop();
-  const listening = vOn && (voiceMic !== "device" || mic.on);
-  setBtn($("voice-btn"), t(vOn ? "voice.stoplisten" : "voice.listen"), vOn ? "ri-mic-off-fill" : "ri-mic-fill");
+  const listening = vOn && listeningHere();
+  setBtn($("voice-btn"), t(listening ? "voice.stoplisten" : "voice.listen"), listening ? "ri-mic-off-fill" : "ri-mic-fill");
   $("voice-btn").classList.toggle("on", listening);
+  // Is the sound arriving at the robot? (the server counts it)
+  const rx = r.voice_rx || {};
+  $("voice-rx").hidden = !mic.on || !r.voice_rx;   // an older server does not report it
+  $("voice-rx").textContent = rx.age != null && rx.age < 2 ? t("voice.rxok") : t("voice.rxnone");
+  $("voice-rx").className = "small " + (rx.age != null && rx.age < 2 ? "ok" : "err");
   for (const b of document.querySelectorAll("[data-vmic]")) {
     b.classList.toggle("on", b.dataset.vmic === voiceMic);
     b.disabled = !me;
