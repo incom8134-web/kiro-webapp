@@ -352,6 +352,7 @@ for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("c
   try { localStorage.setItem("kiro-voice-step", voiceStep); } catch (e) { /* private window */ }
   voiceRestart();
 });
+$("voice-base").addEventListener("click", () => send({ t: "base", on: true }));   // voice needs the wheel program
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
@@ -636,6 +637,7 @@ function renderRobot() {
     b.disabled = !me;
   }
   $("mic-level").hidden = !mic.on;
+  $("voice-nobase").hidden = !(vOn && !jobRunning("base") && state.server && state.server.backend === "ros");
   const insecure = voiceMic === "device" && !window.isSecureContext;
   $("voice-https").hidden = !insecure;
   $("voice-https").textContent = insecure ? t("voice.https", { url: `https://${location.hostname}:8443` }) : "";
