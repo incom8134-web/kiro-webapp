@@ -5,8 +5,8 @@
 set -eo pipefail
 
 SSID="${SSID:-haebotwifi}"
-BAND="${BAND:-a}"          # a = 5 GHz, bg = 2.4 GHz
-CHANNEL="${CHANNEL:-36}"
+BAND="${BAND:-bg}"         # bg = 2.4 GHz (works without a Wi-Fi country set), a = 5 GHz (needs the country, e.g. sudo iw reg set KR)
+CHANNEL="${CHANNEL:-6}"
 IFACE="${IFACE:-$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="wifi"{print $1; exit}')}"
 
 [ -n "$IFACE" ] || { echo "No Wi-Fi device found."; exit 1; }
