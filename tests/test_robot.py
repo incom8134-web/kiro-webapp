@@ -1,4 +1,5 @@
 """Robot actions in mock mode: who may start what, and what E-STOP stops."""
+import dataclasses
 import json
 import re
 import sys
@@ -529,7 +530,7 @@ def test_voice_record_keeps_tagged_lines(cfg):
 
 def test_voice_switches_language_and_takes_bigger_steps(cfg):
     from robot_server.robot import VOICE_STEPS, Robot
-    assert "default_dist:=0.5" in VOICE_STEPS["big"] and "default_angle:=90.0" in VOICE_STEPS["big"]
+    assert "default_dist:=1.0" in VOICE_STEPS["big"] and "default_angle:=90.0" in VOICE_STEPS["big"]   # until "stop", at most 1 m
     assert "default_dist:=0.2" in VOICE_STEPS["test"] and "default_angle:=45.0" in VOICE_STEPS["test"]  # voice test form 4.1
     r = Robot(cfg, MockBase())
     try:
@@ -542,5 +543,75 @@ def test_voice_switches_language_and_takes_bigger_steps(cfg):
         second = r.jobs.get("voice")
         assert r.voice(True, "t", "en", "test")[0] and r.voice_step == "test"  # test steps: restarted with them
         assert r.jobs.get("voice") is not second and r.jobs.running("voice")
+    finally:
+        r.close()
+
+
+def test_voice_sound_from_the_phone_goes_to_the_voice_node(cfg):
+    import socket
+    from robot_server import robot as robot_mod
+    from robot_server.robot import Robot
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 0))
+    rx.settimeout(1.0)
+    r = Robot(cfg, MockBase())
+    old = robot_mod.VOICE_UDP
+    robot_mod.VOICE_UDP = rx.getsockname()
+    try:
+        r.voice_audio(b"\x01\x00" * 100)                  # voice off: nothing is sent
+        assert r.voice(True, "t", "ko", "big", "device")[0] and r.voice_mic == "device"
+        r.voice_audio(b"\x01\x00" * 100)
+        assert rx.recv(4096) == b"\x01\x00" * 100
+        first = r.jobs.get("voice")
+        assert r.voice(True, "t", "ko", "big", "robot")[0] and r.voice_mic == "robot"   # other microphone: restarted
+        assert r.jobs.get("voice") is not first
+        r.voice_audio(b"\x02\x00" * 100)                  # the robot's own mic now: the phone's sound is dropped
+        with pytest.raises(socket.timeout):
+            rx.recv(4096)
+    finally:
+        robot_mod.VOICE_UDP = old
+        rx.close()
+        r.close()
+
+
+def test_obstacle_stop_switch_writes_lidar_env_and_restarts_the_wheels(cfg, tmp_path):
+    from robot_server.lidar_setup import env_get
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, datasets_dir=str(tmp_path / "d")), MockBase())   # mock lidar.env in tmp
+    try:
+        r.lidar_env.parent.mkdir(parents=True, exist_ok=True)
+        r.lidar_env.write_text("LASER_YAW=1.26\nOBSTACLE_STOP=0\n")
+        assert r.base(True, "t")[0]
+        first = r.jobs.get("base")
+        assert r.set_obstacle_stop(True, "t")[0] and r.obstacle_stop_on()
+        assert env_get(r.lidar_env.read_text(), "LASER_YAW") == "1.26"          # the other values stay
+        assert r.jobs.get("base") is not first and r.jobs.running("base")        # the wheel program reads it at start
+        second = r.jobs.get("base")
+        assert r.set_obstacle_stop(True, "t") == (True, "") and r.jobs.get("base") is second   # no change: no restart
+        assert r.set_obstacle_stop(False, "t")[0] and not r.obstacle_stop_on()
+    finally:
+        r.close()
+
+
+def test_laptop_leader_drives_one_or_both_arms_with_the_left_correction(cfg):
+    from robot_server.robot import JOINTS, Robot
+    r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
+    sent = []
+    r._bridge_send_arms = sent.append
+    try:
+        assert r.leader(True, "both", "t")[0] and r.bridge_side == "both" and r.bridge_mode == "leader"
+        r.leader_cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
+        r.leader_offsets = {"left": {"wrist_flex": 10.0, "gripper": 50.0}}
+        r.leader_pos("both", [2000] * 6)
+        assert set(sent[-1]) == {"right", "left"}
+        assert abs(sent[-1]["right"]["wrist_flex"]) < 0.01 and abs(sent[-1]["left"]["wrist_flex"] - 10.0) < 0.01
+        assert sent[-1]["left"]["gripper"] == sent[-1]["right"]["gripper"]   # never the gripper
+        r.leader_pos("right", [2000] * 6)                                   # not the running side: ignored
+        assert len(sent) == 1
+        assert r.leader(False, "both", "t")[0] and not r.jobs.running("bridge")
+        assert r.leader(True, "left", "t")[0] and r.bridge_side == "left"
+        r.leader_pos("left", [2000] * 6)
+        assert set(sent[-1]) == {"left"}
+        assert not r.leader(True, "nonsense", "t")[0]
     finally:
         r.close()

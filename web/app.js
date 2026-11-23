@@ -263,12 +263,79 @@ $("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-s
 let voiceLang = (() => { try { return localStorage.getItem("kiro-voice-lang"); } catch (e) { return null; } })() || (LANG === "en" ? "en" : "ko");
 // Step per command: "big" 0.5 m / 90 degrees, or "test" 0.2 m / 45 degrees as the voice test form asks
 let voiceStep = (() => { try { return localStorage.getItem("kiro-voice-step"); } catch (e) { return null; } })() || "big";
-$("voice-btn").addEventListener("click", () => send({ t: "voice", on: !jobRunning("voice"), lang: voiceLang, step: voiceStep }));
+// Microphone: "device" = this phone or laptop (the page sends the sound), "robot" = the robot's USB microphone
+let voiceMic = (() => { try { return localStorage.getItem("kiro-voice-mic"); } catch (e) { return null; } })() || "device";
+const voiceMsg = (on) => ({ t: "voice", on, lang: voiceLang, step: voiceStep, mic: voiceMic });
+// Tap to listen, tap again to stop (no holding). It keeps listening in between.
+$("voice-btn").addEventListener("click", async () => {
+  if (jobRunning("voice") || mic.on) { micStop(); send(voiceMsg(false)); return; }
+  if (voiceMic === "device" && !(await micStart())) return;
+  send(voiceMsg(true));
+});
 const voiceRestart = () => {
   const r = state.robot;
-  if (jobRunning("voice") && r && (r.voice_lang !== voiceLang || r.voice_step !== voiceStep)) send({ t: "voice", on: true, lang: voiceLang, step: voiceStep });
+  if (jobRunning("voice") && r && (r.voice_lang !== voiceLang || r.voice_step !== voiceStep || (r.voice_mic || "device") !== voiceMic)) {
+    if (voiceMic !== "device") micStop();
+    send(voiceMsg(true));
+  }
   renderRobot();
 };
+for (const b of document.querySelectorAll("[data-vmic]")) b.addEventListener("click", async () => {
+  voiceMic = b.dataset.vmic;
+  try { localStorage.setItem("kiro-voice-mic", voiceMic); } catch (e) { /* private window */ }
+  if (voiceMic === "device" && jobRunning("voice") && !mic.on && !(await micStart())) return;
+  voiceRestart();
+});
+
+/* This device's microphone -> 16 kHz mono 16-bit pieces over the WebSocket (binary), about 8 a second.
+ * Browsers allow the microphone only on https (or localhost): https://<robot>:8443. */
+const mic = { on: false, stream: null, ctx: null, src: null, node: null, level: 0, sawVoice: false };
+async function micStart() {
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showNote(t("voice.https", { url: `https://${location.hostname}:8443` }), true);
+    return false;
+  }
+  try {
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    showNote(t("voice.denied"), true);
+    return false;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  mic.ctx = new AC();
+  mic.src = mic.ctx.createMediaStreamSource(mic.stream);
+  mic.node = mic.ctx.createScriptProcessor(4096, 1, 1);
+  mic.node.onaudioprocess = (ev) => {
+    const x = ev.inputBuffer.getChannelData(0), ratio = mic.ctx.sampleRate / 16000;
+    const n = Math.floor(x.length / ratio), out = new Int16Array(n);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const p = i * ratio, k = Math.floor(p), f = p - k;
+      const v = Math.max(-1, Math.min(1, x[k] * (1 - f) + (k + 1 < x.length ? x[k + 1] : x[k]) * f));
+      out[i] = v * 32767;
+      sum += v * v;
+    }
+    mic.level = Math.min(1, Math.sqrt(sum / Math.max(1, n)) * 6);
+    const bar = $("mic-level").firstElementChild;
+    if (bar) bar.style.width = Math.round(mic.level * 100) + "%";
+    if (state.open && state.ws.readyState === WebSocket.OPEN && isOperator()) state.ws.send(out.buffer);
+  };
+  mic.src.connect(mic.node);
+  mic.node.connect(mic.ctx.destination);  // needed for the processor to run; its output is silence
+  if (mic.ctx.state === "suspended") await mic.ctx.resume();
+  mic.on = true;
+  mic.sawVoice = false;
+  renderRobot();
+  return true;
+}
+function micStop() {
+  if (!mic.on && !mic.stream) return;
+  mic.on = false;
+  try { mic.node && mic.node.disconnect(); mic.src && mic.src.disconnect(); } catch (e) { /* already gone */ }
+  if (mic.stream) for (const tr of mic.stream.getTracks()) tr.stop();
+  if (mic.ctx) mic.ctx.close().catch(() => {});
+  Object.assign(mic, { stream: null, ctx: null, src: null, node: null, level: 0 });
+}
 for (const b of document.querySelectorAll("[data-vlang]")) b.addEventListener("click", () => {
   voiceLang = b.dataset.vlang;
   try { localStorage.setItem("kiro-voice-lang", voiceLang); } catch (e) { /* private window */ }
@@ -400,11 +467,13 @@ function render() {
   const gd = (s && s.guard) || { on: false, lidar: false, block: [] };
   const held = gd.lost ? t("guard.lost")
     : gd.block && gd.block.length ? t("guard.held", { where: gd.block.map((d) => t("dir." + d)).join(", ") }) : "";
-  $("guard-sw").checked = !!gd.on;
+  const rob = state.robot || {};
+  $("guard-sw").checked = !!gd.on && (s.backend !== "ros" || rob.obstacle_stop !== false);  // the page's stop and the robot's own lidar guard
   $("guard-st").textContent = !s ? "" : !gd.on ? t("guard.off") : gd.lost ? held : !gd.lidar ? t("guard.nolidar") : held || t("guard.on", { cm: Math.round((gd.stop_m || 0) * 100) });
   $("guard-st").className = "st grow" + (!s ? "" : gd.on && gd.lidar && !held ? " live" : " warn");
   const rg = state.robot && state.robot.voice && state.robot.voice.guard;  // the old lidar guard on the robot (gamepad, voice, page)
-  $("guard-note").textContent = !s ? "" : !gd.on ? t("guard.offnote") : gd.lost ? t("guard.lostnote") : !gd.lidar ? t("guard.nolidarnote")
+  $("guard-note").textContent = !s ? "" : !$("guard-sw").checked ? t("guard.offnote") : gd.lost ? t("guard.lostnote")
+    : s.backend === "ros" && rob.lidar_measured === false ? t("guard.unmeasured") : !gd.lidar ? t("guard.nolidarnote")
     : rg && jobRunning("base") ? t("guard.robot", { st: rg }) : "";
 
   const hint = !me ? t("hint.viewer") : stopped ? t("hint.estop") : s.need_neutral ? t("hint.neutral")
@@ -524,7 +593,11 @@ function renderRobot() {
   } else if (leader.on && !leader.paused && (!me || (leader.sawRunning && !br.running))) leaderStop("");
   setBtn($("leader-btn"), t(leader.on ? "leader.stop" : "leader.use"), leader.on ? "ri-stop-fill" : "ri-usb-line");
   $("leader-btn").classList.toggle("on", leader.on);
-  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { n: leader.ok, state: br.state || "..." })
+  for (const b of document.querySelectorAll("[data-lside]")) {
+    b.classList.toggle("on", b.dataset.lside === leader.side);
+    b.disabled = !me || leader.on || ((b.dataset.lside !== "right") && !r.left_arm_ok);
+  }
+  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { arm: t("arm." + leader.side), n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
@@ -540,8 +613,20 @@ function renderRobot() {
 
   // Voice
   const vOn = jobRunning("voice");
-  setBtn($("voice-btn"), t(vOn ? "btn.stop" : "btn.start"), vOn ? "ri-stop-fill" : "ri-play-fill");
-  $("voice-btn").classList.toggle("on", vOn);
+  // The page's microphone ends with the voice program, E-STOP, or losing control
+  if (mic.on && vOn) mic.sawVoice = true;
+  if (mic.on && ((mic.sawVoice && !vOn) || !me || (state.server && state.server.estop) || (r.voice_mic && r.voice_mic !== "device" && vOn))) micStop();
+  const listening = vOn && (voiceMic !== "device" || mic.on);
+  setBtn($("voice-btn"), t(vOn ? "voice.stoplisten" : "voice.listen"), vOn ? "ri-mic-off-fill" : "ri-mic-fill");
+  $("voice-btn").classList.toggle("on", listening);
+  for (const b of document.querySelectorAll("[data-vmic]")) {
+    b.classList.toggle("on", b.dataset.vmic === voiceMic);
+    b.disabled = !me;
+  }
+  $("mic-level").hidden = !mic.on;
+  const insecure = voiceMic === "device" && !window.isSecureContext;
+  $("voice-https").hidden = !insecure;
+  $("voice-https").textContent = insecure ? t("voice.https", { url: `https://${location.hostname}:8443` }) : "";
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
   for (const b of document.querySelectorAll("[data-vstep]")) {
     b.classList.toggle("on", b.dataset.vstep === voiceStep);
@@ -757,6 +842,14 @@ $("say-box").addEventListener("submit", (e) => {
  * servo board, reads the six joints 30 times per second and sends them to the robot, which
  * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
 const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
+// Which follower arm(s) the laptop's leader arm moves: right, left or both (remembered in this browser)
+try { leader.side = ["right", "left", "both"].includes(localStorage.getItem("kiro-leader-side")) ? localStorage.getItem("kiro-leader-side") : "right"; } catch (e) { /* private window */ }
+for (const b of document.querySelectorAll("[data-lside]")) b.addEventListener("click", () => {
+  if (leader.on) return;                     // stop the leader arm first
+  leader.side = b.dataset.lside;
+  try { localStorage.setItem("kiro-leader-side", leader.side); } catch (e) { /* private window */ }
+  renderRobot();
+});
 
 async function leaderStart() {
   if (!LeaderArm.supported()) {

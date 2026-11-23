@@ -189,3 +189,22 @@ def test_guard_stop_kind_reads_the_old_guard_status():
     assert guard_stop_kind("scan OK(300점) | 앞 가림 좌 2.0 우 2.0 뒤 무시 m | 최근접 0.00 | 가림 +0°가림 +30°가림 | 정지") == "covered"
     assert guard_stop_kind("scan OK(432점) | 앞 1.0 좌 2.0 우 2.0 뒤 무시 m | 최근접 0.5 | 가림 없음 | 정지") is None
     assert guard_stop_kind(None) is None
+
+
+def test_microphone_sound_only_from_the_operator_and_never_during_estop():
+    with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
+        got = []
+        client.app.state.data["robot"].voice_audio = got.append
+        with client.websocket_connect("/ws?name=Laptop") as op, client.websocket_connect("/ws?name=Phone") as viewer:
+            viewer.send_bytes(b"\x01\x00" * 10)                 # a viewer's microphone: dropped
+            op.send_json({"t": "take", "pin": "4321"})
+            assert read_until(op, lambda m: m["t"] == "note")["ok"] is True
+            op.send_bytes(b"\x02\x00" * 10)
+            op.send_json({"t": "ping", "ts": 1})                 # text still works between sound pieces
+            read_until(op, lambda m: m["t"] == "pong")
+            op.send_json({"t": "estop", "on": True})
+            read_until(op, lambda m: m["t"] == "note" and m.get("about") == "estop")
+            op.send_bytes(b"\x03\x00" * 10)                      # E-STOP: dropped
+            op.send_json({"t": "ping", "ts": 2})
+            read_until(op, lambda m: m["t"] == "pong")
+        assert got == [b"\x02\x00" * 10]

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import errno
+import json
 import logging
 import time
 import uuid
@@ -29,7 +30,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # Messages that only the operator may send. Each maps to a Robot method run in a thread
 # (starting or stopping a program can take seconds).
-OPERATOR_ACTIONS = {"base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide", "stops_clear",
+OPERATOR_ACTIONS = {"obstacle_stop", "base", "teleop", "arm", "skill", "voice", "system", "say", "servo", "wizard", "wizard_decide", "stops_clear",
                     "leader", "wave", "follow", "studio", "guard_profile", "lidar_setup"}
 # Also need the engineer PIN: the Studio page (recording, servo tester, check wizard, guard distance, lidar setup)
 ENGINEER_ACTIONS = {"servo", "wizard", "wizard_decide", "studio", "guard_profile", "lidar_setup"}
@@ -253,7 +254,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         starting = on and not (t == "arm" and msg.get("action") == "release")
         if t == "studio":  # only starting a recording moves an arm; next / again / stop / force stop / checks never do
             starting = msg.get("cmd") == "start"
-        elif t in ("guard_profile", "stops_clear"):
+        elif t in ("guard_profile", "stops_clear", "obstacle_stop"):
             starting = False
         elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
             starting = msg.get("cmd") == "apply"
@@ -269,6 +270,8 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             call = lambda: r.base(on, name, r.guard_profile)  # noqa: E731
         elif t == "guard_profile":
             call = lambda: r.set_guard_profile(str(msg.get("profile")), name)  # noqa: E731
+        elif t == "obstacle_stop":
+            call = lambda: r.set_obstacle_stop(on, name)  # noqa: E731
         elif t == "lidar_setup":
             call = lambda: r.lidar(str(msg.get("cmd")), name)  # noqa: E731
         elif t == "studio":
@@ -324,7 +327,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         elif t == "skill":
             call = lambda: r.skill(str(msg.get("name", "")), on, name)  # noqa: E731
         elif t == "voice":
-            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")), str(msg.get("step", "big")))  # noqa: E731
+            call = lambda: r.voice(on, name, str(msg.get("lang", "ko")), str(msg.get("step", "big")), str(msg.get("mic", "device")))  # noqa: E731
         elif t == "system":
             call = lambda: r.system(str(msg.get("action")), name)  # noqa: E731
         else:
@@ -521,7 +524,14 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             await send(cid, snapshot(cid))
             await send(cid, state["robot"].snapshot())
             while True:
-                msg = await ws.receive_json()
+                raw = await ws.receive()
+                if raw.get("type") == "websocket.disconnect":
+                    raise WebSocketDisconnect(raw.get("code", 1000))
+                if raw.get("bytes") is not None:  # the phone's / laptop's microphone for voice (16 kHz mono 16-bit)
+                    if cid == ctrl.operator and not ctrl.estop:
+                        state["robot"].voice_audio(raw["bytes"])
+                    continue
+                msg = json.loads(raw.get("text") or "null")
                 if not isinstance(msg, dict):
                     continue
                 t = msg.get("t")
@@ -573,6 +583,10 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                     if cid == ctrl.operator:
                         state["guard"]["on"] = bool(msg.get("on"))
                         state["robot"].event(who(cid), "obstacle stop " + ("on" if state["guard"]["on"] else "OFF"))
+                        # the same switch for the robot's own lidar guard (gamepad, voice): may restart the wheel program
+                        task = asyncio.create_task(act(cid, {"t": "obstacle_stop", "on": state["guard"]["on"]}))
+                        tasks.add(task)
+                        task.add_done_callback(tasks.discard)
                     else:
                         await send(cid, {"t": "note", "ok": False, "msg": "Take control first.", "about": "guard"})
                 elif t == "talk":  # hold-to-talk: fast, no thread needed

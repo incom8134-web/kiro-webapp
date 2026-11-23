@@ -128,6 +128,8 @@
           <div class="row head"><h3><span data-i18n="leader.title">Leader arm</span></h3></div>
           <button id="follow-btn" class="btn wide big" type="button" data-op><i class="ri-git-fork-line"></i><span></span></button>
           <p id="follow-st" class="small mute"></p>
+          <div class="row voice-lang"><span class="small mute" data-i18n="leader.moves">Leader on this laptop moves</span><span class="grow"></span>
+            <div class="row seg" id="leader-sides"><button class="btn" type="button" data-lside="right" data-i18n="arm.right">Right</button><button class="btn" type="button" data-lside="left" data-i18n="arm.left">Left</button><button class="btn" type="button" data-lside="both" data-i18n="arm.both">Both</button></div></div>
           <button id="leader-btn" class="btn wide big" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
           <p id="leader-st" class="small mute"></p>
           <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
@@ -142,10 +144,15 @@
           <div class="row voice-lang"><span class="small mute" data-i18n="voice.lang">Speech language</span><span class="grow"></span>
             <div class="row seg" id="voice-langs"><button class="btn" type="button" data-vlang="ko">한국어</button><button class="btn" type="button" data-vlang="en">English</button></div></div>
           <div class="row voice-lang"><span class="small mute" data-i18n="voice.step">Step per command</span><span class="grow"></span>
-            <div class="row seg" id="voice-steps"><button class="btn" type="button" data-vstep="big" data-i18n="voice.step.big">0.5 m · 90°</button><button class="btn" type="button" data-vstep="test" data-i18n="voice.step.test">0.2 m · 45° (test)</button></div></div>
+            <div class="row seg" id="voice-steps"><button class="btn" type="button" data-vstep="big" data-i18n="voice.step.big">Until stop (max 1 m)</button><button class="btn" type="button" data-vstep="test" data-i18n="voice.step.test">0.2 m · 45° (test)</button></div></div>
+          <div class="row voice-lang"><span class="small mute" data-i18n="voice.mic">Microphone</span><span class="grow"></span>
+            <div class="row seg" id="voice-mics"><button class="btn" type="button" data-vmic="device" data-i18n="voice.mic.device">This phone / laptop</button><button class="btn" type="button" data-vmic="robot" data-i18n="voice.mic.robot">Robot</button></div></div>
           <p id="voice-note" class="small mute" hidden></p>
+          <p id="voice-https" class="small note err" hidden></p>
+          <div class="miclevel" id="mic-level" hidden><i></i></div>
           <div id="voice-on" hidden>
-            <button id="talk" class="btn talk" type="button"><i class="ri-mic-fill"></i><span data-i18n="voice.talk">Hold to talk</span></button>
+            <p class="small mute" data-i18n="voice.howto">Say "forward", "back", "left", "right", "turn left", "turn right". Say "stop" to stop.</p>
+            <button id="talk" class="btn talk" type="button" hidden><i class="ri-mic-fill"></i><span data-i18n="voice.talk">Hold to talk</span></button>
             <p class="heard"><span class="mute small" data-i18n="voice.heard">Heard</span> <b id="voice-text">-</b></p>
             <ol id="voice-log" class="vlog" aria-live="polite"></ol>
             <div class="quick" id="quick"></div>

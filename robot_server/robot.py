@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .camera import Camera, find_cameras, repair_top
 from .config import Config
-from .leadermath import JOINTS, leader_to_target
+from .leadermath import JOINTS, apply_offsets, leader_to_target
 from .jobs import Jobs, JobSpec
 from .lidar_setup import LidarSetup, Result, bin_start, env_get, env_update, mask_str, parse_mask
 from .recorder import Recorder
@@ -77,6 +77,8 @@ ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # 
 # Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
 TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
+# Per-arm angle corrections for one leader driving the followers (leader_relay.py reads the same file)
+FOLLOW_OFFSETS = Path("~/.config/kiro-webapp/follow_offsets.json").expanduser()
 JOINTS_ADDR = ("127.0.0.1", 5005)  # twin_bridge sends the arms' measured joint angles here, 30 times a second
 HF_CALIB = Path(os.environ.get("HF_LEROBOT_HOME", "~/.cache/huggingface/lerobot")).expanduser() / "calibration"
 
@@ -98,11 +100,17 @@ SERIAL_RE = re.compile(r"^/dev/(so101_[a-z_]+|ttyACM\d+|ttyUSB\d+)$")
 VOICE_MODELS = {"ko": "vosk-model-small-ko-0.22", "en": "vosk-model-small-en-us-0.15"}
 # Tagged lines of the voice node worth showing on the page (heard, executed, done, stopped, ignored...)
 VOICE_TAG = re.compile(r"\[(들림|실행|완료|정지|중단|무시|취소|비슷한 문구|주의|오류|이어붙임)\].*")
-VOICE_ARGS = ("-p ptt:=true -p grammar_mode:=phrases -p output_topic:=/cmd_vel_raw -p lin_speed:=0.10 -p min_conf:=0.6")
-# Steps per voice command. "big" 0.5 m / 90 degrees is the default since 20 Nov 2026 (the user found 0.2 m / 45
-# degrees too small); "test" 0.2 m / 45 degrees is what the voice test form asks for (시험평가서 4.1).
-VOICE_STEPS = {"big": "-p default_dist:=0.5 -p max_dist:=1.0 -p default_angle:=90.0",
+# Voice listens all the time while it is on (tap on / tap off on the page, 23 Nov 2026: no holding a button).
+# Each sentence is judged on its own and only an exact command phrase moves the robot.
+VOICE_ARGS = ("-p ptt:=false -p grammar_mode:=phrases -p output_topic:=/cmd_vel_raw -p lin_speed:=0.10 -p min_conf:=0.6")
+# Steps per voice command. "big" (default since 23 Nov 2026): "forward" drives slowly (0.10 m/s) until "stop",
+# at most 1 m (10 s) when no "stop" is heard. "test" 0.2 m / 45 degrees is what the voice test form asks for (4.1).
+VOICE_STEPS = {"big": "-p default_dist:=1.0 -p max_dist:=1.0 -p default_angle:=90.0",
                "test": "-p default_dist:=0.2 -p max_dist:=0.2 -p default_angle:=45.0"}
+# The phone's or laptop's microphone: the page streams 16 kHz mono 16-bit sound over its WebSocket,
+# the server passes it to the old voice node here (voice_cmd device:=udp:<port>)
+VOICE_UDP = ("127.0.0.1", 5559)
+VOICE_STOP_WORD = {"ko": "멈춰", "en": "stop"}
 
 
 # Lines of a program that lost its USB serial board (LeRobot / Feetech / pyserial messages)
@@ -148,6 +156,7 @@ class Robot:
         self._stop = threading.Event()
         self.voice_lang = "ko"
         self.voice_step = "big"  # VOICE_STEPS: "big" (default) or "test" (0.2 m / 45 degrees, the voice test form)
+        self.voice_mic = "device"  # "device" = the operator's phone / laptop (sound from the page), "robot" = USB mic
         self.voice_log: deque[dict] = deque(maxlen=12)  # the voice node's last tagged lines, with their time
         self.servo_scan: dict | None = None
         self._wizard_steps: list[dict] | None = None
@@ -156,6 +165,7 @@ class Robot:
         self.bridge_side: str | None = None
         self.bridge_mode: str | None = None
         self.leader_cal: dict | None = None
+        self.leader_offsets: dict = {}
         self.leader_rx, self.leader_last, self.leader_deg = 0, 0.0, None
         self._seq = 0
         self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -326,6 +336,26 @@ class Robot:
             return self.lidar_env.read_text(encoding="utf-8")
         except OSError:
             return ""
+
+    def set_obstacle_stop(self, on: bool, who: str) -> tuple[bool, str]:
+        """The Drive tab's obstacle stop switch, for the robot's own lidar guard (gamepad and voice too):
+        OBSTACLE_STOP in lidar.env. The wheel program reads it when it starts, so it is restarted if it runs
+        (nothing moves meanwhile)."""
+        text = self._lidar_env_text()
+        if self.obstacle_stop_on() == on:
+            return True, ""
+        try:
+            self.lidar_env.parent.mkdir(parents=True, exist_ok=True)
+            self.lidar_env.write_text(env_update(text, {"OBSTACLE_STOP": "1" if on else "0"},
+                                                 f"{time.strftime('%Y-%m-%d %H:%M')} Drive tab switch"), encoding="utf-8")
+        except OSError as e:
+            return False, f"Could not write {self.lidar_env}: {e}"
+        self.event(who, "robot lidar obstacle stop " + ("on" if on else "OFF"))
+        if self.jobs.running("base"):
+            self._stop_job("base", who)
+            ok, msg = self.base(True, who, self.guard_profile)
+            return ok, ("" if ok else f"Start the wheels again: {msg}")
+        return True, ""
 
     def obstacle_stop_on(self) -> bool:
         """The old config/lidar.env can switch the obstacle stop off (OBSTACLE_STOP=0)."""
@@ -555,29 +585,49 @@ class Robot:
                                             env=self._venv_env(), label=f"skill {name}", stop_wait=8.0), who)
 
     # ---------------------------------------------------------------- voice
-    def voice(self, on: bool, who: str, lang: str = "ko", step: str = "big") -> tuple[bool, str]:
+    def voice(self, on: bool, who: str, lang: str = "ko", step: str = "big", mic: str = "device") -> tuple[bool, str]:
         if not on:
+            self._voice_halt()
             return self._stop_job("voice", who)
         lang = "en" if lang == "en" else "ko"
         step = step if step in VOICE_STEPS else "big"
+        mic = "robot" if mic == "robot" else "device"
         if self.jobs.running("voice"):
-            if self.voice_lang == lang and self.voice_step == step:
+            if self.voice_lang == lang and self.voice_step == step and self.voice_mic == mic:
                 return True, ""
-            self._stop_job("voice", who)       # switching language or step: restart with the other model / steps
+            self._voice_halt()
+            self._stop_job("voice", who)       # switching language, step or microphone: restart with them
         model = Path("~/models/vosk").expanduser() / VOICE_MODELS[lang]
         if not self.mock and not model.is_dir():
             return False, f"Speech model not installed: {model}"
-        # No USB microphone: start without one, so typed and quick commands still work (they use the node too)
-        device = "auto" if self.mock or self.usb_mic() else "none"
+        if mic == "device":
+            device = f"udp:{VOICE_UDP[1]}"
+        else:  # no USB microphone: start without one, so typed and quick commands still work (they use the node too)
+            device = "auto" if self.mock or self.usb_mic() else "none"
         if self.mock:
-            cmd = self._mock_cmd(f"voice ({lang}, push-to-talk)")
+            cmd = self._mock_cmd(f"voice ({lang}, {mic} microphone, listening)")
         else:
             cmd = ["bash", "-c", ROS_SETUP + f"exec ros2 run so101_base voice_cmd --ros-args {VOICE_ARGS} {VOICE_STEPS[step]} "
                                              f"-p lang:={lang} -p model_path:={model} -p device:={device}"]
-        self.voice_lang, self.voice_step = lang, step
+        self.voice_lang, self.voice_step, self.voice_mic = lang, step, mic
         self.voice_log.clear()
         ok, msg = self._start("voice", JobSpec(cmd, frozenset({"mic"}), label=f"voice {lang}", on_line=self._voice_line), who)
         return ok, ("NO_MIC" if ok and device == "none" else msg)
+
+    def voice_audio(self, data: bytes) -> None:
+        """Sound from the operator's phone or laptop, about 8 pieces a second. Never blocks."""
+        if self.voice_mic != "device" or not data or not self.jobs.running("voice"):
+            return
+        try:
+            self._udp.sendto(data[:16000], VOICE_UDP)
+        except OSError:
+            pass
+
+    def _voice_halt(self) -> None:
+        """Voice going off while the robot drives a voice command: stop that drive first."""
+        if self.jobs.running("voice") and self.ros is not None and hasattr(self.ros, "publish_str"):
+            self.ros.publish_str("/voice/say", VOICE_STOP_WORD.get(self.voice_lang, "멈춰"))
+            time.sleep(0.3)
 
     def _voice_line(self, line: str) -> None:
         m = VOICE_TAG.search(ANSI.sub("", line))
@@ -783,8 +833,11 @@ class Robot:
         return "Arm not ready (" + "; ".join(bad) + "). Check its power and cables."
 
     def _bridge_send(self, side: str, target: dict) -> None:
+        self._bridge_send_arms({side: target})
+
+    def _bridge_send_arms(self, arms: dict) -> None:
         self._seq += 1
-        pkt = {"cmd": "target", "t": time.time(), "seq": self._seq, "units": "deg", "arms": {side: target}}
+        pkt = {"cmd": "target", "t": time.time(), "seq": self._seq, "units": "deg", "arms": arms}
         try:
             self._udp.sendto(json.dumps(pkt).encode(), BRIDGE_ADDR)
         except OSError:
@@ -804,11 +857,22 @@ class Robot:
         return None
 
     def leader(self, on: bool, side: str, who: str) -> tuple[bool, str]:
+        """The leader arm on the operator's laptop moves the right, the left or both follower arms
+        (side = the follower arm(s)). Its readings come in through leader_pos()."""
         if not on:
             if self.bridge_mode == "leader":
                 return self._stop_job("bridge", who)
             return True, ""
-        f = HF_CALIB / "teleoperators" / "so_leader" / f"{side}_leader.json"
+        if side not in SIDES:
+            return False, "Unknown arm."
+        # This robot has one leader arm: its calibration file, whatever arm it drives
+        folder = HF_CALIB / "teleoperators" / "so_leader"
+        f = next((folder / f"{s}_leader.json" for s in ("right", "left") if (folder / f"{s}_leader.json").exists()),
+                 folder / "right_leader.json")
+        try:
+            self.leader_offsets = json.loads(FOLLOW_OFFSETS.read_text()) if FOLLOW_OFFSETS.exists() else {}
+        except (OSError, ValueError):
+            self.leader_offsets = {}
         try:
             self.leader_cal = json.loads(f.read_text())
             bad = [j for j in JOINTS if self.leader_cal[j]["range_max"] <= self.leader_cal[j]["range_min"]]
@@ -877,7 +941,8 @@ class Robot:
             self.leader_deg = leader_to_target(self.leader_cal, raw)
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return
-        self._bridge_send(side, self.leader_deg)
+        # The same correction per arm as the Jetson leader copy (e.g. the left wrist), never the gripper
+        self._bridge_send_arms({s: apply_offsets(self.leader_deg, self.leader_offsets.get(s, {})) for s in _sides(side)})
 
     def wave(self, side: str, who: str) -> tuple[bool, str]:
         """A small hello from the arm's current pose: wrist waves, gripper opens and closes, back to start."""
@@ -1267,12 +1332,12 @@ class Robot:
                          **({"live": cam.info()["live"], "paused_by": cam.paused_by, "error": cam.error} if cam else {})})
         return {
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
-            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step,
+            "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step, "voice_mic": self.voice_mic,
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
-            "obstacle_stop": self.obstacle_stop_on(), "wheels": self.base_wheels(), "base_guard": self.base_guard(),
+            "obstacle_stop": self.obstacle_stop_on(), "lidar_measured": bool(parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK"))), "wheels": self.base_wheels(), "base_guard": self.base_guard(),
             "stops": self.stops(),
             "bridge": {"running": self.jobs.running("bridge"), "side": self.bridge_side, "mode": self.bridge_mode,
                        "state": (self._bridge_status() or {}).get("state"), "rx": self.leader_rx,
