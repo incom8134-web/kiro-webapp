@@ -611,7 +611,7 @@ function renderRobot() {
     b.classList.toggle("on", b.dataset.lside === leader.side);
     b.disabled = !me || leader.on || ((b.dataset.lside !== "right") && !r.left_arm_ok);
   }
-  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { arm: t("arm." + leader.side), n: leader.ok, state: br.state || "..." })
+  $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { arm: t(leader.side === "both" ? "leader.two" : "arm." + leader.side), n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
@@ -858,33 +858,86 @@ $("say-box").addEventListener("submit", (e) => {
 /* Plug the leader arm into this laptop's USB and press the button. The browser finds the
  * servo board, reads the six joints 30 times per second and sends them to the robot, which
  * moves the follower arm through the old twin_bridge (limits, speed ramp, hold on silence). */
-const leader = { arm: null, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
-// Which leader is plugged into this laptop: it moves the follower arm of its own side (remembered in this browser)
-try { leader.side = ["right", "left"].includes(localStorage.getItem("kiro-leader-side")) ? localStorage.getItem("kiro-leader-side") : "right"; } catch (e) { /* private window */ }
+const leader = { arms: {}, on: false, side: "right", ok: 0, fail: 0, sawRunning: false, paused: false };
+// Leader arm(s) plugged into this laptop: right, left, or both (two leaders). Each moves the arm of its own side.
+try { leader.side = ["right", "left", "both"].includes(localStorage.getItem("kiro-leader-side")) ? localStorage.getItem("kiro-leader-side") : "right"; } catch (e) { /* private window */ }
 for (const b of document.querySelectorAll("[data-lside]")) b.addEventListener("click", () => {
   if (leader.on) return;                     // stop the leader arm first
   leader.side = b.dataset.lside;
   try { localStorage.setItem("kiro-leader-side", leader.side); } catch (e) { /* private window */ }
   renderRobot();
 });
+const FEETECH_FILTERS = () => FEETECH_VENDORS.map((v) => ({ usbVendorId: v }));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* Every board this browser may use (granted before) where six servos answer: the leader arms on this laptop. */
+async function grantedLeaders() {
+  const out = [];
+  for (const port of (await navigator.serial.getPorts()).filter((p) => FEETECH_VENDORS.includes(p.getInfo().usbVendorId))) {
+    const arm = new LeaderArm(port);
+    try { await arm.open(); } catch (e) { continue; }
+    if (await arm.readPositions()) out.push(arm); else await arm.close();
+  }
+  return out;
+}
+const closeAll = async (arms) => { for (const a of arms) await a.close(); };
+
+/* Two leaders look the same to the browser. The person moves the RIGHT one a little: the board that moves is
+ * the right leader, the other one the left. Returns { right: arm, left: arm } or null (nothing moved). */
+async function whichIsWhich(arms, side) {
+  showNote(t("leader.wiggle." + side));
+  const p0 = [];
+  for (const a of arms) p0.push(await a.readPositions());
+  const moved = arms.map(() => 0);
+  const end = performance.now() + 15000;
+  while (performance.now() < end) {
+    for (let i = 0; i < arms.length; i++) {
+      const p = await arms[i].readPositions();
+      if (p && p0[i]) moved[i] = Math.max(moved[i], p.slice(0, 5).reduce((sum, v, j) => sum + Math.abs(v - p0[i][j]), 0));
+    }
+    const best = moved.indexOf(Math.max(...moved));
+    const rest = Math.max(0, ...moved.filter((_, i) => i !== best));
+    if (moved[best] > 150 && moved[best] > 3 * rest) {
+      const other = arms.find((_, i) => i !== best);
+      showNote(t("leader.found"));
+      return side === "left" ? { left: arms[best], right: other } : { right: arms[best], left: other };
+    }
+    await sleep(50);
+  }
+  return null;
+}
 
 async function leaderStart() {
   if (!LeaderArm.supported()) {
     showNote(t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` }), true);
     return;
   }
+  const sides = leader.side === "both" ? ["right", "left"] : [leader.side];
   try {
-    let ports = (await navigator.serial.getPorts()).filter((p) => FEETECH_VENDORS.includes(p.getInfo().usbVendorId));
-    if (!ports.length) ports = [await navigator.serial.requestPort({ filters: FEETECH_VENDORS.map((v) => ({ usbVendorId: v })) })];
-    let found = null;
-    for (const port of ports) {           // try each granted board until six servos answer
-      const arm = new LeaderArm(port);
-      try { await arm.open(); } catch (e) { continue; }
-      if (await arm.readPositions()) { found = arm; break; }
-      await arm.close();
+    let arms = await grantedLeaders();
+    if (arms.length < sides.length) {          // the browser's list: pick (another) leader arm's USB port
+      await closeAll(arms);
+      await navigator.serial.requestPort({ filters: FEETECH_FILTERS() });
+      arms = await grantedLeaders();
+      if (arms.length < sides.length) {
+        await closeAll(arms);
+        if (arms.length) showNote(t("leader.picksecond")); else showNote(t("leader.noservos"), true);
+        return;
+      }
     }
-    if (!found) { showNote(t("leader.noservos"), true); return; }
-    Object.assign(leader, { arm: found, on: true, ok: 0, fail: 0, sawRunning: false });
+    let map;
+    if (arms.length === 1) map = { [sides[0]]: arms[0] };
+    else {
+      map = await whichIsWhich(arms.slice(0, 2), sides[0]);
+      await closeAll(arms.slice(2));
+      if (!map) { await closeAll(arms.slice(0, 2)); showNote(t("leader.nomove." + sides[0]), true); return; }
+      if (sides.length === 1) {                // one arm wanted: let the other leader go
+        const other = sides[0] === "right" ? "left" : "right";
+        await map[other].close();
+        delete map[other];
+      }
+    }
+    Object.assign(leader, { arms: map, on: true, ok: 0, fail: 0, sawRunning: false });
     send({ t: "leader", on: true, side: leader.side });
     renderRobot();
     leaderLoop();
@@ -894,16 +947,20 @@ async function leaderStart() {
 }
 
 async function leaderLoop() {
-  while (leader.on && leader.arm) {
+  while (leader.on) {
     const t0 = performance.now();
-    let pos = null;
-    try { pos = await leader.arm.readPositions(); } catch (e) { leaderStop(t("leader.lost")); return; }
-    if (pos) {
-      leader.ok++; leader.fail = 0;
-      if (isOperator()) send({ t: "leader_pos", side: leader.side, raw: pos });
-    } else if (++leader.fail > 15) { leaderStop(t("leader.lost")); return; }
+    const list = Object.entries(leader.arms);
+    if (!list.length) return;
+    for (const [side, arm] of list) {          // each leader for the arm of its own side
+      let pos = null;
+      try { pos = await arm.readPositions(); } catch (e) { leaderStop(t("leader.lost")); return; }
+      if (pos) {
+        leader.ok++; leader.fail = 0;
+        if (isOperator()) send({ t: "leader_pos", side, raw: pos });
+      } else if (++leader.fail > 15 * list.length) { leaderStop(t("leader.lost")); return; }
+    }
     const wait = 33 - (performance.now() - t0);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    if (wait > 0) await sleep(wait);
   }
 }
 
@@ -911,9 +968,9 @@ async function leaderStop(reason) {
   const was = leader.on;
   leader.on = false; leader.paused = false;
   if (was) send({ t: "leader", on: false, side: leader.side });
-  const a = leader.arm;
-  leader.arm = null;
-  if (a) await a.close();
+  const arms = Object.values(leader.arms);
+  leader.arms = {};
+  await closeAll(arms);
   if (reason) showNote(reason, true);
   renderRobot();
 }

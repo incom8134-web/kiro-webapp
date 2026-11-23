@@ -163,7 +163,7 @@ class Robot:
         self.wizard_results: dict[str, dict] = {}
         self.bridge_side: str | None = None
         self.bridge_mode: str | None = None
-        self.leader_cal: dict | None = None
+        self.leader_cals: dict = {}  # leader calibration per side ("right", "left") of the laptop leader arms
         self.leader_rx, self.leader_last, self.leader_deg = 0, 0.0, None
         self._seq = 0
         self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -855,38 +855,44 @@ class Robot:
         return None
 
     def leader(self, on: bool, side: str, who: str) -> tuple[bool, str]:
-        """The leader arm on the operator's laptop moves the follower arm of the same side (right leader ->
-        right arm, left leader -> left arm). Its readings come in through leader_pos()."""
+        """Leader arms on the operator's laptop: each moves the follower arm of its own side (right leader ->
+        right arm, left leader -> left arm). side = right, left or both (two leaders). Readings: leader_pos()."""
         if not on:
             if self.bridge_mode == "leader":
                 return self._stop_job("bridge", who)
             return True, ""
-        if side not in ("right", "left"):
+        if side not in SIDES:
             return False, "Unknown arm."
-        f = HF_CALIB / "teleoperators" / "so_leader" / f"{side}_leader.json"
-        try:
-            self.leader_cal = json.loads(f.read_text())
-            bad = [j for j in JOINTS if self.leader_cal[j]["range_max"] <= self.leader_cal[j]["range_min"]]
-        except (OSError, ValueError, KeyError, TypeError):
-            if not self.mock:
-                return False, f"Leader calibration not found or unreadable: {f}"
-            self.leader_cal, bad = None, []
-        if bad:
-            return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
+        cals: dict = {}
+        for s in _sides(side):
+            f = HF_CALIB / "teleoperators" / "so_leader" / f"{s}_leader.json"
+            try:
+                cal = json.loads(f.read_text())
+                bad = [j for j in JOINTS if cal[j]["range_max"] <= cal[j]["range_min"]]
+            except (OSError, ValueError, KeyError, TypeError):
+                if not self.mock:
+                    return False, f"Leader calibration not found or unreadable: {f}"
+                continue
+            if bad:
+                return False, f"{s} leader calibration is broken (" + ", ".join(bad) + "). Recalibrate that leader arm."
+            cals[s] = cal
+        self.leader_cals = cals
         return self._bridge_start(side, "leader", who)
 
     def leader_pos(self, side: str, raw: object) -> None:
-        """Called about 30 times per second while the leader arm streams. Never blocks."""
-        if self.bridge_mode != "leader" or self.bridge_side != side or not self.jobs.running("bridge"):
+        """Called about 30 times per second per leader arm while it streams. Never blocks."""
+        if side not in ("right", "left") or self.bridge_mode != "leader" or side not in _sides(self.bridge_side or "") \
+                or not self.jobs.running("bridge"):
             return
         if not isinstance(raw, list) or len(raw) != 6 or not all(isinstance(v, (int, float)) and 0 <= v <= 4095 for v in raw):
             return
         self.leader_rx += 1
         self.leader_last = time.monotonic()
-        if self.leader_cal is None:  # mock mode without calibration
+        cal = self.leader_cals.get(side)
+        if cal is None:  # mock mode without calibration
             return
         try:
-            self.leader_deg = leader_to_target(self.leader_cal, raw)
+            self.leader_deg = leader_to_target(cal, raw)
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return
         self._bridge_send(side, self.leader_deg)

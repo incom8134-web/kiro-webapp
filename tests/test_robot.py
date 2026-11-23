@@ -549,17 +549,26 @@ def test_each_arm_follows_its_own_leader_separately_or_both_at_once(cfg):
         r.close()
 
 
-def test_laptop_leader_moves_only_the_arm_of_its_own_side(cfg):
+def test_two_laptop_leaders_move_each_arm_of_their_own_side(cfg):
     from robot_server.robot import JOINTS, Robot
     r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
     sent = []
-    r._bridge_send = lambda side, target: sent.append(side)
+    r._bridge_send = lambda side, target: sent.append((side, target["shoulder_pan"]))
     try:
-        assert not r.leader(True, "both", "t")[0]                                     # no single leader for both arms
-        assert r.leader(True, "left", "t")[0] and r.bridge_side == "left"
-        r.leader_cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
+        assert r.leader(True, "both", "t")[0] and r.bridge_side == "both" and r.bridge_mode == "leader"
+        r.leader_cals = {"right": {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS},
+                         "left": {j: {"range_min": 0, "range_max": 2000, "drive_mode": 0} for j in JOINTS}}
+        r.leader_pos("right", [2000] * 6)
         r.leader_pos("left", [2000] * 6)
-        r.leader_pos("right", [2000] * 6)                                             # not this leader's side: ignored
-        assert sent == ["left"]
+        assert sent[0] == ("right", 0.0)                       # each leader with its own calibration
+        assert sent[1][0] == "left" and sent[1][1] > 80        # 2000 is the top of the left leader's range
+        r.leader_pos("both", [2000] * 6)                       # not a leader's side: ignored
+        assert len(sent) == 2
+        assert r.leader(False, "both", "t")[0] and not r.jobs.running("bridge")
+        assert r.leader(True, "left", "t")[0] and r.bridge_side == "left"
+        r.leader_cals = {"left": {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}}
+        r.leader_pos("right", [2000] * 6)                      # only the left arm runs now
+        r.leader_pos("left", [2000] * 6)
+        assert sent[-1] == ("left", 0.0) and len(sent) == 3
     finally:
         r.close()
