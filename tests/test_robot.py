@@ -544,7 +544,6 @@ def test_each_arm_follows_its_own_leader_separately_or_both_at_once(cfg):
         assert r.jobs.get("teleop_left").spec.uses == {PORT["left_follower"], PORT["left_leader"]}
         assert r.teleop("right", False, "t")[0] and not r.jobs.running("teleop_right")
         assert r.jobs.running("teleop_left")                                          # the other arm goes on
-        assert not hasattr(r, "follow")                                               # one leader for both arms: removed
     finally:
         r.close()
 
@@ -582,3 +581,62 @@ def test_a_broken_leader_calibration_is_refused():
     assert leader_cal_problems(good) == []
     bad = {**good, "gripper": {"range_min": 2045, "range_max": 2051}, "elbow_flex": {"range_min": 0, "range_max": 4095}}
     assert leader_cal_problems(bad) == ["elbow_flex", "gripper"]
+
+
+def test_one_leader_moves_both_arms_only_when_the_left_arm_is_allowed(cfg):
+    import dataclasses
+    with TestClient(create_app(cfg, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["msg"] == "LEFT_BLOCKED"        # broken left calibration: no both-arm copy
+    ok = dataclasses.replace(cfg, left_arm_ok=True)
+    with TestClient(create_app(ok, MockBase())) as client, client.websocket_connect("/ws?name=Laptop") as op:
+        take(op)
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["ok"]
+        r = robot_until(op, lambda m: m["bridge"]["running"] and "relay" in m["jobs"] and m["jobs"]["relay"]["running"])
+        assert r["bridge"]["mode"] == "follow" and r["bridge"]["side"] == "both"
+        op.send_json({"t": "wave", "side": "right"})
+        assert "busy" in note(op, "wave")["msg"]                  # one program per arm
+        op.send_json({"t": "estop", "on": True})                   # E-STOP kills the relay and the bridge
+        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
+        op.send_json({"t": "estop", "on": False})
+        op.send_json({"t": "drive", "en": False})
+        op.send_json({"t": "follow", "on": True})
+        assert note(op, "follow")["ok"]
+        robot_until(op, lambda m: m["bridge"]["running"] and m["jobs"]["relay"]["running"])
+        op.send_json({"t": "follow", "on": False})
+        assert note(op, "follow")["ok"]
+        robot_until(op, lambda m: not m["bridge"]["running"] and not m["jobs"]["relay"]["running"])
+
+
+def test_leader_relay_sends_one_target_for_both_arms():
+    from robot_server.leadermath import leader_to_target
+    cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in
+           ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]}
+    tgt = leader_to_target(cal, [2000, 2000, 2000, 2000, 3000, 1500])
+    assert tgt["shoulder_pan"] == 0.0 and tgt["wrist_roll"] == round(1000 * 360 / 4095, 2) and tgt["gripper"] == 25.0
+
+
+def test_relay_stops_when_the_arm_program_ends(cfg):
+    import dataclasses
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, left_arm_ok=True), MockBase())
+    try:
+        assert r.follow(True, "t")[0]
+        assert r.jobs.running("relay") and r.jobs.running("bridge")
+        r.jobs.kill(["bridge"])                      # the bridge dies (a motor stopped answering)
+        r._follow_watch()
+        assert not r.jobs.running("relay")
+        assert any("copy stopped" in e["text"] for e in r.events)
+    finally:
+        r.close()
+
+
+def test_follow_offsets_shift_one_arm_without_a_jump_at_the_seam():
+    from robot_server.leadermath import apply_offsets
+    tgt = {"wrist_flex": -30.0, "elbow_flex": 96.0, "gripper": 5.0}
+    out = apply_offsets(tgt, {"wrist_flex": 123, "gripper": 50})
+    assert out == {"wrist_flex": 93.0, "elbow_flex": 96.0, "gripper": 5.0}      # gripper never shifted
+    assert apply_offsets({"wrist_flex": 179.0}, {"wrist_flex": 123})["wrist_flex"] == -58.0   # 302 -> -58, continuous
+    assert apply_offsets(tgt, {}) == tgt

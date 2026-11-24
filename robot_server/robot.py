@@ -73,7 +73,7 @@ WIZARD_USES = {
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
 ENGINEER_JOBS = ("record", "pack", "wizard")  # their output is shown only on the Studio page
-ARM_JOBS = ("skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves
+ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves (relay feeds the bridge)
 # Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
 TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
@@ -894,6 +894,51 @@ class Robot:
         self.leader_cals = cals
         return self._bridge_start(side, "leader", who)
 
+    def follow(self, on: bool, who: str) -> tuple[bool, str]:
+        """Copy mode: ONE leader arm on the Jetson moves BOTH follower arms the same way (back on 24 Nov 2026,
+        next to one leader per arm). The grey leader (right) is used when plugged in: the per-arm offsets in
+        follow_offsets.json were measured with it. The relay reads the leader; the twin bridge moves the arms
+        with its safety limits and holds them on stop."""
+        if not on:
+            ok, msg = self._stop_job("relay", who) if self.jobs.running("relay") else (True, "")
+            if self.bridge_mode == "follow" and self.jobs.running("bridge"):
+                return self._stop_job("bridge", who)
+            return ok, msg
+        leader = next((s for s in ("right", "left") if os.path.exists(PORT[f"{s}_leader"])), None)
+        if leader is None and not self.mock:
+            return False, "No leader arm is plugged into the Jetson."
+        leader = leader or "right"
+        f = HF_CALIB / "teleoperators" / "so_leader" / f"{leader}_leader.json"
+        if not self.mock:
+            try:
+                cal = json.loads(f.read_text())
+                bad = leader_cal_problems(cal)
+            except (OSError, ValueError, KeyError, TypeError):
+                return False, f"Leader calibration not found or unreadable: {f}"
+            if bad:
+                return False, "Leader calibration is broken (" + ", ".join(bad) + "). Recalibrate the leader arm."
+        ok, msg = self._bridge_start("both", "follow", who)
+        if not ok:
+            return ok, msg
+        lport = PORT[f"{leader}_leader"]
+        if self.mock:
+            cmd = self._mock_cmd(f"leader_relay {leader} -> both arms")
+        else:
+            cmd = [sys.executable, str(HERE / "leader_relay.py"), "--port", lport, "--calib", str(f), "--arms", "right,left",
+                   "--to", f"{BRIDGE_ADDR[0]}:{BRIDGE_ADDR[1]}"]
+        ok, msg = self._start("relay", JobSpec(cmd, frozenset({lport}), label=f"{leader} leader -> both arms", stop_wait=3.0), who)
+        if not ok:
+            self._stop_job("bridge", who)
+            return ok, msg
+        return True, "Both arms follow the leader arm."
+
+    def _follow_watch(self) -> None:
+        """The relay only feeds the bridge: when the bridge ends (a motor stopped answering, E-STOP...)
+        the relay is stopped too, so the page shows the copy as off and the bridge's error stays visible."""
+        if self.jobs.running("relay") and not self.jobs.running("bridge"):
+            self.jobs.stop("relay")
+            self.event("server", "both-arm copy stopped: the arm program ended (see the Arms tab)")
+
     def leader_pos(self, side: str, raw: object) -> None:
         """Called about 30 times per second per leader arm while it streams. Never blocks."""
         if side not in ("right", "left") or self.bridge_mode != "leader" or side not in _sides(self.bridge_side or "") \
@@ -1262,6 +1307,7 @@ class Robot:
         while not self._stop.is_set():
             try:
                 h = {"jetson": self._jetson(), "t": time.time()}
+                self._follow_watch()
                 self._lidar_watch()
                 self.rec.poll()
                 h["boards"] = self._boards() if n % 2 == 0 else self.health.get("boards", {})

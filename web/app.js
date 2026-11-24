@@ -355,6 +355,9 @@ for (const b of document.querySelectorAll("[data-vstep]")) b.addEventListener("c
 $("voice-base").addEventListener("click", () => send({ t: "base", on: true }));   // voice needs the wheel program
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
+// Copy mode: ONE leader (the grey one, on the robot) moves both arms the same way
+$("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
+const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Both arms at once, each with the leader of its own side (two separate teleop programs)
 $("tele-both").addEventListener("click", () => {
   const on = !(jobRunning("teleop_right") && jobRunning("teleop_left"));
@@ -615,7 +618,13 @@ function renderRobot() {
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
-  $("wave-btn").disabled = !me || leader.on || waving || estop;
+  const follows = following();
+  $("wave-btn").disabled = !me || leader.on || waving || follows || estop;
+  setBtn($("follow-btn"), t(follows ? "follow.stop" : "follow.start"), follows ? "ri-stop-fill" : "ri-git-fork-line");
+  $("follow-btn").classList.toggle("on", follows);
+  $("follow-btn").disabled = !me || leader.on || (estop && !follows) || (!follows && !r.left_arm_ok);
+  $("follow-st").textContent = follows ? t("follow.live") : !r.left_arm_ok ? t("follow.locked") : t("follow.hint");
+  $("follow-st").className = "small " + (follows ? "accent" : !r.left_arm_ok ? "note err" : "mute");
   const both = jobRunning("teleop_right") && jobRunning("teleop_left");
   setBtn($("tele-both"), t(both ? "arm.teleop.bothoff" : "arm.teleop.both"), both ? "ri-stop-fill" : "ri-git-merge-line");
   $("tele-both").classList.toggle("on", both);
@@ -717,7 +726,7 @@ function renderRobot() {
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
 
   renderCams();
-  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both"].includes(el.id)) el.disabled = !me;
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both", "follow-btn"].includes(el.id)) el.disabled = !me;
 
   tabDot("drive", baseOn, !$("base-err").hidden);
   tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
