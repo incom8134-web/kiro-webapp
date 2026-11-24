@@ -8,6 +8,10 @@ import lerobot_patch  # noqa: E402
 
 lerobot_patch.apply()
 lerobot_patch.apply_rollout()
+try:
+    lerobot_patch.apply_timing()  # log lines: where each step's time goes
+except Exception as e:  # noqa: BLE001 - timing is only a help
+    print("timing not available:", e, flush=True)
 from lerobot.scripts.lerobot_rollout import main  # noqa: E402
 
 if __name__ == "__main__":

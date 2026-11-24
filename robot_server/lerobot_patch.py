@@ -95,3 +95,35 @@ def apply_rollout() -> None:
 
     SyncInferenceEngine.get_action = get_action
     SyncInferenceEngine._kiro_queue_skip = True
+
+
+def apply_timing(every: float = 3.0) -> None:
+    """Print, every few seconds, how long each part of a rollout step takes (cameras, motors, model):
+    finds what holds the loop below 30 Hz. Log lines only; nothing else changes."""
+    import time
+    from collections import defaultdict
+    from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
+    from lerobot.rollout.inference.sync import SyncInferenceEngine
+    from lerobot.motors.motors_bus import SerialMotorsBus
+
+    acc, n, t_last = defaultdict(float), defaultdict(int), [time.monotonic()]
+
+    def timed(key, fn):
+        def wrap(*a, **kw):
+            t0 = time.monotonic()
+            try:
+                return fn(*a, **kw)
+            finally:
+                k = key(a[0]) if callable(key) else key
+                acc[k] += time.monotonic() - t0
+                n[k] += 1
+                if time.monotonic() - t_last[0] > every:
+                    t_last[0] = time.monotonic()
+                    print("[timing] " + "  ".join(f"{k} {1000 * acc[k] / max(1, n[k]):.0f} ms x{n[k]}" for k in sorted(acc)), flush=True)
+                    acc.clear(); n.clear()
+        return wrap
+
+    OpenCVCamera.async_read = timed(lambda cam: f"cam {cam.config.index_or_path}", OpenCVCamera.async_read)
+    SerialMotorsBus.sync_read = timed("motors read", SerialMotorsBus.sync_read)
+    SerialMotorsBus.sync_write = timed("motors write", SerialMotorsBus.sync_write)
+    SyncInferenceEngine.get_action = timed("policy", SyncInferenceEngine.get_action)
