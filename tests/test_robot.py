@@ -662,3 +662,28 @@ def test_leader_tune_file_is_read_and_bad_files_are_ignored(tmp_path):
     assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": (1.2, -14.5)}}
     f.write_text("not json")
     assert load_tune(f) == {} and load_tune(tmp_path / "missing.json") == {}
+
+
+def test_skill_repeats_with_a_pause_and_stop_or_estop_ends_the_series(cfg):
+    from robot_server.robot import Robot
+    r = Robot(dataclasses.replace(cfg, skill_seconds=1), MockBase())
+    try:
+        assert r.skill("demo_act", True, "t", repeat=2, pause=0.3)[0]
+        assert r.skill_series and r.skill_series["of"] == 2
+        assert not r.skill("demo_act", True, "t")[0]                     # one series at a time
+        end = time.time() + 15
+        runs = set()
+        while r.skill_series and time.time() < end:
+            runs.add(r.skill_series["run"])
+            time.sleep(0.05)
+        assert r.skill_series is None and runs == {1, 2}                  # both runs played, then it ended
+        assert r.skill("demo_act", True, "t", repeat=5, pause=5)[0]
+        assert r.skill("demo_act", False, "t")[0]                         # Stop ends the whole series
+        time.sleep(0.5)
+        assert r.skill_series is None and not r.jobs.running("skill")
+        assert r.skill("demo_act", True, "t", repeat=5, pause=5)[0]
+        r.on_estop("t")                                                   # E-STOP ends it too
+        time.sleep(0.8)
+        assert r.skill_series is None and not r.jobs.running("skill")
+    finally:
+        r.close()

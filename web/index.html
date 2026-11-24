@@ -115,7 +115,14 @@
       <section class="panel" data-panel="arms">
         <div class="card skills-card">
           <div class="row head"><h3><i class="ri-robot-2-line"></i><span data-i18n="skills.title">Autonomous skills</span></h3><span id="skill-st" class="st"></span></div>
+          <div class="row skill-rep">
+            <label class="small mute" for="skill-repeat" data-i18n="skill.runs">Runs</label>
+            <input id="skill-repeat" class="num" type="number" min="1" max="50" value="1">
+            <label class="small mute" for="skill-pause" data-i18n="skill.pause">Pause between runs (s)</label>
+            <input id="skill-pause" class="num" type="number" min="0" max="120" value="10">
+          </div>
           <div id="skills"></div>
+          <p class="small" id="skill-prog" hidden></p>
           <p class="small mute" id="skill-hint"></p>
           <pre id="skill-tail" class="tail" hidden></pre>
         </div>

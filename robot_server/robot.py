@@ -168,6 +168,9 @@ class Robot:
         self.voice_step = "big"  # VOICE_STEPS: "big" (default) or "test" (0.2 m / 45 degrees, the voice test form)
         self.voice_mic = "device"  # "device" = the operator's phone / laptop (sound from the page), "robot" = USB mic
         self.voice_rx_t = 0.0  # when the last piece of sound from the page arrived
+        self._skill_stop = threading.Event()  # set = the series of skill runs ends (Stop, E-STOP)
+        self._skill_thread: threading.Thread | None = None
+        self.skill_series: dict | None = None  # {"name", "run", "of", "pause", "waiting"} while a series plays
         self.voice_log: deque[dict] = deque(maxlen=12)  # the voice node's last tagged lines, with their time
         self.servo_scan: dict | None = None
         self._wizard_steps: list[dict] | None = None
@@ -575,9 +578,48 @@ class Robot:
         """Trained models for the Autonomous skills card. arms: "right", "left", "both" or "?" (training.py)."""
         return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable")} for m in self.train.models()]
 
-    def skill(self, name: str, on: bool, who: str) -> tuple[bool, str]:
+    def skill(self, name: str, on: bool, who: str, repeat: int = 1, pause: float = 10.0) -> tuple[bool, str]:
+        """Play a trained skill: one run of skill_seconds, or `repeat` runs with `pause` seconds between them
+        (time to put the object back). Stop, E-STOP or a run that fails ends the whole series."""
         if not on:
+            self._skill_stop.set()
             return self._stop_job("skill", who)
+        repeat, pause = max(1, min(50, int(repeat))), max(0.0, min(120.0, float(pause)))
+        if self._skill_thread and self._skill_thread.is_alive():
+            return False, "The skill is already running."
+        ok, msg = self._skill_run(name, who)
+        if not ok:
+            return ok, msg
+        self._skill_stop.clear()
+        self.skill_series = {"name": name, "run": 1, "of": repeat, "pause": pause, "waiting": False}
+        self._skill_thread = threading.Thread(target=self._skill_series, args=(name, who, repeat, pause), daemon=True)
+        self._skill_thread.start()
+        return True, ""
+
+    def _skill_series(self, name: str, who: str, repeat: int, pause: float) -> None:
+        try:
+            for run in range(1, repeat + 1):
+                if run > 1:
+                    self.skill_series.update(run=run, waiting=True)
+                    if self._skill_stop.wait(pause):
+                        return
+                    self.skill_series["waiting"] = False
+                    ok, msg = self._skill_run(name, who)
+                    if not ok:
+                        self.event(who, f"skill series stopped before run {run}: {msg}")
+                        return
+                while self.jobs.running("skill"):
+                    if self._skill_stop.wait(0.3):
+                        return
+                j = self.jobs.get("skill")
+                if j is not None and j.code not in (0, None):
+                    self.event(who, f"skill series stopped: run {run} ended with code {j.code}")
+                    return
+            self.event(who, f"skill {name}: {repeat} run(s) done")
+        finally:
+            self.skill_series = None
+
+    def _skill_run(self, name: str, who: str) -> tuple[bool, str]:
         m = next((m for m in self.models() if m["name"] == name), None)
         if m is None:
             return False, "Model not found."
@@ -1103,6 +1145,7 @@ class Robot:
         and nothing can keep driving; then every wheel's speed is checked (wheel_stop.py).
         The user's choice (20 Nov 2026): a moment later both arms fold home by themselves, slowly.
         Pressing E-STOP again while they are about to fold or folding cancels it: they stay frozen."""
+        self._skill_stop.set()  # a series of skill runs ends too, not only the current run
         now = time.monotonic()
         self.base_meter.trigger(now, "estop", f"E-STOP by {who}")
         self.arm_meter.trigger(now, "estop", f"E-STOP by {who}")
@@ -1347,7 +1390,7 @@ class Robot:
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step, "voice_mic": self.voice_mic, "voice_rx": {"age": round(time.monotonic() - self.voice_rx_t, 1) if self.voice_rx_t else None},
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
-            "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds,
+            "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds, "skill_series": self.skill_series,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "lidar_measured": bool(parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK"))), "wheels": self.base_wheels(), "base_guard": self.base_guard(),

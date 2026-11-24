@@ -706,7 +706,8 @@ function renderRobot() {
 
   // Skills
   const sk = J.skill;
-  const skillOn = jobRunning("skill");
+  const series = r.skill_series;            // repeat: runs left, and the pause in between (no program runs then)
+  const skillOn = jobRunning("skill") || !!series;
   const models = r.models || [];
   const camOk = (k) => ((r.cams || []).find((c) => c.key === k) || {}).present;
   const sh = models.length ? models.map((m) => {
@@ -724,8 +725,17 @@ function renderRobot() {
   const skills = $("skills");
   if (skills.dataset.html !== sh) {
     skills.innerHTML = sh; skills.dataset.html = sh;
-    for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => send({ t: "skill", name: el.dataset.skill, on: !jobRunning("skill") }));
+    for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => {
+      const r2 = state.robot || {};
+      const on = !(jobRunning("skill") || r2.skill_series);
+      const repeat = Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1));
+      const pause = Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0));
+      send({ t: "skill", name: el.dataset.skill, on, repeat, pause });
+    });
   }
+  $("skill-prog").hidden = !series;
+  if (series) $("skill-prog").textContent = t(series.waiting ? "skill.waiting" : "skill.runof", { n: series.run, of: series.of, s: Math.round(series.pause) });
+  $("skill-repeat").disabled = $("skill-pause").disabled = skillOn;
   $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(r.skill_s || 20) }) : t("skill.add");
   $("skill-st").textContent = skillOn ? t("st.on") : "";
   $("skill-st").className = "st" + (skillOn ? " live" : "");

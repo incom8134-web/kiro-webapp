@@ -325,7 +325,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         elif t == "arm":
             call = lambda: r.arm(str(msg.get("side")), str(msg.get("action")), name)  # noqa: E731
         elif t == "skill":
-            call = lambda: r.skill(str(msg.get("name", "")), on, name)  # noqa: E731
+            call = lambda: r.skill(str(msg.get("name", "")), on, name, int(msg.get("repeat") or 1), float(msg.get("pause") or 10))  # noqa: E731
         elif t == "voice":
             call = lambda: r.voice(on, name, str(msg.get("lang", "ko")), str(msg.get("step", "big")), str(msg.get("mic", "device")))  # noqa: E731
         elif t == "system":

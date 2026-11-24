@@ -176,6 +176,8 @@ const STRINGS = {
 
     "skill.none": "No trained models found in {dir}", "skill.run": "Run", "skill.stop": "Stop",
     "skills.title": "Autonomous skills", "skill.play": "Play", "skill.arm": "black arm",
+    "skill.runs": "Runs", "skill.pause": "Pause between runs (s)",
+    "skill.runof": "Run {n} of {of}", "skill.waiting": "Run {n} of {of} starts in {s} s: put the object back",
     "skill.nocam": "Needs a camera that is not connected: {cams}",
     "skill.hint": "The arm does the task by itself for {s} s, then stops. E-STOP stops it at once.",
     "skill.add": "To add a skill, train one in Studio > Train a skill, or copy a trained model to ~/policies/<name>/pretrained_model on the Jetson.",
@@ -638,6 +640,8 @@ const STRINGS = {
 
     "skill.none": "{dir}에 학습된 모델이 없습니다", "skill.run": "실행", "skill.stop": "중지",
     "skills.title": "자율 동작", "skill.play": "재생", "skill.arm": "검정 팔",
+    "skill.runs": "횟수", "skill.pause": "다음 실행까지 대기(초)",
+    "skill.runof": "{of}회 중 {n}회째", "skill.waiting": "{of}회 중 {n}회째가 {s}초 뒤 시작: 물건을 제자리에 두세요",
     "skill.nocam": "연결되지 않은 카메라가 필요합니다: {cams}",
     "skill.hint": "팔이 {s}초 동안 스스로 작업한 뒤 멈춥니다. 비상정지를 누르면 바로 멈춥니다.",
     "skill.add": "스킬을 추가하려면 스튜디오 > 스킬 학습 에서 학습하거나, 학습된 모델을 젯슨의 ~/policies/<이름>/pretrained_model 에 복사하세요.",

@@ -732,3 +732,6 @@ details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: 
 .miclevel { height: 4px; border-radius: 2px; background: var(--raise-2); overflow: hidden; margin: 6px 0 2px; }
 .miclevel > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .1s linear; }
 #voice-rx.ok { color: var(--ok); }
+.skill-rep { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.skill-rep .num { width: 72px; }
+#skill-prog { color: var(--accent); }
