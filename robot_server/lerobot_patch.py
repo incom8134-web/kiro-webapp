@@ -66,3 +66,32 @@ def apply() -> None:
 
     SerialMotorsBus._normalize, SerialMotorsBus._unnormalize = _normalize, _unnormalize
     SerialMotorsBus._kiro_drive_mode = True
+
+
+def apply_rollout() -> None:
+    """lerobot-rollout runs the whole picture pipeline (both cameras to the GPU, normalised) on EVERY step,
+    but ACT looks at it only once per chunk (100 steps) and otherwise pops its planned queue. On the Jetson
+    that wasted work held the loop at ~10 Hz instead of 30 (24 Nov 2026), so the arm moved 3x slower than
+    it was trained. While the queue still has actions, pop it directly: the same actions, in the same order."""
+    import torch
+    from contextlib import nullcontext
+    from lerobot.rollout.inference.sync import SyncInferenceEngine
+
+    if getattr(SyncInferenceEngine, "_kiro_queue_skip", False):
+        return
+    orig = SyncInferenceEngine.get_action
+
+    def get_action(self, obs_frame):
+        queue = getattr(self._policy, "_action_queue", None)
+        ensemble = getattr(getattr(self._policy, "config", None), "temporal_ensemble_coeff", None)
+        if obs_frame is None or not queue or ensemble is not None:
+            return orig(self, obs_frame)  # empty queue: the model plans the next chunk as usual
+        amp = self._device.type == "cuda" and self._policy.config.use_amp
+        with torch.inference_mode(), (torch.autocast(device_type=self._device.type) if amp else nullcontext()):
+            action = self._postprocessor(queue.popleft().unsqueeze(0) if queue[0].dim() == 1 else queue.popleft())
+        from lerobot.rollout.inference.sync import make_robot_action
+        action_dict = make_robot_action(action.squeeze(0).cpu(), self._dataset_features)
+        return torch.tensor([action_dict[k] for k in self._ordered_action_keys])
+
+    SyncInferenceEngine.get_action = get_action
+    SyncInferenceEngine._kiro_queue_skip = True

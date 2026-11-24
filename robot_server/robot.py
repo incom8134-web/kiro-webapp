@@ -578,13 +578,15 @@ class Robot:
         """Trained models for the Autonomous skills card. arms: "right", "left", "both" or "?" (training.py)."""
         return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable")} for m in self.train.models()]
 
-    def skill(self, name: str, on: bool, who: str, repeat: int = 1, pause: float = 10.0) -> tuple[bool, str]:
+    def skill(self, name: str, on: bool, who: str, repeat: int = 1, pause: float = 10.0,
+              seconds: float | None = None) -> tuple[bool, str]:
         """Play a trained skill: one run of skill_seconds, or `repeat` runs with `pause` seconds between them
         (time to put the object back). Stop, E-STOP or a run that fails ends the whole series."""
         if not on:
             self._skill_stop.set()
             return self._stop_job("skill", who)
         repeat, pause = max(1, min(50, int(repeat))), max(0.0, min(120.0, float(pause)))
+        self._skill_secs = int(max(5, min(120, float(seconds)))) if seconds else int(self.cfg.skill_seconds)
         if self._skill_thread and self._skill_thread.is_alive():
             return False, "The skill is already running."
         ok, msg = self._skill_run(name, who)
@@ -630,11 +632,13 @@ class Robot:
             return False, "Not connected: right follower"
         cams = m["cams"] or ["top", "right_wrist"]
         uses = frozenset({PORT["right_follower"], *(f"cam:{c}" for c in cams)})
-        secs = str(int(self.cfg.skill_seconds))
+        secs = str(getattr(self, "_skill_secs", int(self.cfg.skill_seconds)))
         cmd = (self._mock_cmd(f"skill {name}", seconds=int(secs)) if self.mock
                else ["bash", str(self.so101 / "run_policy.sh"), "run", m["path"], secs])
+        # ROLLOUT_PY: the rollout with the ACT queue shortcut (30 Hz instead of ~10 on the Jetson)
+        env = {**self._venv_env(), "ROLLOUT_PY": str(HERE / "rollout_runner.py")}
         return self._start("skill", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
-                                            env=self._venv_env(), label=f"skill {name}", stop_wait=8.0), who)
+                                            env=env, label=f"skill {name}", stop_wait=8.0), who)
 
     # ---------------------------------------------------------------- voice
     def voice(self, on: bool, who: str, lang: str = "ko", step: str = "big", mic: str = "device") -> tuple[bool, str]:
@@ -1390,7 +1394,7 @@ class Robot:
             "t": "robot", "mock": self.mock, "jobs": jobs, "health": self.health, "cams": cams,
             "models": self.models(), "voice": self.voice_text(), "voice_models": self.voice_models(), "voice_lang": self.voice_lang, "voice_step": self.voice_step, "voice_mic": self.voice_mic, "voice_rx": {"age": round(time.monotonic() - self.voice_rx_t, 1) if self.voice_rx_t else None},
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
-            "estop_fold": self.estop_fold_state(), "skill_s": self.cfg.skill_seconds, "skill_series": self.skill_series,
+            "estop_fold": self.estop_fold_state(), "skill_s": getattr(self, "_skill_secs", self.cfg.skill_seconds), "skill_series": self.skill_series,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "lidar_measured": bool(parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK"))), "wheels": self.base_wheels(), "base_guard": self.base_guard(),

@@ -359,7 +359,7 @@ $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
-const DEMO_RUNS = { runs: 30, pause: 5 };   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
+const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
   return !!l && l.state !== "missing";
@@ -722,7 +722,7 @@ function renderRobot() {
         : lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
       + `</div><div class="skill-btns"><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
       + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button>`
-      + (skillOn ? "" : `<button class="btn" data-skill30="${esc(m.name)}" ${blocked ? "disabled" : ""}><i class="ri-repeat-line"></i><span>${t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause })}</span></button>`)
+      + (skillOn ? "" : `<button class="btn" data-skill30="${esc(m.name)}" ${blocked ? "disabled" : ""}><i class="ri-repeat-line"></i><span>${t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause, d: DEMO_RUNS.seconds })}</span></button>`)
       + `</div></div>`;
   }).join("") : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
   const skills = $("skills");
@@ -730,13 +730,14 @@ function renderRobot() {
     skills.innerHTML = sh; skills.dataset.html = sh;
     // One click: the demo series (30 runs, 5 s apart). Stop / E-STOP ends it.
     for (const el of skills.querySelectorAll("[data-skill30]")) el.addEventListener("click", () =>
-      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause }));
+      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds }));
     for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => {
       const r2 = state.robot || {};
       const on = !(jobRunning("skill") || r2.skill_series);
       const repeat = Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1));
       const pause = Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0));
-      send({ t: "skill", name: el.dataset.skill, on, repeat, pause });
+      const seconds = Math.max(5, Math.min(120, parseFloat($("skill-secs").value) || 30));
+      send({ t: "skill", name: el.dataset.skill, on, repeat, pause, seconds });
     });
   }
   // The first ~40 s of a run: countdown, then the model loads on the Jetson. The arm does not move yet: say so,
@@ -747,8 +748,8 @@ function renderRobot() {
     loading && !(series && series.waiting) ? t("skill.loading") : ""].filter(Boolean).join(" · ");
   $("skill-prog").hidden = !prog;
   $("skill-prog").textContent = prog;
-  $("skill-repeat").disabled = $("skill-pause").disabled = skillOn;
-  $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(r.skill_s || 20) }) : t("skill.add");
+  $("skill-repeat").disabled = $("skill-pause").disabled = $("skill-secs").disabled = skillOn;
+  $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(parseFloat($("skill-secs").value) || 30) }) : t("skill.add");
   $("skill-st").textContent = skillOn ? t("st.on") : "";
   $("skill-st").className = "st" + (skillOn ? " live" : "");
   failTail($("skill-tail"), sk);

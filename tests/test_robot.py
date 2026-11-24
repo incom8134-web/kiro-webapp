@@ -681,7 +681,8 @@ def test_skill_repeats_with_a_pause_and_stop_or_estop_ends_the_series(cfg):
         assert r.skill("demo_act", False, "t")[0]                         # Stop ends the whole series
         time.sleep(0.5)
         assert r.skill_series is None and not r.jobs.running("skill")
-        assert r.skill("demo_act", True, "t", repeat=5, pause=5)[0]
+        assert r.skill("demo_act", True, "t", repeat=5, pause=5, seconds=45)[0]
+        assert r._skill_secs == 45 and r.jobs.get("skill").spec.env["ROLLOUT_PY"].endswith("rollout_runner.py")
         r.on_estop("t")                                                   # E-STOP ends it too
         time.sleep(0.8)
         assert r.skill_series is None and not r.jobs.running("skill")
