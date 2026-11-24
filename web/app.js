@@ -652,7 +652,7 @@ function renderRobot() {
   $("voice-nobase").hidden = !(vOn && !jobRunning("base") && state.server && state.server.backend === "ros");
   const insecure = voiceMic === "device" && !window.isSecureContext;
   $("voice-https").hidden = !insecure;
-  $("voice-https").textContent = insecure ? t("voice.https", { url: `https://${location.hostname}:8443` }) : "";
+  $("voice-https-go").href = `https://${location.hostname}:8443${location.pathname}#voice`;
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
   for (const b of document.querySelectorAll("[data-vstep]")) {
     b.classList.toggle("on", b.dataset.vstep === voiceStep);

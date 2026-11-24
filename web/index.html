@@ -150,7 +150,8 @@
           <div class="row voice-lang"><span class="small mute" data-i18n="voice.mic">Microphone</span><span class="grow"></span>
             <div class="row seg" id="voice-mics"><button class="btn" type="button" data-vmic="device" data-i18n="voice.mic.device">This phone / laptop</button><button class="btn" type="button" data-vmic="robot" data-i18n="voice.mic.robot">Robot</button></div></div>
           <p id="voice-note" class="small mute" hidden></p>
-          <p id="voice-https" class="small note err" hidden></p>
+          <div id="voice-https" class="row" hidden><p class="small mute grow" data-i18n="voice.httpsnote">Chrome allows the microphone only on the secure page. Tap to listen switches there by itself.</p>
+            <a id="voice-https-go" class="btn" href="#"><i class="ri-lock-line"></i><span data-i18n="voice.httpsgo">Open secure page</span></a></div>
           <div class="miclevel" id="mic-level" hidden><i></i></div>
           <p id="voice-rx" class="small" hidden></p>
           <div id="voice-nobase" class="row" hidden><p class="small note err grow" data-i18n="voice.nobase">The wheels are off: voice is heard, but the robot cannot move.</p>
