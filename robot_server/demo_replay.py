@@ -42,6 +42,7 @@ def main() -> int:
     ap.add_argument("--id", required=True)
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--episode", type=int, default=9)
+    ap.add_argument("--episodes", default="", help="several episodes, played in turn: 0,1,2 (overrides --episode)")
     ap.add_argument("--repeat", type=int, default=5)
     ap.add_argument("--pause", type=float, default=3.0)
     ap.add_argument("--glide", type=float, default=2.0)
@@ -52,16 +53,18 @@ def main() -> int:
 
     files = sorted(glob.glob(a.dataset + "/data/*/*.parquet"))
     df = pd.concat([pd.read_parquet(f) for f in files])
-    ep = df[df["episode_index"] == a.episode].sort_values("frame_index")
-    if ep.empty:
-        print(f"Episode {a.episode} not found in {a.dataset}", flush=True)
-        return 2
-    frames = np.stack(ep["action"].values).astype(float)
-    kernel = np.ones(5) / 5  # light smoothing of hand jitter, same length
-    padded = np.pad(frames, ((2, 2), (0, 0)), mode="edge")
-    frames = np.stack([np.convolve(padded[:, j], kernel, mode="valid") for j in range(frames.shape[1])], axis=1)
+    wanted = [int(x) for x in a.episodes.split(",") if x.strip()] or [a.episode]
+    clips = []
+    for e in wanted:
+        ep = df[df["episode_index"] == e].sort_values("frame_index")
+        if ep.empty:
+            print(f"Episode {e} not found in {a.dataset}", flush=True)
+            return 2
+        f = np.stack(ep["action"].values).astype(float)
+        padded = np.pad(f, ((2, 2), (0, 0)), mode="edge")  # light smoothing of hand jitter, same length
+        clips.append((e, np.stack([np.convolve(padded[:, j], np.ones(5) / 5, mode="valid") for j in range(f.shape[1])], axis=1)))
     fps = 30.0 * max(0.5, min(2.0, a.speed))
-    print(f"episode {a.episode}: {len(frames) / 30:.1f} s recorded, {a.repeat} run(s), speed x{fps / 30:.2f}", flush=True)
+    print(f"episodes {wanted}, {a.repeat} run(s), speed x{fps / 30:.2f}", flush=True)
 
     robot = SOFollower(SOFollowerRobotConfig(port=a.port, id=a.id, disable_torque_on_disconnect=False))
     robot.connect(calibrate=False)
@@ -86,7 +89,8 @@ def main() -> int:
 
         pose = home
         for run in range(1, a.repeat + 1):
-            print(f"run {run} of {a.repeat}", flush=True)
+            e, frames = clips[(run - 1) % len(clips)]
+            print(f"run {run} of {a.repeat} (episode {e}, {len(frames) / 30:.1f} s)", flush=True)
             for part in ("in", "pick", "out"):  # glide to the start, the recorded pick, glide home
                 poses = (min_jerk(pose, frames[0], a.glide, 30) if part == "in" else frames if part == "pick"
                          else min_jerk(pose, home, a.glide, 30))
