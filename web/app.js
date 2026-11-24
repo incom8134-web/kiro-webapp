@@ -374,7 +374,7 @@ function showTab(name) {
 for (const b of document.querySelectorAll(".tabs [data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
 let startTab = "drive";
 try { startTab = localStorage.getItem("kiro-tab") || "drive"; } catch (e) { /* ignore */ }
-if (location.hash === "#voice") startTab = "voice";   // sent here from the http page to use the microphone
+if (location.hash === "#voice" || location.hash === "#arms") startTab = location.hash.slice(1);   // sent here from the http page (microphone, USB)
 showTab(document.querySelector(`.panel[data-panel="${startTab}"]`) ? startTab : "drive");
 
 /* A dot on a tab: green when something there runs, amber when something there failed. */
@@ -917,6 +917,10 @@ async function whichIsWhich(arms, side) {
 }
 
 async function leaderStart() {
+  if (!window.isSecureContext) {               // http: browsers block USB. Same robot, secure door (8443), Arms tab.
+    location.href = `https://${location.hostname}:8443${location.pathname}#arms`;
+    return;
+  }
   if (!LeaderArm.supported()) {
     showNote(t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` }), true);
     return;
