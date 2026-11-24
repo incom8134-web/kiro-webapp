@@ -657,6 +657,8 @@ def test_leader_tune_file_is_read_and_bad_files_are_ignored(tmp_path):
     from robot_server.lerobot_patch import load_tune
     f = tmp_path / "leader_tune.json"
     f.write_text('{"/dev/so101_left_leader": {"shoulder_lift": 1.091}}')
-    assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": 1.091}}
+    assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": (1.091, 0.0)}}
+    f.write_text('{"/dev/so101_left_leader": {"shoulder_lift": {"scale": 1.2, "offset": -14.5}}}')
+    assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": (1.2, -14.5)}}
     f.write_text("not json")
     assert load_tune(f) == {} and load_tune(tmp_path / "missing.json") == {}

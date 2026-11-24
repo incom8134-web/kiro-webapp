@@ -15,11 +15,17 @@ TUNE = Path("~/.config/kiro-webapp/leader_tune.json").expanduser()
 
 
 def load_tune(path: Path = TUNE) -> dict:
-    """{port: {joint: scale}}: stretch a leader joint whose stop-to-stop angle is smaller than its follower's
-    (24 Nov 2026: yellow leader's shoulder 187 deg, green arm 210 deg: at rest the green arm leaned forward)."""
+    """{port: {joint: (scale, offset)}} from {port: {joint: scale | {"scale": s, "offset": deg}}}: map a leader
+    joint onto its follower when the two travel differently (24 Nov 2026: yellow leader's shoulder vs the green
+    arm, measured in two poses, rest and straight up, by matching both arms)."""
     try:
-        return {port: {j: float(v) for j, v in joints.items()} for port, joints in json.loads(path.read_text()).items()}
-    except (OSError, ValueError, AttributeError, TypeError):
+        out = {}
+        for port, joints in json.loads(path.read_text()).items():
+            out[port] = {}
+            for j, v in joints.items():
+                out[port][j] = (float(v["scale"]), float(v.get("offset", 0.0))) if isinstance(v, dict) else (float(v), 0.0)
+        return out
+    except (OSError, ValueError, AttributeError, TypeError, KeyError):
         return {}
 
 
@@ -37,18 +43,26 @@ def apply() -> None:
         cal = (bus.calibration or {}).get(motor)
         return bool(cal and cal.drive_mode and bus.motors[motor].norm_mode is MotorNormMode.DEGREES)
 
-    def scale(bus, id_) -> float:
+    def tuned(bus, id_) -> tuple[float, float]:
         motor = bus._id_to_name(id_)
         if bus.motors[motor].norm_mode is not MotorNormMode.DEGREES:
-            return 1.0
-        return tune.get(str(getattr(bus, "port", "")), {}).get(motor, 1.0)
+            return 1.0, 0.0
+        return tune.get(str(getattr(bus, "port", "")), {}).get(motor, (1.0, 0.0))
 
     def _normalize(self, ids_values):
-        out = orig_norm(self, ids_values)
-        return {i: (-v if reversed_deg(self, i) else v) * scale(self, i) for i, v in out.items()}
+        out = {}
+        for i, v in orig_norm(self, ids_values).items():
+            sc, off = tuned(self, i)
+            out[i] = (-v if reversed_deg(self, i) else v) * sc + off
+        return out
 
     def _unnormalize(self, ids_values):
-        return orig_unnorm(self, {i: (-v if reversed_deg(self, i) else v) / scale(self, i) for i, v in ids_values.items()})
+        back = {}
+        for i, v in ids_values.items():
+            sc, off = tuned(self, i)
+            v = (v - off) / sc
+            back[i] = -v if reversed_deg(self, i) else v
+        return orig_unnorm(self, back)
 
     SerialMotorsBus._normalize, SerialMotorsBus._unnormalize = _normalize, _unnormalize
     SerialMotorsBus._kiro_drive_mode = True
