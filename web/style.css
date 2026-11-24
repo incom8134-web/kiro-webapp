@@ -735,3 +735,4 @@ details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: 
 .skill-rep { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .skill-rep .num { width: 72px; }
 #skill-prog { color: var(--accent); }
+.skill-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

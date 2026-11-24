@@ -359,6 +359,7 @@ $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
+const DEMO_RUNS = { runs: 30, pause: 5 };   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
   return !!l && l.state !== "missing";
@@ -719,12 +720,17 @@ function renderRobot() {
     return `<div class="skill"><div class="skill-t"><b>${esc(m.name)}</b><span class="small mute">${esc(String(m.type).toUpperCase())} · ${esc(armK ? t(armK) : t("skill.arm"))} · ${esc(need.map((k) => t("cam." + k)).join(" + "))}</span>`
       + (noplay ? `<span class="small note err">${esc(t("fm.noplay." + m.arms))}</span>`
         : lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
-      + `</div><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
-      + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button></div>`;
+      + `</div><div class="skill-btns"><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
+      + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button>`
+      + (skillOn ? "" : `<button class="btn" data-skill30="${esc(m.name)}" ${blocked ? "disabled" : ""}><i class="ri-repeat-line"></i><span>${t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause })}</span></button>`)
+      + `</div></div>`;
   }).join("") : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
   const skills = $("skills");
   if (skills.dataset.html !== sh) {
     skills.innerHTML = sh; skills.dataset.html = sh;
+    // One click: the demo series (30 runs, 5 s apart). Stop / E-STOP ends it.
+    for (const el of skills.querySelectorAll("[data-skill30]")) el.addEventListener("click", () =>
+      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause }));
     for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => {
       const r2 = state.robot || {};
       const on = !(jobRunning("skill") || r2.skill_series);
