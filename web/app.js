@@ -733,8 +733,14 @@ function renderRobot() {
       send({ t: "skill", name: el.dataset.skill, on, repeat, pause });
     });
   }
-  $("skill-prog").hidden = !series;
-  if (series) $("skill-prog").textContent = t(series.waiting ? "skill.waiting" : "skill.runof", { n: series.run, of: series.of, s: Math.round(series.pause) });
+  // The first ~40 s of a run: countdown, then the model loads on the Jetson. The arm does not move yet: say so,
+  // or people press Stop before it starts (24 Nov 2026)
+  const skJob = J.skill, now = (r.health && r.health.t) || Date.now() / 1000;
+  const loading = !!(skJob && skJob.running && now - skJob.started < 45);
+  const prog = [series ? t(series.waiting ? "skill.waiting" : "skill.runof", { n: series.run, of: series.of, s: Math.round(series.pause) }) : "",
+    loading && !(series && series.waiting) ? t("skill.loading") : ""].filter(Boolean).join(" · ");
+  $("skill-prog").hidden = !prog;
+  $("skill-prog").textContent = prog;
   $("skill-repeat").disabled = $("skill-pause").disabled = skillOn;
   $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(r.skill_s || 20) }) : t("skill.add");
   $("skill-st").textContent = skillOn ? t("st.on") : "";
