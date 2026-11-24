@@ -358,9 +358,32 @@ $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 // Copy mode: ONE leader (the grey one, on the robot) moves both arms the same way
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
-// Both arms at once, each with the leader of its own side (two separate teleop programs)
+// Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
+const robotLeader = (side) => {
+  const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
+  return !!l && l.state !== "missing";
+};
+const laptopTele = (side) => leader.on && (leader.side === side || leader.side === "both");
+function teleClick(side) {
+  if (jobRunning("teleop_" + side)) { send({ t: "teleop", side, on: false }); return; }
+  if (laptopTele(side)) { leaderStop(""); return; }
+  if (robotLeader(side)) { send({ t: "teleop", side, on: true }); return; }
+  if (leader.on) { showNote(t("leader.busy"), true); return; }   // the other laptop leader runs: stop it first
+  leader.side = side;
+  try { localStorage.setItem("kiro-leader-side", side); } catch (e) { /* private window */ }
+  leaderStart();
+}
+// Both arms at once, each with the leader of its own side (two teleop programs, or two leaders on this laptop)
 $("tele-both").addEventListener("click", () => {
+  if (laptopTele("right") && laptopTele("left")) { leaderStop(""); return; }
   const on = !(jobRunning("teleop_right") && jobRunning("teleop_left"));
+  if (on && !(robotLeader("right") && robotLeader("left"))) {
+    if (leader.on) { showNote(t("leader.busy"), true); return; }
+    leader.side = "both";
+    try { localStorage.setItem("kiro-leader-side", "both"); } catch (e) { /* private window */ }
+    leaderStart();
+    return;
+  }
   for (const side of ["right", "left"]) if (jobRunning("teleop_" + side) !== on) send({ t: "teleop", side, on });
 });
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
@@ -566,7 +589,7 @@ function renderRobot() {
   const b = (r.health && r.health.boards) || {};
   const armCol = (side) => {
     const blocked = side === "left" && !r.left_arm_ok;
-    const tele = jobRunning("teleop_" + side);
+    const tele = jobRunning("teleop_" + side) || laptopTele(side);
     const f = b[side + "_follower"];
     const off = !me || blocked ? "disabled" : "";
     const status = blocked ? t("arm.locked") : f && f.state === "missing" ? t("arm.missing")
@@ -587,7 +610,7 @@ function renderRobot() {
   const html = armCol("right") + armCol("left");
   if (arms.dataset.html !== html) {
     arms.innerHTML = html; arms.dataset.html = html;
-    for (const el of arms.querySelectorAll("[data-tele]")) el.addEventListener("click", () => send({ t: "teleop", side: el.dataset.tele, on: !jobRunning("teleop_" + el.dataset.tele) }));
+    for (const el of arms.querySelectorAll("[data-tele]")) el.addEventListener("click", () => teleClick(el.dataset.tele));
     for (const el of arms.querySelectorAll("[data-act]")) {
       if (el.dataset.act === "release") holdButton(el, () => send({ t: "arm", side: el.dataset.arm, action: "release" }));
       else el.addEventListener("click", () => send({ t: "arm", side: el.dataset.arm, action: el.dataset.act }));
@@ -625,7 +648,7 @@ function renderRobot() {
   $("follow-btn").disabled = !me || leader.on || (estop && !follows) || (!follows && !r.left_arm_ok);
   $("follow-st").textContent = follows ? t("follow.live") : !r.left_arm_ok ? t("follow.locked") : t("follow.hint");
   $("follow-st").className = "small " + (follows ? "accent" : !r.left_arm_ok ? "note err" : "mute");
-  const both = jobRunning("teleop_right") && jobRunning("teleop_left");
+  const both = (jobRunning("teleop_right") && jobRunning("teleop_left")) || (laptopTele("right") && laptopTele("left"));
   setBtn($("tele-both"), t(both ? "arm.teleop.bothoff" : "arm.teleop.both"), both ? "ri-stop-fill" : "ri-git-merge-line");
   $("tele-both").classList.toggle("on", both);
   $("tele-both").disabled = !me || !r.left_arm_ok || (estop && !both);
