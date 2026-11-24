@@ -651,3 +651,12 @@ def test_a_reversed_leader_joint_is_turned_round():
     turned = leader_to_target(cal, [2500] * 6)
     assert turned["shoulder_lift"] == -normal["shoulder_lift"] and normal["shoulder_lift"] > 40
     assert turned["elbow_flex"] == normal["elbow_flex"] and turned["gripper"] == normal["gripper"]
+
+
+def test_leader_tune_file_is_read_and_bad_files_are_ignored(tmp_path):
+    from robot_server.lerobot_patch import load_tune
+    f = tmp_path / "leader_tune.json"
+    f.write_text('{"/dev/so101_left_leader": {"shoulder_lift": 1.091}}')
+    assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": 1.091}}
+    f.write_text("not json")
+    assert load_tune(f) == {} and load_tune(tmp_path / "missing.json") == {}
