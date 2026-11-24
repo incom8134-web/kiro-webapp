@@ -73,7 +73,7 @@ WIZARD_USES = {
     "ros_base": {"/dev/so101_base"}, "ros_camera": {"cam:top"}, "lidar": {"/dev/rplidar"},
 }
 ENGINEER_JOBS = ("record", "pack", "wizard")  # their output is shown only on the Studio page
-ARM_JOBS = ("relay", "skill", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves (relay feeds the bridge)
+ARM_JOBS = ("relay", "skill", "demo", "bridge", "arm_right", "arm_left", "arm_both")  # programs that move a follower arm by themselves (relay feeds the bridge)
 # Follower arms copying a leader held by a person; a recording (Studio) is teleop plus cameras
 TELEOP_JOBS = ("teleop_right", "teleop_left", "teleop_both", "record")
 BRIDGE_ADDR = ("127.0.0.1", 5558)  # twin_bridge listens here, only for this server
@@ -639,6 +639,36 @@ class Robot:
         env = {**self._venv_env(), "ROLLOUT_PY": str(HERE / "rollout_runner.py")}
         return self._start("skill", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
                                             env=env, label=f"skill {name}", stop_wait=8.0), who)
+
+    # ---------------------------------------------------------- demo motion
+    # Replays one recorded picking demonstration on the black arm, smoothly, several times (24 Nov 2026: to
+    # show the robot it only has to look like a pick; no model, starts in seconds). demo_replay.py.
+    DEMO_DATASET = Path("~/.cache/kiro-webapp/demo_motion/right_arm_task2").expanduser()
+    DEMO_EPISODE = 9  # the smoothest clean pick of the 43 recorded (15 s)
+
+    def demo(self, on: bool, who: str, repeat: int = 5, pause: float = 3.0) -> tuple[bool, str]:
+        if not on:
+            return self._stop_job("demo", who)
+        if self.jobs.running("demo"):
+            return True, ""
+        if not self.mock and not (self.DEMO_DATASET / "data").is_dir():
+            return False, f"Demo motion data not found: {self.DEMO_DATASET}"
+        if self._missing(["right_follower"]):
+            return False, "Not connected: right follower"
+        port = PORT["right_follower"]
+        busy = self.jobs.busy(frozenset({port}))
+        if busy:
+            return False, f"{busy} is using the arm. Stop it first."
+        why = self._sync_goals([port])  # targets = where the motors are: no jump when torque comes on
+        if why:
+            return False, why
+        repeat = max(1, min(50, int(repeat)))
+        cmd = (self._mock_cmd(f"demo motion x{repeat}", seconds=5) if self.mock else
+               [str(self.venv / "bin" / "python"), str(HERE / "demo_replay.py"), "--port", port, "--id", "right_follower",
+                "--dataset", str(self.DEMO_DATASET), "--episode", str(self.DEMO_EPISODE), "--repeat", str(repeat),
+                "--pause", str(float(pause))])
+        return self._start("demo", JobSpec(cmd, frozenset({port}), env=self._venv_env(), label=f"demo motion x{repeat}",
+                                           stop_wait=6.0), who)
 
     # ---------------------------------------------------------------- voice
     def voice(self, on: bool, who: str, lang: str = "ko", step: str = "big", mic: str = "device") -> tuple[bool, str]:

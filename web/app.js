@@ -359,7 +359,9 @@ $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
-const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
+const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };
+// Demo pick motion: one recorded pick replayed smoothly on the black arm, 5 times per click (no model, no object)
+$("demo-btn").addEventListener("click", () => send({ t: "demo", on: !jobRunning("demo"), repeat: 5, pause: 3 }));   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
   return !!l && l.state !== "missing";
@@ -749,6 +751,13 @@ function renderRobot() {
   $("skill-prog").hidden = !prog;
   $("skill-prog").textContent = prog;
   $("skill-repeat").disabled = $("skill-pause").disabled = $("skill-secs").disabled = skillOn;
+  const demoOn = jobRunning("demo"), demoJob = J.demo;
+  setBtn($("demo-btn"), t(demoOn ? "demo.stop" : "demo.start"), demoOn ? "ri-stop-fill" : "ri-hand");
+  $("demo-btn").classList.toggle("on", demoOn);
+  $("demo-btn").classList.toggle("primary", !demoOn);
+  $("demo-btn").disabled = !me || (!demoOn && (estop || skillOn));
+  const demoLine = demoOn && demoJob ? (demoJob.tail || []).slice().reverse().find((l) => /^run \d+ of \d+/.test(l)) : "";
+  $("demo-st").textContent = demoOn ? (demoLine ? t("demo.run", { run: demoLine.replace(/^run (\d+) of (\d+).*/, "$1/$2") }) : t("demo.starting")) : t("demo.hint");
   $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(parseFloat($("skill-secs").value) || 30) }) : t("skill.add");
   $("skill-st").textContent = skillOn ? t("st.on") : "";
   $("skill-st").className = "st" + (skillOn ? " live" : "");
@@ -772,7 +781,7 @@ function renderRobot() {
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
 
   renderCams();
-  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both", "follow-btn"].includes(el.id)) el.disabled = !me;
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both", "follow-btn", "demo-btn"].includes(el.id)) el.disabled = !me;
 
   tabDot("drive", baseOn, !$("base-err").hidden);
   tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
