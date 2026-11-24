@@ -527,7 +527,6 @@ class Robot:
         missing = self._missing(keys)
         if missing:
             return False, "Not connected: " + ", ".join(missing)
-        bin_ = str(self.venv / "bin" / "lerobot-teleoperate")
         if side == "both":
             args = ["--robot.type=bi_so_follower", "--robot.id=so101",
                     f"--robot.left_arm_config.port={PORT['left_follower']}", f"--robot.right_arm_config.port={PORT['right_follower']}",
@@ -536,7 +535,8 @@ class Robot:
         else:
             args = ["--robot.type=so101_follower", f"--robot.port={PORT[side + '_follower']}", f"--robot.id={side}_follower",
                     "--teleop.type=so101_leader", f"--teleop.port={PORT[side + '_leader']}", f"--teleop.id={side}_leader"]
-        cmd = self._mock_cmd(f"teleop {side}") if self.mock else [bin_, *args]
+        # through teleop_runner.py: LeRobot plus reversed joints in degrees (the yellow leader's shoulder)
+        cmd = self._mock_cmd(f"teleop {side}") if self.mock else [str(self.venv / "bin" / "python"), str(HERE / "teleop_runner.py"), *args]
         uses = frozenset(PORT[k] for k in keys)
         busy = self.jobs.busy(uses)
         if busy:

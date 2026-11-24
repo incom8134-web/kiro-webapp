@@ -640,3 +640,14 @@ def test_follow_offsets_shift_one_arm_without_a_jump_at_the_seam():
     assert out == {"wrist_flex": 93.0, "elbow_flex": 96.0, "gripper": 5.0}      # gripper never shifted
     assert apply_offsets({"wrist_flex": 179.0}, {"wrist_flex": 123})["wrist_flex"] == -58.0   # 302 -> -58, continuous
     assert apply_offsets(tgt, {}) == tgt
+
+
+def test_a_reversed_leader_joint_is_turned_round():
+    """24 Nov 2026: the yellow leader's shoulder counts the other way round (drive_mode 1 in its file)."""
+    from robot_server.robot import JOINTS, leader_to_target
+    cal = {j: {"range_min": 1000, "range_max": 3000, "drive_mode": 0} for j in JOINTS}
+    normal = leader_to_target(cal, [2500] * 6)
+    cal["shoulder_lift"]["drive_mode"] = 1
+    turned = leader_to_target(cal, [2500] * 6)
+    assert turned["shoulder_lift"] == -normal["shoulder_lift"] and normal["shoulder_lift"] > 40
+    assert turned["elbow_flex"] == normal["elbow_flex"] and turned["gripper"] == normal["gripper"]

@@ -15,8 +15,9 @@ def leader_to_target(cal: dict, raw: list) -> dict:
         if j == "gripper":
             n = (min(hi, max(lo, v)) - lo) / (hi - lo) * 100.0
             out[j] = round(100.0 - n if c.get("drive_mode") else n, 2)
-        else:
-            out[j] = round((v - (lo + hi) / 2.0) * 360.0 / 4095.0, 2)
+        else:  # drive_mode 1: the motor counts the other way round (yellow leader's shoulder)
+            deg = (v - (lo + hi) / 2.0) * 360.0 / 4095.0
+            out[j] = round(-deg if c.get("drive_mode") else deg, 2)
     return out
 
 

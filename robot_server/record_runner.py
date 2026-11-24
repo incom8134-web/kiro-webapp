@@ -134,6 +134,8 @@ def record(cfg: dict) -> int:
         except Exception as e:  # noqa: BLE001 - the old window also goes on
             print(f"{c['key']}: camera tuning failed: {e}", flush=True)
 
+    import lerobot_patch  # reversed joints honoured in degrees (the yellow leader's shoulder)
+    lerobot_patch.apply()
     from lerobot.scripts import lerobot_record as lr
     from lerobot.utils.keyboard_input import apply_recording_control
     args = lerobot_args(rg, cfg, cams)
