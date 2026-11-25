@@ -164,11 +164,12 @@ def test_studio_camera_previews_need_the_engineer_token(cfg):
             take(op)
             st = unlock(op)
             tok = st["token"]
-            assert client.get(f"/api/studio/camera/nope.mjpg?token={tok}").status_code == 404   # past the lock
+            assert client.get(f"/api/studio/camera/nope.mjpg?token={tok}").status_code == 403  # a token in the URL is ignored
+            assert client.get("/api/studio/camera/nope.mjpg", headers={"X-Studio-Token": tok}).status_code == 404   # past the lock
             op.send_json({"t": "engineer", "lock": True})
             time.sleep(0.3)
-            assert client.get(f"/api/studio/camera/nope.mjpg?token={tok}").status_code == 403
-        assert client.get(f"/api/studio/camera/top.mjpg?token={tok}").status_code == 403
+            assert client.get("/api/studio/camera/nope.mjpg", headers={"X-Studio-Token": tok}).status_code == 403
+        assert client.get("/api/studio/camera/top.mjpg", headers={"X-Studio-Token": tok}).status_code == 403
 
 
 def test_viewers_get_no_engineer_values(cfg):

@@ -354,23 +354,25 @@ def test_every_training_endpoint_needs_the_engineer(cfg):
             assert client.get(u).status_code == 403
             assert client.get(u + "?token=guess").status_code == 403
         assert client.post("/api/studio/models?name=a_act", content=make_zip(model_files())).status_code == 403
-        assert client.post("/api/studio/models?name=a_act", content=b"x", headers={"X-Studio-Token": "guess"}).status_code == 403
+        assert client.post("/api/studio/models?name=a_act", content=b"x", headers={"X-Studio-Token": "guess", "Origin": "http://testserver"}).status_code == 403
         with client.websocket_connect("/ws?name=Laptop") as op:
             op.send_json({"t": "take", "pin": "4321"})
             note(op, "take")
             for u in urls:                                          # the operator without the engineer PIN: still no
                 assert client.get(u).status_code == 403
             tok = take_and_unlock(op)["token"]
-            assert client.get(f"/api/studio/models/pick_act.zip?token={tok}").status_code == 200
-            assert client.get(f"/api/studio/models/nope.zip?token={tok}").status_code == 404
-            assert client.get(f"/api/studio/packages/x_20261120_1200.tar.gz?token={tok}").status_code == 404
+            h = {"X-Studio-Token": tok}
+            assert client.get("/api/studio/models/pick_act.zip?token=" + tok).status_code == 403  # not in the URL
+            assert client.get("/api/studio/models/pick_act.zip", headers=h).status_code == 200
+            assert client.get("/api/studio/models/nope.zip", headers=h).status_code == 404
+            assert client.get("/api/studio/packages/x_20261120_1200.tar.gz", headers=h).status_code == 404
             assert client.post("/api/studio/models?name=a_act", content=make_zip(model_files()),
                                headers={"X-Studio-Token": tok, "Origin": "http://evil.example"}).status_code == 403
             op.send_json({"t": "engineer", "lock": True})
             time.sleep(0.3)
-            assert client.get(f"/api/studio/models/pick_act.zip?token={tok}").status_code == 403
+            assert client.get("/api/studio/models/pick_act.zip", headers=h).status_code == 403
             assert client.post("/api/studio/models?name=a_act", content=make_zip(model_files()),
-                               headers={"X-Studio-Token": tok}).status_code == 403
+                               headers={**h, "Origin": "http://testserver"}).status_code == 403
         assert not (Path(cfg.policies_dir) / "a_act").exists()
 
 
@@ -379,17 +381,17 @@ def test_upload_download_and_delete_over_http_and_websocket(cfg):
         st = take_and_unlock(op)
         tok = st["token"]
         assert st["train"]["models"] == [] and "colab.research.google.com/github/" in st["train"]["colab"]
-        h = {"X-Studio-Token": tok}
+        h = {"X-Studio-Token": tok, "Origin": "http://testserver"}
         r = client.post("/api/studio/models?name=pick_act", content=make_zip(model_files()), headers=h)
         assert r.status_code == 200 and r.json()["model"]["name"] == "pick_act", r.text
         r = client.post("/api/studio/models?name=pick_act", content=make_zip(model_files()), headers=h)
         assert r.status_code == 409 and r.json()["code"] == "EXISTS"
         r = client.post("/api/studio/models?name=bad_act", content=make_zip({**model_files(), "x.pt": b"x"}), headers=h)
         assert r.status_code == 400 and r.json()["code"] == "BAD_FILE"
-        r = client.get(f"/api/studio/models/pick_act.zip?token={tok}")
+        r = client.get("/api/studio/models/pick_act.zip", headers={"X-Studio-Token": tok})
         assert r.status_code == 200 and 'filename="pick_act_pretrained_model.zip"' in r.headers["content-disposition"]
         assert zipfile.ZipFile(io.BytesIO(r.content)).read("pretrained_model/model.safetensors") == weights()
-        nb = client.get(f"/api/studio/notebook.ipynb?token={tok}")
+        nb = client.get("/api/studio/notebook.ipynb", headers={"X-Studio-Token": tok})
         assert nb.status_code == 200 and json.loads(nb.content)["nbformat"] == 4
         for _ in range(100):                                      # the model is now an Autonomous skill
             m = op.receive_json()

@@ -13,6 +13,12 @@ def _f(name: str, default: float) -> float:
     return float(os.environ.get(name, default))
 
 
+def https_url(value: str, default: str) -> str:
+    """A link the page will open. Anything that is not https is replaced by the default."""
+    v = (value or "").strip()
+    return v if v.lower().startswith("https://") else default
+
+
 @dataclass(frozen=True)
 class Config:
     host: str = "0.0.0.0"
@@ -115,7 +121,7 @@ class Config:
             datasets_dir=os.environ.get("KIRO_DATASETS_DIR", d.datasets_dir),
             backups_dir=os.environ.get("KIRO_BACKUPS_DIR", d.backups_dir),
             packages_dir=os.environ.get("KIRO_PACKAGES_DIR", d.packages_dir),
-            colab_url=os.environ.get("KIRO_COLAB_URL", d.colab_url),
+            colab_url=https_url(os.environ.get("KIRO_COLAB_URL", d.colab_url), d.colab_url),
             log_dir=os.environ.get("KIRO_LOG_DIR", d.log_dir),
             skill_seconds=_f("KIRO_SKILL_SECONDS", d.skill_seconds),
             health_period=_f("KIRO_HEALTH_PERIOD", d.health_period),

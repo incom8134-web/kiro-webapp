@@ -76,7 +76,9 @@ def test_left_arm_blocked_until_recalibrated(cfg):
             op.send_json(msg)
             n = note(op, msg["t"])
             assert n["ok"] is False and n["msg"] == "LEFT_BLOCKED"
-        op.send_json({"t": "arm", "side": "left", "action": "release"})  # letting go never moves the arm
+        op.send_json({"t": "confirm", "action": "arm:release"})  # letting go never moves the arm, but it is confirmed
+        tok = next(m["token"] for _ in range(40) if (m := op.receive_json())["t"] == "confirm")
+        op.send_json({"t": "arm", "side": "left", "action": "release", "confirm": tok})
         assert note(op, "arm")["ok"]
 
 

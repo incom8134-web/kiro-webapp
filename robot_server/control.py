@@ -17,6 +17,9 @@ from .config import Config
 
 MAX_BAD_PINS = 5
 PIN_LOCKOUT_S = 30.0
+PIN_LOCKOUT_MAX_S = 900.0  # later lockouts double, and stop growing at 15 minutes
+CONFIRM_TTL_S = 60.0
+SESSION_S = 30 * 24 * 3600
 ZERO_TICKS = 5  # zeros sent after driving ends, then the server goes silent
 
 Vec = tuple[float, float, float]
@@ -28,6 +31,8 @@ class Client:
     name: str
     last_seen: float
     ip: str = ""
+    authed: bool = False   # signed in (session cookie, or a successful PIN on this connection)
+    session: str = ""      # set only for a cookie login; that is what unlocks the engineer tools
 
 
 @dataclass
@@ -35,6 +40,7 @@ class PinGuard:
     """Wrong-PIN counter for one device ADDRESS (not one connection): reconnecting does not reset it."""
     bad_pins: int = 0
     locked_until: float = 0.0
+    strikes: int = 0       # how many lockouts this address has already served; the next one is longer
 
 
 @dataclass(frozen=True)
@@ -84,8 +90,10 @@ class Controller:
         self._zero_left = 0
         self.engineer_pin = cfg.engineer_pin  # the server sets the mock default in mock mode
         self.engineers: set[str] = set()      # operators who also unlocked the engineer tools
-        self.tokens: dict[str, str] = {}      # Studio page token -> connection (camera previews over HTTP)
+        self.tokens: dict[str, str] = {}      # Studio header token -> connection (not accepted from a URL)
         self.pin_guard: dict[str, PinGuard] = {}
+        self.sessions: dict[str, float] = {}  # cookie id -> wall-clock expiry (lost on restart)
+        self.confirms: dict[tuple[str, str], tuple[str, float]] = {}  # (connection, action) -> (token, monotonic expiry)
 
     # ---- connections -------------------------------------------------
     def connect(self, cid: str, name: str, ip: str | None = None) -> None:
@@ -103,30 +111,45 @@ class Controller:
             c.last_seen = self.clock()
 
     # ---- operator lock -----------------------------------------------
-    def _check_pin(self, c: Client, pin: object, want: str) -> str | None:
-        """None if the PIN is right. Wrong PINs count toward a short lockout (shared by both PINs)."""
+    def check_pin(self, ip: str, pin: object, want: str | None = None) -> str | None:
+        """None if the PIN is right. Wrong PINs share one lockout per address, and each lockout is longer than the last."""
         now = self.clock()
-        c.last_seen = now
-        g = self.pin_guard.setdefault(c.ip, PinGuard())
+        want = self.cfg.pin if want is None else want
+        g = self.pin_guard.setdefault(ip or "?", PinGuard())
         if now < g.locked_until:
             return f"Too many wrong PINs. Wait {int(g.locked_until - now) + 1} s."
-        if not hmac.compare_digest(str(pin).encode(), want.encode()):
+        if not hmac.compare_digest(str(pin if pin is not None else "").encode(), str(want).encode()):
             g.bad_pins += 1
             if g.bad_pins >= MAX_BAD_PINS:
                 g.bad_pins = 0
-                g.locked_until = now + PIN_LOCKOUT_S
+                g.strikes += 1
+                delay = min(PIN_LOCKOUT_MAX_S, PIN_LOCKOUT_S * (2 ** (g.strikes - 1)))
+                g.locked_until = now + delay
             return "Wrong PIN."
         g.bad_pins = 0
+        g.strikes = 0
         return None
 
-    def take(self, cid: str, pin: object, force: bool = False) -> tuple[bool, str]:
+    def _check_pin(self, c: Client, pin: object, want: str) -> str | None:
+        c.last_seen = self.clock()
+        return self.check_pin(c.ip, pin, want)
+
+    def take(self, cid: str, pin: object = None, force: bool = False) -> tuple[bool, str]:
         c = self.clients.get(cid)
         if c is None:
             return False, "Not connected."
-        err = self._check_pin(c, pin, self.cfg.pin)
-        if err:
-            return False, err
+        # A signed-in browser does not send the PIN again. A connection with no session still must
+        # (the tests, and any old client). An empty PIN is not a guess, so it does not count.
+        if not c.authed:
+            if pin is None or pin == "":
+                return False, "Log in first."
+            err = self._check_pin(c, pin, self.cfg.pin)
+            if err:
+                return False, err
+            c.authed = True
         if self.operator == cid:
+            if c.session:
+                self.engineers.add(cid)
             return True, "You already have control."
         if self.operator is not None and not force:
             return False, f"{self.clients[self.operator].name} is in control."
@@ -141,9 +164,15 @@ class Controller:
 
     def _set_operator(self, cid: str | None) -> None:
         self.operator = cid
-        self.engineers.clear()  # a new operator must unlock the engineer tools again
+        self.engineers.clear()  # a new operator starts locked; a cookie session is unlocked again below
         self.tokens.clear()
         self._halt()
+        # One PIN, owner's choice: a browser that signed in (a session cookie) is the engineer as soon
+        # as it has control. A PIN typed only on this socket, with no cookie, is not: the old tests
+        # still unlock the engineer tools with their own PIN.
+        c = self.clients.get(cid) if cid else None
+        if c and c.session:
+            self.engineers.add(cid)
 
     # ---- engineer tools (servo tester, check wizard) -------------------
     def unlock_engineer(self, cid: str, pin: object) -> tuple[bool, str]:
@@ -183,6 +212,77 @@ class Controller:
     def token_ok(self, token: object) -> bool:
         cid = self.tokens.get(str(token or ""))
         return cid is not None and self.is_engineer(cid)
+
+    def is_authed(self, cid: str) -> bool:
+        c = self.clients.get(cid)
+        return bool(c and c.authed)
+
+    # ---- one login, remembered in a cookie ----------------------------
+    def open_session(self) -> str:
+        sid = secrets.token_urlsafe(32)
+        self.sessions[sid] = time.time() + SESSION_S
+        return sid
+
+    def session_ok(self, sid: object) -> bool:
+        key = str(sid or "")
+        exp = self.sessions.get(key)
+        if not exp:
+            return False
+        if time.time() >= exp:
+            self.sessions.pop(key, None)
+            return False
+        return True
+
+    def drop_session(self, sid: object) -> None:
+        self.sessions.pop(str(sid or ""), None)
+
+    def attach_session(self, cid: str, sid: object) -> None:
+        """A WebSocket that presented a live session cookie is signed in. Engineer tools follow control."""
+        c = self.clients.get(cid)
+        if c and self.session_ok(sid):
+            c.authed = True
+            c.session = str(sid)
+
+    def session_is_engineer(self, sid: object) -> bool:
+        """True when some live connection of this login is the current engineer (Studio downloads)."""
+        key = str(sid or "")
+        if not self.session_ok(key):
+            return False
+        return any(c.session == key and self.is_engineer(cid) for cid, c in self.clients.items())
+
+    def grant_session_engineer(self, cid: str) -> bool:
+        """The signed-in operator may open the engineer tools again without a second PIN."""
+        c = self.clients.get(cid)
+        if c and c.session and cid == self.operator:
+            self.engineers.add(cid)
+            return True
+        return False
+
+    # ---- second step for shutdown, reboot, torque release, ID change ----
+    def begin_confirm(self, cid: str, action: str) -> tuple[bool, str]:
+        c = self.clients.get(cid)
+        if c is None:
+            return False, "Not connected."
+        if not c.authed:
+            return False, "Log in first."
+        if cid != self.operator:
+            return False, "Take control first."
+        token = secrets.token_urlsafe(18)
+        self.confirms[(cid, action)] = (token, self.clock() + CONFIRM_TTL_S)
+        return True, token
+
+    def consume_confirm(self, cid: str, action: str, token: object) -> bool:
+        """One use. A wrong or late token is thrown away with the real one."""
+        got = self.confirms.pop((cid, action), None)
+        if not got:
+            return False
+        tok, exp = got
+        if self.clock() > exp:
+            return False
+        try:
+            return hmac.compare_digest(str(token or "").encode(), tok.encode())
+        except (TypeError, ValueError):
+            return False
 
     def _halt(self) -> None:
         self._target = ZERO

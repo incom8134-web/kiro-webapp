@@ -5,7 +5,7 @@
  * this browser since the page was opened. A chart with no data says so; nothing is invented.
  */
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => Kiro.esc(s);
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const WINDOW_S = 300;
 
@@ -26,29 +26,25 @@ function readTheme() {
 readTheme();
 
 // ------------------------------------------------------------ connection
+let link = null;
+const send = (o) => { if (link) link.send(o); };
 function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?name=Dashboard`);
-  st.ws = ws;
-  ws.onopen = () => { st.open = true; send({ t: "logs" }); termLive(); };
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.t === "state") { st.server = m; onState(); }
-    else if (m.t === "robot") { st.robot = m; onRobot(); }
-    else if (m.t === "scan") { m.at = performance.now(); st.scan = m; }
-    else if (m.t === "pong") st.rtt = performance.now() - m.ts;
-    else if (m.t === "log") onLog(m);
-  };
-  ws.onclose = () => { st.open = false; st.server = null; st.rtt = null; render(); termLive(); renderCheck(); setTimeout(connect, 1000); };
-  ws.onerror = () => ws.close();
+  link = Kiro.connect({
+    name: "Dashboard",
+    onOpen() { st.open = true; send({ t: "logs" }); termLive(); },
+    onClose() { st.open = false; st.server = null; st.rtt = null; render(); termLive(); renderCheck(); },
+    onMessage(m) {
+      if (m.t === "state") { st.server = m; onState(); }
+      else if (m.t === "robot") { st.robot = m; onRobot(); }
+      else if (m.t === "scan") { m.at = performance.now(); st.scan = m; }
+      else if (m.t === "pong") st.rtt = performance.now() - m.ts;
+      else if (m.t === "log") onLog(m);
+    },
+  });
 }
-const send = (o) => { if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(o)); };
-setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 
-$("estop").addEventListener("click", () => {   // anyone may stop the robot; only the operator releases it
-  if (!(st.server && st.server.estop)) send({ t: "estop", on: true });
-});
-window.addEventListener("keydown", (e) => { if (e.code === "Escape") send({ t: "estop", on: true }); });
+Kiro.bindEstop($("estop"), $("estop-release"), send, () => !!(st.server && st.server.estop), () => false);
+window.addEventListener("keydown", (e) => { if (e.code === "Escape" && !Kiro.typing(e)) send({ t: "estop", on: true }); });
 for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); buildTiles(); buildCharts(); render(); onRobot(); termLive(); });
 $("theme-btn").addEventListener("click", () => toggleTheme());
 window.addEventListener("kiro-theme", () => { readTheme(); themeIcon($("theme-btn")); buildCharts(); drawLidar(); });
@@ -173,7 +169,7 @@ function renderTiles() {
   const subs = {
     dist: t("d.since"), nearest: n ? t(direction(n.a)) : t("d.nolidar"),
     p_in: j.power ? `CPU+GPU ${j.power.VDD_CPU_GPU_CV} W · SoC ${j.power.VDD_SOC} W` : "",
-    cpu: j.cores ? `${j.cores} ${t("d.cores")}` : "", gpu: "Orin Nano",
+    cpu: j.cores ? `${j.cores} ${t("d.cores")}` : "", gpu: t("d.orin"),
     t_cpu: j.temps && j.temps.gpu != null ? `GPU ${j.temps.gpu}°C` : "",
     mem: j.mem_mb ? `${(j.mem_mb[0] / 1024).toFixed(1)} / ${(j.mem_mb[1] / 1024).toFixed(1)} GB` : "",
     net: j.net ? `↓ ${j.net.rx} · ↑ ${j.net.tx}` : "", speed: t("d.last5"), rtt: t("d.thisdevice"),
@@ -317,6 +313,8 @@ function render() {
   const stopped = !!s && s.estop;
   $("estop").classList.toggle("on", stopped);
   $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");
+  $("estop").setAttribute("aria-pressed", stopped ? "true" : "false");
+  document.title = t("title.dash");
   const banner = $("banner");
   const fold = st.robot && st.robot.estop_fold;
   const foldText = fold ? " " + t(fold === "pending" ? "banner.fold.pending" : "banner.fold.running") : "";
@@ -349,7 +347,7 @@ function renderLists() {
       continue;
     }
     const ma = Object.values(x.servos || {}).reduce((s, v) => s + (v.ma || 0), 0);
-    rows.push(`<tr><td>${esc(label)} <span class="mute">${x.n}/${x.of}</span></td><td><b>${x.vmin ?? "-"}</b> V</td><td>${x.tmax ?? "-"} °C</td><td>${Math.round(ma)} mA${x.alarm ? " · ALARM" : ""}</td></tr>`);
+    rows.push(`<tr><td>${esc(label)} <span class="mute">${esc(x.n)}/${esc(x.of)}</span></td><td><b>${esc(x.vmin ?? "-")}</b> V</td><td>${esc(x.tmax ?? "-")} °C</td><td>${esc(Math.round(ma))} mA${x.alarm ? " · ALARM" : ""}</td></tr>`);
   }
   $("servos").innerHTML = rows.join("");
 
@@ -360,14 +358,14 @@ function renderLists() {
     const j = J[k];
     const stTxt = !j ? `<span class="mute">${t("d.never")}</span>` : j.running
       ? `<b class="accent">${t("d.running")}</b> <span class="mute">${fmtUp(Math.round(Date.now() / 1000 - j.started))}</span>`
-      : `${t("d.stopped")}${j.code ? ` <span class="mute">(${j.code})</span>` : ""}`;
-    return `<tr><th>${esc(j ? j.label : t(label))}</th><td>${stTxt}</td></tr>`;
+      : `${esc(t("d.stopped"))}${j.code != null && j.code !== 0 ? ` <span class="mute">(${esc(j.code)})</span>` : ""}`;
+    return `<tr><th>${esc(j && j.label ? j.label : t(label))}</th><td>${stTxt}</td></tr>`;
   }).join("");
 
   $("voice").textContent = (r.voice && r.voice.text) || "-";
   const ev = (r.events || []).slice().reverse();
   $("log").innerHTML = ev.length ? ev.map((e) => `<li><time>${new Date(e.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>${esc(e.who)}: ${esc(e.text)}</span></li>`).join("")
-    : `<li class="mute">${t("log.empty")}</li>`;
+    : `<li class="mute">${esc(t("log.empty"))}</li>`;
 }
 
 // ---------------------------------------------------------------- cameras
@@ -392,6 +390,7 @@ function renderCams() {
   for (const box of boxes) {
     const key = box.dataset.cam, c = cams.find((x) => x.key === key);
     const im = box.querySelector("img"), em = box.querySelector(".empty"), msg = box.querySelector(".msg");
+    if (im) im.alt = t("cam." + key);
     box.querySelector(".qhead").title = c && c.auto ? `${t("cam.auto")} ${c.auto}` : "";
     const why = camsOff ? t("b.cams.off") : !c || !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : c.error ? t("cam.busy") : "";
     if (why) {
@@ -596,3 +595,4 @@ render();
 termLive();
 renderCheck();
 connect();
+Kiro.bindLogin({ onLogin() { document.querySelectorAll(".quad .qbox[data-cam]").forEach((b) => delete b.dataset.on); if (link) link.reconnect(); } });

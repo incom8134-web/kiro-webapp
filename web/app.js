@@ -45,49 +45,30 @@ const trail = [];
 let noteTimer = null;
 
 const isOperator = () => !!state.server && state.server.you.role === "operator";
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => Kiro.esc(s);
 const jobs = () => (state.robot && state.robot.jobs) || {};
 const jobRunning = (name) => !!(jobs()[name] && jobs()[name].running);
 
 // ---------------------------------------------------------------- connection
-function deviceName() {
-  try {
-    let n = sessionStorage.getItem("kiro-name");
-    if (!n) {
-      const kind = /Mobi|Android|iPhone|iPad/.test(navigator.userAgent) ? "Phone" : "Laptop";
-      n = kind + "-" + Math.random().toString(36).slice(2, 5).toUpperCase();
-      sessionStorage.setItem("kiro-name", n);
-    }
-    return n;
-  } catch (e) {
-    return "Device";
-  }
-}
-
+let link = null;
+function send(obj) { if (link) link.send(obj); }
 function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?name=${encodeURIComponent(deviceName())}`);
-  state.ws = ws;
-  ws.onopen = () => { state.open = true; render(); };
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.t === "state") { state.server = m; render(); }
-    else if (m.t === "robot") { state.robot = m; renderRobot(); }
-    else if (m.t === "scan") { m.at = performance.now(); state.scan = m; }
-    else if (m.t === "pong") { state.rtt = performance.now() - m.ts; renderLink(); }
-    else if (m.t === "note") showNote(m.msg, !m.ok);
-  };
-  ws.onclose = () => {
-    state.open = false; state.server = null; state.rtt = null;
-    if (leader.on) leader.paused = true;   // Wi-Fi lost: keep the leader arm open; the robot's bridge holds the arm (test R5)
-    dropInputs(); render();
-    setTimeout(connect, 1000);
-  };
-  ws.onerror = () => ws.close();
-}
-
-function send(obj) {
-  if (state.open && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(obj));
+  link = Kiro.connect({
+    name: () => Kiro.deviceName(),
+    onOpen(ws) { state.ws = ws; state.open = true; render(); },
+    onClose() {
+      state.open = false; state.server = null; state.rtt = null; state.ws = null;
+      if (leader.on) leader.paused = true;   // Wi-Fi lost: keep the leader arm open; the robot's bridge holds the arm
+      dropInputs(); render();
+    },
+    onMessage(m) {
+      if (m.t === "state") { state.server = m; render(); }
+      else if (m.t === "robot") { state.robot = m; renderRobot(); }
+      else if (m.t === "scan") { m.at = performance.now(); state.scan = m; }
+      else if (m.t === "pong") { state.rtt = performance.now() - m.ts; renderLink(); }
+      else if (m.t === "note") showNote(m.msg, !m.ok);
+    },
+  });
 }
 
 // -------------------------------------------------------------------- inputs
@@ -185,30 +166,23 @@ function dropInputs() { input.keys.clear(); endMove(); endTurn(); setTalk(false)
 window.addEventListener("blur", dropInputs);
 document.addEventListener("visibilitychange", () => { if (document.hidden) dropInputs(); });
 
-const typing = (e) => {
-  const el = e.target;
-  return el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement ||
-    (el instanceof HTMLInputElement && ["password", "text", "number"].includes(el.type));
-};
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Escape" || e.key === "Escape") { send({ t: "estop", on: true }); return; }
-  if (typing(e)) return;
+  if (e.code === "Escape" || e.key === "Escape") {
+    if (!Kiro.typing(e)) send({ t: "estop", on: true });   // not while a PIN or a command is being typed
+    return;
+  }
+  if (Kiro.typing(e) || Kiro.interactive(e)) return;       // Space and Enter stay with the focused control
   const code = keyCode(e);
   if (code === "KeyV" && !e.repeat && isOperator()) setTalk(true);
   if (KEYMAP[code] || code === "Space" || code === "ShiftLeft" || code === "ShiftRight") {
     input.keys.add(code);
-    if (isOperator() && (KEYMAP[code] || code === "Space")) e.preventDefault(); // no page scroll, no button press
+    if (isOperator() && (KEYMAP[code] || code === "Space")) e.preventDefault(); // no page scroll
   }
 });
 window.addEventListener("keyup", (e) => {
   const code = keyCode(e);
   input.keys.delete(code);
   if (code === "KeyV") setTalk(false);
-});
-// A focused button would react to Space or arrows. Remove focus after every click.
-document.addEventListener("click", (e) => {
-  const el = e.target.closest("button, summary, input[type=checkbox]");
-  if (el) el.blur();
 });
 window.addEventListener("gamepadconnected", render);
 window.addEventListener("gamepaddisconnected", render);
@@ -225,7 +199,6 @@ setInterval(() => {
   padY = y;
   if (isOperator()) send({ t: "drive", x: cur.x, y: cur.y, z: cur.z, en: cur.en, turbo: cur.turbo, src: cur.src });
 }, SEND_MS);
-setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 
 // ------------------------------------------------------------------- buttons
 $("take-box").addEventListener("submit", (e) => {
@@ -236,14 +209,10 @@ $("take-box").addEventListener("submit", (e) => {
     force = confirm(t("takeover", { name: s.operator.name }));
     if (!force) return;
   }
-  send({ t: "take", pin: $("pin").value, force });
-  $("pin").value = ""; $("pin").blur();
+  send({ t: "take", force });
 });
 $("release").addEventListener("click", () => send({ t: "release" }));
-$("estop").addEventListener("click", () => {
-  const on = !(state.server && state.server.estop);
-  send({ t: "estop", on });
-});
+Kiro.bindEstop($("estop"), $("estop-release"), send, () => !!(state.server && state.server.estop), isOperator);
 for (const b of document.querySelectorAll(".lang button")) {
   b.addEventListener("click", () => { setLang(b.dataset.lang); render(); });
 }
@@ -258,7 +227,10 @@ for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) talk.addEv
 talk.addEventListener("contextmenu", (e) => e.preventDefault());
 
 $("base-btn").addEventListener("click", () => send({ t: "base", on: !jobRunning("base") }));   // guard distance: set in the Studio
-$("guard-sw").addEventListener("change", () => send({ t: "guard", on: $("guard-sw").checked }));   // the server's obstacle stop
+$("guard-sw").addEventListener("change", () => {
+  if (!$("guard-sw").checked && !confirm(t("guard.confirm.off"))) { $("guard-sw").checked = true; return; }
+  send({ t: "guard", on: $("guard-sw").checked });
+});
 // Speech language: the operator's choice (remembered in this browser), not the page language
 let voiceLang = (() => { try { return localStorage.getItem("kiro-voice-lang"); } catch (e) { return null; } })() || (LANG === "en" ? "en" : "ko");
 // Step per command: "big" 0.5 m / 90 degrees, or "test" 0.2 m / 45 degrees as the voice test form asks
@@ -290,11 +262,11 @@ for (const b of document.querySelectorAll("[data-vmic]")) b.addEventListener("cl
 });
 
 /* This device's microphone -> 16 kHz mono 16-bit pieces over the WebSocket (binary), about 8 a second.
- * Browsers allow the microphone only on https (or localhost): https://<robot>:8443. */
+ * Browsers allow the microphone only on https (or localhost). The page is already https. */
 const mic = { on: false, stream: null, ctx: null, src: null, node: null, level: 0, sawVoice: false };
 async function micStart() {
   if (!window.isSecureContext) {               // http: browsers block the microphone. Go to the https page (same robot).
-    location.href = `https://${location.hostname}:8443${location.pathname}#voice`;
+    location.href = `https://${location.host}${location.pathname}#voice`;
     return false;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -361,7 +333,11 @@ const following = () => jobRunning("relay") && ((state.robot && state.robot.brid
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
 const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };
 // Demo pick motion: one recorded pick replayed smoothly on the black arm, 5 times per click (no model, no object)
-$("demo-btn").addEventListener("click", () => send({ t: "demo", on: !jobRunning("demo"), repeat: 5, pause: 3 }));   // the one-click series on the Autonomous skills card (user, 24 Nov 2026)
+$("demo-btn").addEventListener("click", () => {
+  const on = !jobRunning("demo");
+  if (on && !confirm(t("demo.confirm"))) return;
+  send({ t: "demo", on, repeat: 5, pause: 3 });
+});
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
   return !!l && l.state !== "missing";
@@ -393,11 +369,35 @@ $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : lead
 
 // Tabs in the dock: Drive, Arms, Voice, System. The last one used is remembered.
 function showTab(name) {
-  for (const b of document.querySelectorAll(".tabs [data-tab]")) b.classList.toggle("on", b.dataset.tab === name);
-  for (const p of document.querySelectorAll(".panel[data-panel]")) p.classList.toggle("on", p.dataset.panel === name);
+  for (const b of document.querySelectorAll(".tabs [data-tab]")) {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+    b.tabIndex = on ? 0 : -1;
+  }
+  for (const p of document.querySelectorAll(".panel[data-panel]")) {
+    const on = p.dataset.panel === name;
+    p.classList.toggle("on", on);
+    p.setAttribute("aria-hidden", on ? "false" : "true");
+  }
   try { localStorage.setItem("kiro-tab", name); } catch (e) { /* ignore */ }
 }
 for (const b of document.querySelectorAll(".tabs [data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
+const tablist = document.querySelector(".tabs");
+if (tablist) tablist.addEventListener("keydown", (e) => {
+  const tabs = [...tablist.querySelectorAll("[role=tab]")];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  let n = i;
+  if (e.key === "ArrowRight") n = (i + 1) % tabs.length;
+  else if (e.key === "ArrowLeft") n = (i + tabs.length - 1) % tabs.length;
+  else if (e.key === "Home") n = 0;
+  else if (e.key === "End") n = tabs.length - 1;
+  else return;
+  e.preventDefault();
+  showTab(tabs[n].dataset.tab);
+  tabs[n].focus();
+});
 let startTab = "drive";
 try { startTab = localStorage.getItem("kiro-tab") || "drive"; } catch (e) { /* ignore */ }
 if (location.hash === "#voice" || location.hash === "#arms") startTab = location.hash.slice(1);   // sent here from the http page (microphone, USB)
@@ -417,38 +417,22 @@ for (const d of document.querySelectorAll("details.fold")) {
   d.addEventListener("toggle", () => { try { localStorage.setItem("kiro-open-" + d.id, d.open ? "1" : "0"); } catch (e) { /* ignore */ } });
 }
 
-/* Hold a button for HOLD_MS to confirm. Used for shutdown, restart, torque release, servo writes. */
-function holdButton(el, action) {
-  let timer = null, start = 0, raf = 0;
-  const fill = el.querySelector(".fill");
-  const reset = () => { clearTimeout(timer); cancelAnimationFrame(raf); timer = null; if (fill) fill.style.width = "0"; };
-  const step = () => { if (fill) fill.style.width = Math.min(100, (performance.now() - start) / HOLD_MS * 100) + "%"; raf = requestAnimationFrame(step); };
-  el.addEventListener("pointerdown", (e) => {
-    if (el.disabled) return;
-    el.setPointerCapture(e.pointerId); start = performance.now(); step();
-    timer = setTimeout(() => { reset(); action(); }, HOLD_MS);
-  });
-  for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(n, reset);
-  el.addEventListener("contextmenu", (e) => e.preventDefault());
-}
-holdButton($("shutdown"), () => send({ t: "system", action: "shutdown" }));
-holdButton($("reboot"), () => send({ t: "system", action: "reboot" }));
+const holdButton = (el, action) => Kiro.holdButton(el, action);
+holdButton($("shutdown"), () => Kiro.confirmSend(send, "system:shutdown", { t: "system", action: "shutdown" }));
+holdButton($("reboot"), () => Kiro.confirmSend(send, "system:reboot", { t: "system", action: "reboot" }));
 
 function showNote(text, isError) {
   if (!text) return;
   const known = { "LEFT_BLOCKED": "arm.leftblocked", "TWO_ARM": "fm.noplay.both", "LEFT_ARM": "fm.noplay.left", "NO_FIT": "fm.noplay.other",
     "LIDAR_MISSING": "base.nolidar", "NO_MIC": "voice.nomic" };
   const n = $("note");
-  n.textContent = known[text] ? t(known[text]) : text;
+  n.textContent = known[text] ? t(known[text]) : Kiro.serverText(text);
   n.className = "note" + (isError ? " err" : "");
   clearTimeout(noteTimer);
   noteTimer = setTimeout(() => { n.textContent = ""; n.className = "note"; renderHintNote(); }, 5000);
 }
 
-function renderHintNote() {
-  const s = state.server, n = $("note");
-  if (!n.textContent && s && s.default_pin && s.you.role !== "operator") n.textContent = t("mockpin");
-}
+function renderHintNote() { /* the PIN is not shown on the page */ }
 
 // -------------------------------------------------------------------- render
 function renderLink() {
@@ -479,7 +463,9 @@ function render() {
   const es = $("estop");
   const stopped = !!s && s.estop;
   es.classList.toggle("on", stopped);
-  $("estop-label").textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
+  $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");
+  es.setAttribute("aria-pressed", stopped ? "true" : "false");
+  if ($("estop-release")) $("estop-release").hidden = !(stopped && me);
 
   const banner = $("banner");
   const fold = state.robot && state.robot.estop_fold;   // after E-STOP the arms fold home by themselves
@@ -529,7 +515,8 @@ function render() {
 
   const o = s && s.odom;
   $("pose").textContent = o ? t("pose", { x: o.x.toFixed(2), y: o.y.toFixed(2), th: Math.round(o.th * 180 / Math.PI) }) : "";
-  $("ver").textContent = s ? `HAEBOT Robot v${s.version} · ${s.clients} device${s.clients === 1 ? "" : "s"}` : "";
+  document.title = t("title.control");
+  $("ver").textContent = s ? t("foot.ver", { v: s.version, n: t(s.clients === 1 ? "devices.one" : "devices.many", { n: s.clients }) }) : "";
   drawMap();
   renderRobot();
 }
@@ -606,7 +593,7 @@ function renderRobot() {
       <div class="trio">
         <button class="btn" data-arm="${side}" data-act="fold" ${off}>${t("arm.fold")}</button>
         <button class="btn" data-arm="${side}" data-act="hold" ${off}>${t("arm.hold")}</button>
-        <button class="btn hold" data-arm="${side}" data-act="release" ${me ? "" : "disabled"}><span class="fill"></span>${t("arm.release")}</button>
+        <button class="btn hold danger" data-arm="${side}" data-act="release" ${me ? "" : "disabled"}><span class="fill"></span>${esc(t("arm.release"))}</button>
       </div></div>`;
   };
   const arms = $("arms");
@@ -615,7 +602,7 @@ function renderRobot() {
     arms.innerHTML = html; arms.dataset.html = html;
     for (const el of arms.querySelectorAll("[data-tele]")) el.addEventListener("click", () => teleClick(el.dataset.tele));
     for (const el of arms.querySelectorAll("[data-act]")) {
-      if (el.dataset.act === "release") holdButton(el, () => send({ t: "arm", side: el.dataset.arm, action: "release" }));
+      if (el.dataset.act === "release") holdButton(el, () => Kiro.confirmSend(send, "arm:release", { t: "arm", side: el.dataset.arm, action: "release" }));
       else el.addEventListener("click", () => send({ t: "arm", side: el.dataset.arm, action: el.dataset.act }));
     }
   }
@@ -641,7 +628,7 @@ function renderRobot() {
     b.disabled = !me || leader.on || ((b.dataset.lside !== "right") && !r.left_arm_ok);
   }
   $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { arm: t(leader.side === "both" ? "leader.two" : "arm." + leader.side), n: leader.ok, state: br.state || "..." })
-    : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` })
+    : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.host}` })
     : t("leader.hint");
   const waving = !!(br.running && br.mode === "wave");
   const follows = following();
@@ -678,7 +665,8 @@ function renderRobot() {
   $("voice-nobase").hidden = !(vOn && !jobRunning("base") && state.server && state.server.backend === "ros");
   const insecure = voiceMic === "device" && !window.isSecureContext;
   $("voice-https").hidden = !insecure;
-  $("voice-https-go").href = `https://${location.hostname}:8443${location.pathname}#voice`;
+  const secureVoice = Kiro.httpsUrl(`https://${location.host}${location.pathname}#voice`);
+  if (secureVoice) $("voice-https-go").href = secureVoice;
   $("voice-st").textContent = vOn ? (r.voice_lang || "ko").toUpperCase() : "";
   for (const b of document.querySelectorAll("[data-vstep]")) {
     b.classList.toggle("on", b.dataset.vstep === voiceStep);
@@ -731,11 +719,14 @@ function renderRobot() {
   if (skills.dataset.html !== sh) {
     skills.innerHTML = sh; skills.dataset.html = sh;
     // One click: the demo series (30 runs, 5 s apart). Stop / E-STOP ends it.
-    for (const el of skills.querySelectorAll("[data-skill30]")) el.addEventListener("click", () =>
-      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds }));
+    for (const el of skills.querySelectorAll("[data-skill30]")) el.addEventListener("click", () => {
+      if (!confirm(t("skill.confirm30", { n: DEMO_RUNS.runs }))) return;
+      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds });
+    });
     for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => {
       const r2 = state.robot || {};
       const on = !(jobRunning("skill") || r2.skill_series);
+      if (on && !confirm(t("skill.confirm"))) return;
       const repeat = Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1));
       const pause = Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0));
       const seconds = Math.max(5, Math.min(120, parseFloat($("skill-secs").value) || 30));
@@ -774,8 +765,8 @@ function renderRobot() {
   for (const [k, label] of Object.entries(names)) {
     const x = b[k];
     if (!x) continue;
-    const v = x.state === "missing" ? t("arm.missing") : x.state === "busy" ? t("h.inuse", { job: x.by }) :
-      x.state === "silent" ? t("arm.nopower") : x.state === "ok" ? `<b>${x.vmin ?? "-"} V</b> · ${x.tmax ?? "-"}°C${x.alarm ? " · ALARM" : ""}` : esc(x.msg || x.state);
+    const v = x.state === "missing" ? esc(t("arm.missing")) : x.state === "busy" ? esc(t("h.inuse", { job: x.by })) :
+      x.state === "silent" ? esc(t("arm.nopower")) : x.state === "ok" ? `<b>${esc(x.vmin ?? "-")} V</b> · ${esc(x.tmax ?? "-")}°C${x.alarm ? " · ALARM" : ""}` : esc(x.msg || x.state);
     rows.push([label, v]);
   }
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
@@ -797,6 +788,7 @@ function renderCams() {
     const key = view.dataset.cam;
     const c = cams.find((x) => x.key === key);
     const img = view.querySelector(":scope > img.cam"), empty = view.querySelector(":scope > .empty"), msg = view.querySelector(":scope > .empty .msg");
+    if (img) img.alt = t("cam." + key);
     const why = !c ? t("cam.notconfigured") : !c.present ? t("cam.notconnected") : c.paused_by ? t("cam.inuse") : "";
     if (why) {
       if (state.cams[key]) { img.removeAttribute("src"); state.cams[key] = false; }
@@ -972,12 +964,12 @@ async function whichIsWhich(arms, side) {
 }
 
 async function leaderStart() {
-  if (!window.isSecureContext) {               // http: browsers block USB. Same robot, secure door (8443), Arms tab.
-    location.href = `https://${location.hostname}:8443${location.pathname}#arms`;
+  if (!window.isSecureContext) {               // http: browsers block USB. Same robot, the https page, Arms tab.
+    location.href = `https://${location.host}${location.pathname}#arms`;
     return;
   }
   if (!LeaderArm.supported()) {
-    showNote(t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.hostname}:8443` }), true);
+    showNote(t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.host}` }), true);
     return;
   }
   const sides = leader.side === "both" ? ["right", "left"] : [leader.side];
@@ -1047,3 +1039,4 @@ if (LeaderArm.supported()) navigator.serial.addEventListener("disconnect", () =>
 applyStrings();
 render();
 connect();
+Kiro.bindLogin({ onLogin() { state.cams = {}; if (link) link.reconnect(); } });

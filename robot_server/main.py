@@ -6,6 +6,8 @@ import contextlib
 import errno
 import json
 import logging
+import os
+import socket
 import time
 import uuid
 from pathlib import Path
@@ -66,25 +68,151 @@ async def copy_upload(chunks, write, alive, limit: int, wait_s: float = UPLOAD_W
         await write(chunk)
 
 
-class NoStalePages:
-    """Browsers must re-check the page files on every load (a cheap 304 when unchanged). Without
-    this, an update can leave a phone running new JavaScript against an old page, or the reverse."""
+# Pages are classic scripts plus inline style attributes, a data-URI icon and same-origin streams.
+# script-src stays 'self' (no inline script). style-src allows the style attributes the pages already use.
+CSP = (
+    "default-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self'; "
+    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
+SESSION_COOKIE = "kiro_session"
+SESSION_MAX = 30 * 24 * 3600
+_DROP = {b"x-frame-options", b"content-security-policy", b"x-content-type-options",
+         b"referrer-policy", b"strict-transport-security"}
+
+
+def _host_name(value: str) -> str:
+    v = (value or "").strip().lower()
+    if v.startswith("["):
+        return v[1:].split("]", 1)[0]
+    if v.count(":") == 1:
+        return v.split(":", 1)[0]
+    return v
+
+
+def _origin_host(origin: str) -> str:
+    try:
+        return (urlsplit(origin).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def host_allowlist() -> set[str]:
+    """Names this server will answer. A DNS-rebind Host that is not in here is refused, even when Origin matches it."""
+    hosts = {"localhost", "127.0.0.1", "::1", "10.42.0.1"}
+    for part in os.environ.get("KIRO_ALLOWED_HOSTS", "").split(","):
+        name = _host_name(part)
+        if name:
+            hosts.add(name)
+    # The test client calls itself "testserver". That name is not allowed on a real run.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        hosts.add("testserver")
+    try:
+        hosts.add(socket.gethostname().lower())
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("192.0.2.1", 9))
+            hosts.add(sock.getsockname()[0])
+        finally:
+            sock.close()
+    except OSError:
+        pass
+    return hosts
+
+
+def request_allowed(headers: dict[str, str], state_changing: bool) -> bool:
+    """Host must be this robot. A state change (POST, WebSocket) also needs an Origin on that list.
+    A missing Origin used to be allowed; a page that is not a browser, or a rebinding site, could use that."""
+    allow = host_allowlist()
+    if _host_name(headers.get("host", "")) not in allow:
+        return False
+    origin = headers.get("origin", "")
+    if state_changing and not origin:
+        return False
+    if origin and _origin_host(origin) not in allow:
+        return False
+    return True
+
+
+def response_headers(existing: list[tuple[bytes, bytes]], scheme: str, path: str) -> list[tuple[bytes, bytes]]:
+    """Security headers on every response, including camera streams and errors.
+    Camera streams keep their own Cache-Control (no-store). Pages stay no-cache so an update cannot mix files.
+    HSTS only on HTTPS: the test client speaks HTTP and must not be told to upgrade."""
+    headers = [(k, v) for k, v in existing if k.lower() not in _DROP]
+    headers += [
+        (b"x-content-type-options", b"nosniff"),
+        (b"referrer-policy", b"no-referrer"),
+        (b"x-frame-options", b"DENY"),
+        (b"content-security-policy", CSP.encode()),
+    ]
+    if scheme == "https":
+        headers.append((b"strict-transport-security", b"max-age=31536000"))
+    if not path.startswith(("/camera/", "/api/studio/camera/")):
+        headers = [(k, v) for k, v in headers if k.lower() != b"cache-control"]
+        headers.append((b"cache-control", b"no-cache"))
+    return headers
+
+
+def _scope_headers(scope) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in scope.get("headers") or []:
+        out[key.decode("latin1").lower()] = value.decode("latin1")
+    return out
+
+
+class SecurityMiddleware:
+    """Host allowlist, Origin on state changes, and the security headers. Cameras are not skipped."""
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"].startswith(("/camera/", "/api/studio/camera/")):
+        if scope["type"] not in ("http", "websocket"):
             return await self.app(scope, receive, send)
+        if scope["type"] == "http":
+            changing = scope.get("method", "GET") not in ("GET", "HEAD", "OPTIONS")
+            if not request_allowed(_scope_headers(scope), changing):
+                body = b"Forbidden"
+                headers = response_headers([], scope.get("scheme", "http"), scope.get("path", ""))
+                headers += [(b"content-type", b"text/plain"), (b"content-length", str(len(body)).encode())]
+                await send({"type": "http.response.start", "status": 403, "headers": headers})
+                await send({"type": "http.response.body", "body": body})
+                return
 
-        async def send_no_cache(msg):
-            if msg["type"] == "http.response.start":
-                headers = [(k, v) for k, v in msg.get("headers", []) if k.lower() != b"cache-control"]
-                # no other site may show these pages inside its own (a hidden frame could trick a click on Send)
-                msg = {**msg, "headers": headers + [(b"cache-control", b"no-cache"), (b"x-frame-options", b"DENY"),
-                                                    (b"content-security-policy", b"frame-ancestors 'none'")]}
-            await send(msg)
-        await self.app(scope, receive, send_no_cache)
+            async def send_safe(msg):
+                if msg["type"] == "http.response.start":
+                    msg = {**msg, "headers": response_headers(msg.get("headers") or [], scope.get("scheme", "http"), scope.get("path", ""))}
+                await send(msg)
+            return await self.app(scope, receive, send_safe)
+        return await self.app(scope, receive, send)
+
+
+def confirm_action(msg: dict) -> str | None:
+    """Actions that need a one-use confirm token: shutdown, reboot, torque release, servo ID change."""
+    kind = msg.get("t")
+    if kind == "system" and msg.get("action") in ("shutdown", "reboot"):
+        return "system:" + str(msg.get("action"))
+    if kind == "arm" and msg.get("action") == "release":
+        return "arm:release"
+    if kind == "servo" and msg.get("cmd") == "setid":
+        return "servo:setid"
+    if kind == "servo" and msg.get("cmd") == "torque" and not msg.get("value"):
+        return "servo:torque_off"
+    return None
+
+
+def robot_view(authed: bool, snap: dict) -> dict:
+    """Health, voice transcripts, the event log and stop records are only for a signed-in connection."""
+    if authed:
+        return snap
+    out = dict(snap)
+    out["health"] = {}
+    out["voice"] = {}
+    out["events"] = []
+    out["stops"] = []
+    out["voice_models"] = []
+    out["voice_rx"] = {}
+    return out
 
 
 def guard_stop_kind(status: str | None) -> str | None:
@@ -134,8 +262,6 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         b = state["base"]
         s = ctrl.snapshot(cid)
         s.update(t="state", backend=b.name, odom=b.odom(), rates=b.rates() if hasattr(b, "rates") else None, version=__version__,
-                 default_pin=cfg.pin_is_default and b.name == "mock",
-                 mock_engineer_pin=b.name == "mock" and ctrl.engineer_pin == MOCK_ENGINEER_PIN,
                  odo_m=round(state["odo_m"], 2), up_s=round(time.time() - state["started"]),
                  guard={**{k: v for k, v in state["guard"].items() if k != "seen"}, "stop_m": gcfg.stop})
         return s
@@ -201,12 +327,13 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             st["log_n"] = new[-1]["n"] if new else (st["log_n"] if log_subs else logs.n)
             if new:
                 msg = {"t": "log", "lines": new}
-                await asyncio.gather(*(send(cid, msg) for cid in list(log_subs)))
+                readers = [cid for cid in list(log_subs) if ctrl.is_authed(cid)]
+                await asyncio.gather(*(send(cid, msg) for cid in readers))
         if n % 2 == 0:  # 10 Hz
             await asyncio.gather(*(send(cid, snapshot(cid)) for cid in list(sockets)))
         if n % 20 == 0:  # 1 Hz
             r = state["robot"].snapshot()
-            await asyncio.gather(*(send(cid, r) for cid in list(sockets)))
+            await asyncio.gather(*(send(cid, robot_view(ctrl.is_authed(cid), r)) for cid in list(sockets)))
             await send_studio([cid for cid in list(sockets) if ctrl.is_engineer(cid)])
 
     def meter_step(st: dict, now: float, b, o: dict | None, sent: bool) -> None:
@@ -251,19 +378,25 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         if t in ENGINEER_ACTIONS and not ctrl.is_engineer(cid):
             await send(cid, {"t": "note", "ok": False, "msg": "Unlock the engineer tools first.", "about": t})
             return
-        starting = on and not (t == "arm" and msg.get("action") == "release")
+        starting = bool(on)
         if t == "studio":  # only starting a recording moves an arm; next / again / stop / force stop / checks never do
             starting = msg.get("cmd") == "start"
         elif t in ("guard_profile", "stops_clear", "obstacle_stop"):
             starting = False
         elif t == "lidar_setup":  # measuring never moves anything; saving restarts the wheel program if it runs
             starting = msg.get("cmd") == "apply"
-        elif t == "servo":  # reading and letting go are always allowed; moving and writing are not during E-STOP
-            starting = msg.get("cmd") in ("move", "setid") or (msg.get("cmd") == "torque" and bool(msg.get("value")))
+        elif t == "arm" and msg.get("action") == "release":
+            starting = True  # torque off is blocked during E-STOP: the arm must not be let go while stopped
+        elif t == "servo":  # torque off is blocked too; reading stays allowed
+            starting = msg.get("cmd") in ("move", "setid", "torque")
         elif t == "wizard_decide":
             starting = False
         if ctrl.estop and starting and t != "system":
             await send(cid, {"t": "note", "ok": False, "msg": "E-STOP is on.", "about": t})
+            return
+        need = confirm_action(msg)
+        if need and not ctrl.consume_confirm(cid, need, msg.get("confirm")):
+            await send(cid, {"t": "note", "ok": False, "msg": "Confirmation required.", "about": t})
             return
         name = who(cid)
         if t == "base":  # guard distance: the engineer's choice on the Studio page, not the message's
@@ -373,22 +506,67 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 b.close()
 
     app = FastAPI(title="KIRO Command Center", version=__version__, lifespan=lifespan)
-    app.add_middleware(NoStalePages)
+    app.add_middleware(SecurityMiddleware)
+
+    def logged_in(request: Request) -> bool:
+        return ctrl.session_ok(request.cookies.get(SESSION_COOKIE, ""))
+
+    def require_login(request: Request) -> None:
+        if not logged_in(request):
+            raise HTTPException(401, "Log in first.")
     app.state.ctrl = ctrl
     app.state.data = state
 
+    def _session_cookie(response: JSONResponse, request: Request, sid: str) -> JSONResponse:
+        # Secure only on HTTPS so the HTTP test client can still send the cookie. SameSite=Lax
+        # so a top-level download (and the Colab tab's first GET) still carries it.
+        response.set_cookie(SESSION_COOKIE, sid, max_age=SESSION_MAX, httponly=True, samesite="lax",
+                            secure=request.url.scheme == "https", path="/")
+        return response
+
+    @app.post("/api/login")
+    async def login(request: Request):
+        """One PIN, asked once. The cookie is the login after that; the page does not ask again."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        ip = request.client.host if request.client else ""
+        err = ctrl.check_pin(ip, body.get("pin", ""))
+        if err:
+            return JSONResponse({"ok": False, "msg": err}, status_code=401)
+        return _session_cookie(JSONResponse({"ok": True}), request, ctrl.open_session())
+
+    @app.get("/api/session")
+    def session(request: Request):
+        if not logged_in(request):
+            raise HTTPException(401, "Log in first.")
+        return {"ok": True}
+
+    @app.post("/api/logout")
+    def logout(request: Request):
+        ctrl.drop_session(request.cookies.get(SESSION_COOKIE, ""))
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
     @app.get("/api/stops.csv")
-    def stops_csv():
+    def stops_csv(request: Request):
         """Every stop measured since the server started (or the last Clear): for the test report sheets."""
+        require_login(request)
         return Response(state["robot"].stops_csv(), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="stops_{time.strftime("%Y%m%d_%H%M")}.csv"'})
 
     @app.get("/api/health")
-    async def health() -> dict:
+    async def health(request: Request) -> dict:
+        require_login(request)
         return {"ok": True, "version": __version__, "backend": state["base"].name, "clients": len(sockets)}
 
     @app.get("/camera/{key}.mjpg")
-    def camera(key: str):
+    def camera(key: str, request: Request):
+        require_login(request)
         cam = state["robot"].cams.get(key) if state["robot"] else None
         if cam is None:
             raise HTTPException(404, "no such camera")
@@ -406,11 +584,22 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         return StreamingResponse(stream(), media_type="multipart/x-mixed-replace; boundary=frame",
                                  headers={"Cache-Control": "no-store"})
 
+    def _studio_alive(request: Request, header_token: str):
+        """Keeps a Studio stream open only while this login (or header token) is still the engineer.
+        A token in the query string is ignored on purpose: it would be saved in logs and history."""
+        if header_token and ctrl.token_ok(header_token):
+            return lambda: ctrl.token_ok(header_token)
+        sid = request.cookies.get(SESSION_COOKIE, "")
+        if ctrl.session_is_engineer(sid):
+            return lambda: ctrl.session_is_engineer(sid)
+        return None
+
     @app.get("/api/studio/camera/{key}.mjpg")
-    def studio_camera(key: str, token: str = ""):
-        """The Studio page's camera previews: the same streams, but only for the unlocked engineer
-        (token from the Studio state). The stream ends as soon as the engineer locks or leaves."""
-        if not ctrl.token_ok(token):
+    def studio_camera(key: str, request: Request):
+        """The Studio page's camera previews. Cookie of the engineer login, or the X-Studio-Token header.
+        The stream ends as soon as the engineer locks or leaves."""
+        alive = _studio_alive(request, request.headers.get("x-studio-token", ""))
+        if alive is None:
             raise HTTPException(403, "Studio is locked")
         cam = state["robot"].cams.get(key) if state["robot"] else None
         if cam is None:
@@ -422,7 +611,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             cam.attach()
             try:
                 for jpg in cam.frames():
-                    if not ctrl.token_ok(token):
+                    if not alive():
                         return
                     yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
             finally:
@@ -432,43 +621,42 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                                  headers={"Cache-Control": "no-store"})
 
     # ------------------------------------------------ training files (Studio)
-    def studio_who(request: Request, token: str = "") -> tuple[str, str]:
-        """(who, token) of the unlocked engineer behind a Studio HTTP request, or 403. The token comes from
-        the Studio state (header X-Studio-Token, or ?token= for downloads) and dies with lock, leave or a
-        new operator; downloads and uploads stop then too."""
-        origin = request.headers.get("origin")
-        if origin and urlsplit(origin).netloc != request.headers.get("host"):
-            raise HTTPException(403, "Wrong origin")
-        tok = request.headers.get("x-studio-token") or token
-        if not ctrl.token_ok(tok):
+    def studio_who(request: Request) -> tuple[str, object]:
+        """(who, still_open) of the unlocked engineer, or 403. The browser sends its session cookie.
+        Tests may send X-Studio-Token. A ?token= in the URL does not count."""
+        alive = _studio_alive(request, request.headers.get("x-studio-token", ""))
+        if alive is None:
             raise HTTPException(403, "Studio is locked")
-        return who(ctrl.tokens[tok]), tok
+        tok = request.headers.get("x-studio-token", "")
+        if tok and ctrl.token_ok(tok):
+            return who(ctrl.tokens[tok]), alive
+        return "session", alive
 
     @app.get("/api/studio/packages/{file}")
-    def studio_package(file: str, request: Request, token: str = ""):
+    def studio_package(file: str, request: Request):
         """A dataset package (.tar.gz) or its checksum (.sha256), to take to Google Colab."""
-        _, tok = studio_who(request, token)
+        _, alive = studio_who(request)
         p = state["robot"].train.package_path(file)
         if p is None:
             raise HTTPException(404, "no such package")
-        return StreamingResponse(file_chunks(p, lambda: ctrl.token_ok(tok)),
+        return StreamingResponse(file_chunks(p, alive),
                                  media_type="application/gzip" if file.endswith(".gz") else "text/plain",
                                  headers={"Content-Disposition": f'attachment; filename="{file}"', "Content-Length": str(p.stat().st_size)})
 
     @app.get("/api/studio/models/{name}.zip")
-    def studio_model_zip(name: str, request: Request, token: str = ""):
+    def studio_model_zip(name: str, request: Request):
         """A trained model as a zip (built while it is sent)."""
-        _, tok = studio_who(request, token)
+        _, alive = studio_who(request)
         tr = state["robot"].train
         if tr.model_dir(name) is None:
             raise HTTPException(404, "no such model")
-        return StreamingResponse(tr.zip_stream(name, lambda: ctrl.token_ok(tok)), media_type="application/zip",
+        return StreamingResponse(tr.zip_stream(name, alive), media_type="application/zip",
                                  headers={"Content-Disposition": f'attachment; filename="{name}_pretrained_model.zip"'})
 
     @app.get("/api/studio/notebook.ipynb")
-    def studio_notebook(request: Request, token: str = ""):
+    def studio_notebook(request: Request):
         """The Colab notebook itself, for uploading it in Colab when the GitHub link does not work."""
-        studio_who(request, token)
+        studio_who(request)
         nb = state["robot"].train.notebook
         if not nb.is_file():
             raise HTTPException(404, "no notebook")
@@ -478,7 +666,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
     async def studio_upload(request: Request, name: str = ""):
         """A trained model zip from the browser (the request body). Written to a temporary file while it
         arrives, then checked and installed as <policies>/<name>/pretrained_model (training.py)."""
-        by, tok = studio_who(request)
+        by, alive = studio_who(request)
         tr = state["robot"].train
 
         def refused(e: Refused) -> JSONResponse:
@@ -494,7 +682,7 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
             return refused(e)
         try:
             with open(tmp, "wb") as f:
-                n = await copy_upload(request.stream(), lambda c: asyncio.to_thread(f.write, c), lambda: ctrl.token_ok(tok), ZIP_MAX)
+                n = await copy_upload(request.stream(), lambda c: asyncio.to_thread(f.write, c), alive, ZIP_MAX)
             if size is not None and n != size:
                 raise Refused("INCOMPLETE", f"{n} of {size} bytes")
             info = await asyncio.to_thread(tr.install, tmp, name, by)
@@ -511,20 +699,21 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
-        # A web page from another site (opened on a laptop that also has internet) must not be
-        # able to talk to the robot: browsers always send Origin, and it must be this server.
-        origin = ws.headers.get("origin")
-        if origin and urlsplit(origin).netloc != ws.headers.get("host"):
+        # Browsers send Origin. A missing one is refused, and so is a Host that is not this robot
+        # (DNS rebinding, where Origin and Host are both the attacker's name).
+        hdrs = {k.lower(): v for k, v in ws.headers.items()}
+        if not request_allowed(hdrs, True):
             await ws.close(code=1008)
             return
         await ws.accept()
         cid = uuid.uuid4().hex[:8]
         sockets[cid] = (ws, asyncio.Lock())
         ctrl.connect(cid, ws.query_params.get("name", "device"), ip=ws.client.host if ws.client else None)
+        ctrl.attach_session(cid, ws.cookies.get(SESSION_COOKIE, ""))
         tasks: set[asyncio.Task] = set()
         try:
             await send(cid, snapshot(cid))
-            await send(cid, state["robot"].snapshot())
+            await send(cid, robot_view(ctrl.is_authed(cid), state["robot"].snapshot()))
             while True:
                 raw = await ws.receive()
                 if raw.get("type") == "websocket.disconnect":
@@ -564,6 +753,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                 elif t == "engineer":
                     if msg.get("lock"):
                         ctrl.lock_engineer(cid)
+                    elif ctrl.grant_session_engineer(cid):
+                        await send(cid, {"t": "note", "ok": True, "msg": "Engineer tools unlocked.", "about": "engineer"})
+                        state["robot"].event(who(cid), "unlocked engineer tools")
+                        await send_studio([cid])
+                        steps = await asyncio.to_thread(state["robot"].wizard_steps)
+                        await send(cid, {"t": "wizard_steps", "steps": steps})
                     else:
                         ok, text = ctrl.unlock_engineer(cid, msg.get("pin", ""))
                         await send(cid, {"t": "note", "ok": ok, "msg": text, "about": "engineer"})
@@ -572,8 +767,18 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
                             await send_studio([cid])
                             steps = await asyncio.to_thread(state["robot"].wizard_steps)
                             await send(cid, {"t": "wizard_steps", "steps": steps})
+                elif t == "confirm":
+                    action = str(msg.get("action") or "")
+                    if action not in ("system:shutdown", "system:reboot", "arm:release", "servo:setid", "servo:torque_off"):
+                        await send(cid, {"t": "confirm", "ok": False, "action": action, "msg": "Unknown action."})
+                    else:
+                        ok, text = ctrl.begin_confirm(cid, action)
+                        await send(cid, {"t": "confirm", "ok": ok, "action": action, "token": text if ok else "",
+                                         "msg": "" if ok else text})
                 elif t == "logs":  # the dashboard terminal: the recent server log once, then every new line
-                    if not msg.get("on", True):
+                    if not ctrl.is_authed(cid):
+                        await send(cid, {"t": "note", "ok": False, "msg": "Log in first.", "about": "logs"})
+                    elif not msg.get("on", True):
                         log_subs.discard(cid)
                     elif cid not in log_subs:
                         log_subs.add(cid)

@@ -83,9 +83,10 @@ All messages are JSON with a field `t`.
 | `t` | Fields | Meaning |
 |---|---|---|
 | `state` | `you`, `operator`, `estop`, `link_ok`, `need_neutral`, `src`, `cmd`, `odom`, `backend`, `clients` | Sent 10 times per second |
-| `robot` | `jobs`, `health`, `cams`, `models`, `voice`, `events`, `left_arm_ok`, `lidar` | Once per second |
+| `robot` | `jobs`, `health`, `cams`, `models`, `voice`, `events`, `left_arm_ok`, `lidar` | Once per second. Health, voice, events and stops are empty until the connection is signed in |
 | `wizard_steps` | `steps` | The 13 steps of the old wizard, sent after unlocking |
-| `studio` | `session`, `datasets`, `check`, `pack`, `cams`, `ports`, `servo_scan`, `wizard`, `guard_profile`, `info`, `token`, `now` | Once per second and after each Studio command, **only to the unlocked engineer**. `token` opens `/api/studio/camera/<key>.mjpg?token=` and dies with the unlock |
+| `studio` | `session`, `datasets`, `check`, `pack`, `cams`, `ports`, `servo_scan`, `wizard`, `guard_profile`, `info`, `token`, `now` | Once per second and after each Studio command, **only to the unlocked engineer**. The page uses the session cookie for downloads and camera previews. `token` is accepted only as the `X-Studio-Token` header, never in the URL |
+| `confirm` | `action`, `ok`, `token` | One-use token for shutdown, reboot, torque release and a servo ID change |
 | `scan` | `xy` (flat list of x, y in cm, robot frame), `src` (`lidar` or `mock`) | 5 times per second, only while a scan is fresh |
 | `note` | `ok`, `msg`, `about` | Answer to a request |
 | `pong` | `ts` | Answer to `ping` |
@@ -110,8 +111,8 @@ Axes: `x` forward, `y` left, `z` turning left. The same directions ROS uses.
 | `/` | Control: drive, arms, skills, voice, health |
 | `/dashboard.html` | Read-only stats for a big screen. Charts keep the last 2 minutes in the browser |
 
-The server answers on http (8080) and https (8443, self-made certificate). https is needed by the browser for Web Serial (leader arm) and the microphone.
+The server answers on HTTPS only (port 8080, self-made certificate unless `KIRO_TLS_CERT` and `KIRO_TLS_KEY` are set). The browser warns once. Web Serial (leader arm) and the microphone use that same address.
 
 ## Camera
 
-`GET /camera/<key>.mjpg` streams 480x360 JPEG at 10 fps (about 2 Mbit/s). Devices come from the old `cams_config.load()`. A camera is open only while someone watches.
+`GET /camera/<key>.mjpg` streams 480x360 JPEG at 10 fps (about 2 Mbit/s) to a signed-in browser. Devices come from the old `cams_config.load()`. A camera is open only while someone watches.

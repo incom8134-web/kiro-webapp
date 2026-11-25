@@ -15,8 +15,16 @@ def read_until(ws, pred, tries=60):
     raise AssertionError("message not received")
 
 
+def login(client, pin="4321"):
+    r = client.post("/api/login", json={"pin": pin}, headers={"origin": "http://testserver"})
+    assert r.status_code == 200, r.text
+    return client.cookies.get("kiro_session")
+
+
 def test_page_and_health():
     with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
+        assert client.get("/api/health").status_code == 401
+        login(client)
         assert client.get("/api/health").json()["backend"] == "mock"
         assert "HAEBOT" in client.get("/").text
 
@@ -70,7 +78,8 @@ def test_dashboard_terminal_gets_the_server_log_without_pins():
     try:
         with TestClient(create_app(Config(pin="4321"), MockBase())) as client:
             logging.getLogger("kiro.test").warning("before the page   opened")
-            with client.websocket_connect("/ws?name=Dashboard") as dash, client.websocket_connect("/ws?name=Laptop") as op:
+            sid = login(client)
+            with client.websocket_connect("/ws?name=Dashboard", headers={"cookie": f"kiro_session={sid}"}) as dash, client.websocket_connect("/ws?name=Laptop") as op:
                 dash.send_json({"t": "logs"})
                 first = read_until(dash, lambda m: m["t"] == "log")
                 assert first["reset"]
@@ -179,6 +188,7 @@ def test_stop_meter_measures_a_web_dead_man_stop_and_serves_csv():
                                                                    for s in m["stops"]), tries=200)
             s = [s for s in r["stops"] if s["kind"] == "deadman"][-1]
             assert s["test"] == "E1" and s["cmd_s"] is not None and s["cmd_s"] <= 0.1 and s["dist"] <= 1.0
+        login(client)
         csv = client.get("/api/stops.csv")
         assert csv.status_code == 200 and "deadman" in csv.text and csv.text.startswith("time,meter,test")
 

@@ -44,7 +44,7 @@ git clone https://github.com/incom8134-web/kiro-webapp.git
 cd kiro-webapp && ./run.sh
 ```
 
-Open **http://localhost:8080**, type the PIN **0000**, press **Take control**, and drive the pretend robot.
+Open **https://localhost:8080**. The certificate is self-signed, so the browser warns once: continue past that warning. Sign in with PIN **0000** (it is remembered in this browser), press **Take control**, and drive the pretend robot. The page is HTTPS only. There is no cleartext fallback.
 
 On Windows, use these three commands instead of `./run.sh`:
 
@@ -81,16 +81,16 @@ If two inputs are used at once, the gamepad wins, then the on-screen sticks, the
 | Lost connection | No message from the operator for 0.5 s: the robot stops |
 | E-STOP | Anyone connected can press it. Only the operator can release it |
 | After E-STOP or taking control | The controls must be let go once before the robot moves again |
-| One operator | Other devices can only watch. Taking over needs the PIN. 5 wrong PINs lock that device address for 30 s, also across reconnects |
-| Other websites | The robot connection refuses pages from any other site (Origin check) |
+| One operator | Other devices can only watch. Taking over asks first. 5 wrong PINs lock that address for 30 s, then 60 s, and so on up to 15 min, also across reconnects |
+| Other websites | The robot refuses another site's Origin, a missing Origin on a command, and a Host name that is not this robot |
 | Slow devices | A page that stops reading is dropped after 0.3 s, so it can never stall the 20 Hz control loop |
 | Speed | 0.15 m/s normal, 0.30 m/s turbo. Speed rises smoothly and drops at once |
 | Lidar guard | Web commands go to `/cmd_vel_raw`, through the old obstacle guard, like the robot gamepad and voice |
 | E-STOP also stops | Every press: arm programs (skill, leader arm, wave, fold) are killed at once and the arm is held where it is (their own clean-up would move it); voice, check wizard and base stop together (wheels: speed 0, torque off; the robot's gamepad cannot keep driving). Also when E-STOP comes while a program is still starting. Teleop keeps running: a person holds the leader arm |
 | Devices | Two programs never open the same arm port or camera. The servo check skips busy ports |
-| Dangerous buttons | Release torque, shut down and restart must be held for 2 s |
+| Dangerous buttons | Release torque, shut down, restart and a servo ID change must be held, then confirmed by the server. Torque off is also refused while E-STOP is on |
 | Left arm | Blocked until recalibrated (`KIRO_LEFT_ARM_OK=1`) |
-| Engineer tools | Need operator control **and** a second PIN (`KIRO_ENGINEER_PIN`). Off on the robot until that is set |
+| One PIN | Sign in once. The same login opens the engineer tools when this browser takes control. This is less separation than two PINs; it was chosen on purpose |
 | Server stop | Ctrl+C, service stop or closing its terminal first stops every program the server started |
 
 Software is not enough for public demos. The robot also needs a **physical switch that cuts servo power**.
@@ -116,8 +116,11 @@ Set these as environment variables before starting the server.
 | Variable | Default | Meaning |
 |---|---|---|
 | `KIRO_BACKEND` | `auto` | `mock`, `ros`, or `auto` (ROS if it is installed) |
-| `KIRO_OPERATOR_PIN` | `0000` in mock mode | **Required** for the real robot. Never put it in git |
-| `KIRO_PORT` | `8080` | Port of the web page |
+| `KIRO_OPERATOR_PIN` | `0000` in mock mode | The one PIN. **Required** for the real robot. Never put it in git |
+| `KIRO_PORT` | `8080` | HTTPS port of the web page |
+| `KIRO_TLS_DIR` | `~/.config/kiro-webapp/tls` | Where the self-signed certificate is written |
+| `KIRO_TLS_CERT`, `KIRO_TLS_KEY` | (made on first run) | Use both to supply your own certificate instead |
+| `KIRO_ALLOWED_HOSTS` | localhost, 127.0.0.1, ::1, 10.42.0.1 | Extra Host names, comma-separated |
 | `KIRO_MAX_VX`, `KIRO_MAX_VY`, `KIRO_MAX_WZ` | `0.15`, `0.15`, `0.8` | Normal speed limits (m/s, m/s, rad/s) |
 | `KIRO_TURBO_VX`, `KIRO_TURBO_VY`, `KIRO_TURBO_WZ` | `0.30`, `0.30`, `1.5` | Turbo speed limits |
 | `KIRO_HEARTBEAT_TIMEOUT` | `0.5` | Seconds without operator messages before the robot stops |

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#09090b">
 <title>HAEBOT Robot</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
@@ -22,10 +22,25 @@
     <a class="toplink" href="dashboard.html"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
     <a class="toplink" href="studio.html" data-i18n-title="studio.open"><i class="ri-lock-2-line"></i><span data-i18n="studio.open">Studio</span></a>
   </nav>
-  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
-  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
-  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme" data-i18n-aria="aria.theme" aria-label="Switch theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en" data-i18n-aria="lang.en" aria-label="English">EN</button><button type="button" data-lang="ko" data-i18n-aria="lang.ko" aria-label="Korean">한</button></div>
+  <div class="estop-group">
+    <button id="estop" class="estop" type="button" data-i18n-aria="aria.estop" aria-label="Emergency stop"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+    <button id="estop-release" class="btn hold danger" type="button" hidden data-i18n-aria="aria.release" aria-label="Hold to release the emergency stop"><span class="fill"></span><span data-i18n="estop.releasehold">Hold to release</span></button>
+  </div>
 </header>
+
+<div id="login" class="login">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <label class="login-user">Username<input name="username" autocomplete="username" value="kiro"></label>
+    <h2 data-i18n="login.title">Sign in</h2>
+    <p class="small mute" data-i18n="login.hint">One PIN for this robot. It stays signed in on this browser.</p>
+    <label class="field"><span data-i18n="login.label">PIN</span>
+      <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="32" required data-i18n-aria="aria.pin" aria-label="PIN"></label>
+    <button class="btn primary big" type="submit"><span data-i18n="login.go">Sign in</span></button>
+    <p id="login-err" class="note err" role="alert" hidden></p>
+  </form>
+</div>
 
 <div id="banner" class="banner" hidden></div>
 
@@ -37,7 +52,7 @@
       <span class="tag"><i class="ri-camera-3-line"></i><span class="tagtext" data-i18n="cam.top">Main camera</span></span>
       <div class="inset glass">
         <div class="head"><span><i class="ri-radar-line"></i><span data-i18n="map">Map</span> <span id="scan-src" class="mute"></span></span><span id="pose" class="mute"></span></div>
-        <canvas id="map"></canvas>
+        <canvas id="map" data-i18n-aria="aria.map" aria-label="Map"></canvas>
       </div>
       <!-- the arm cameras, picture-in-picture: left hand bottom-left, right hand bottom-right -->
       <div class="pips">
@@ -68,7 +83,6 @@
   <aside class="dock">
     <section class="control">
       <form id="take-box" class="row" autocomplete="off">
-        <input id="pin" class="grow" type="password" inputmode="numeric" data-i18n-ph="pin" aria-label="PIN">
         <button id="take" class="btn primary" type="submit"><i class="ri-steering-2-line"></i><span data-i18n="take">Take control</span></button>
       </form>
       <div id="held-box" class="row" hidden>
@@ -79,16 +93,16 @@
       <p id="note" class="note" role="status"></p>
     </section>
 
-    <nav class="tabs" role="tablist">
-      <button type="button" data-tab="drive"><i class="ri-steering-2-line"></i><span data-i18n="tab.drive">Drive</span><b class="dot"></b></button>
-      <button type="button" data-tab="arms"><i class="emo">🦾</i><span data-i18n="sec.arms">Arms</span><b class="dot"></b></button>
-      <button type="button" data-tab="voice"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span><b class="dot"></b></button>
-      <button type="button" data-tab="system"><i class="ri-settings-3-line"></i><span data-i18n="sec.health">System</span><b class="dot"></b></button>
+    <nav class="tabs" role="tablist" data-i18n-aria="aria.tabs" aria-label="Sections">
+      <button type="button" role="tab" id="tab-drive" aria-controls="panel-drive" aria-selected="false" tabindex="-1" data-tab="drive"><i class="ri-steering-2-line"></i><span data-i18n="tab.drive">Drive</span><b class="dot"></b></button>
+      <button type="button" role="tab" id="tab-arms" aria-controls="panel-arms" aria-selected="false" tabindex="-1" data-tab="arms"><i class="emo">🦾</i><span data-i18n="sec.arms">Arms</span><b class="dot"></b></button>
+      <button type="button" role="tab" id="tab-voice" aria-controls="panel-voice" aria-selected="false" tabindex="-1" data-tab="voice"><i class="ri-mic-line"></i><span data-i18n="sec.voice">Voice</span><b class="dot"></b></button>
+      <button type="button" role="tab" id="tab-system" aria-controls="panel-system" aria-selected="false" tabindex="-1" data-tab="system"><i class="ri-settings-3-line"></i><span data-i18n="sec.health">System</span><b class="dot"></b></button>
     </nav>
 
     <div class="panels">
       <!-- DRIVE -->
-      <section class="panel" data-panel="drive">
+      <section class="panel" id="panel-drive" role="tabpanel" aria-labelledby="tab-drive" data-panel="drive">
         <div class="card">
           <div class="row head"><h3><span data-i18n="sec.base">Base</span></h3><span id="base-st" class="st"></span><span class="grow"></span>
             <button id="base-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
@@ -112,7 +126,7 @@
       </section>
 
       <!-- ARMS -->
-      <section class="panel" data-panel="arms">
+      <section class="panel" id="panel-arms" role="tabpanel" aria-labelledby="tab-arms" data-panel="arms">
         <div class="card skills-card">
           <div class="row head"><h3><i class="ri-robot-2-line"></i><span data-i18n="skills.title">Autonomous skills</span></h3><span id="skill-st" class="st"></span></div>
           <div class="row demo-row">
@@ -135,6 +149,7 @@
         <div class="card">
           <div class="row head"><h3><span class="emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
+          <p class="warnline" data-i18n="arm.fall">Releasing torque lets the arm fall. Hold the button, and hold the arm.</p>
           <button id="tele-both" class="btn wide" type="button" data-op><i class="ri-git-merge-line"></i><span></span></button>
           <button id="follow-btn" class="btn wide" type="button" data-op><i class="ri-git-fork-line"></i><span></span></button>
           <p id="follow-st" class="small mute"></p>
@@ -152,7 +167,7 @@
       </section>
 
       <!-- VOICE -->
-      <section class="panel" data-panel="voice">
+      <section class="panel" id="panel-voice" role="tabpanel" aria-labelledby="tab-voice" data-panel="voice">
         <div class="card">
           <div class="row head"><h3><span data-i18n="sec.voice">Voice</span></h3><span id="voice-st" class="st"></span><span class="grow"></span>
             <button id="voice-btn" class="btn" type="button" data-op><i class="ri-play-fill"></i><span></span></button></div>
@@ -184,19 +199,21 @@
       </section>
 
       <!-- SYSTEM -->
-      <section class="panel" data-panel="system">
+      <section class="panel" id="panel-system" role="tabpanel" aria-labelledby="tab-system" data-panel="system">
         <div class="card">
           <div class="row head"><h3><span data-i18n="sec.health">System</span></h3><span id="sys-sum" class="st"></span></div>
           <table class="kv" id="health"></table>
           <div class="row" style="margin-top:12px">
-            <button id="reboot" class="btn hold" type="button" data-op><span class="fill"></span><i class="ri-restart-line"></i><span data-i18n="h.reboot">Restart</span></button>
-            <button id="shutdown" class="btn hold" type="button" data-op><span class="fill"></span><i class="ri-shut-down-line"></i><span data-i18n="h.shutdown">Shut down</span></button>
+            <button id="reboot" class="btn hold danger" type="button" data-op><span class="fill"></span><i class="ri-restart-line"></i><span data-i18n="h.reboot">Restart</span></button>
+            <button id="shutdown" class="btn hold danger" type="button" data-op><span class="fill"></span><i class="ri-shut-down-line"></i><span data-i18n="h.shutdown">Shut down</span></button>
             <span class="mute small" data-i18n="h.holdconfirm">Hold 2 s</span>
           </div>
+          <p class="warnline" data-i18n="h.confirm.shutdown">Shut down the Jetson? The page goes offline.</p>
+          <p class="warnline" data-i18n="h.confirm.reboot">Restart the Jetson? The page comes back in about one minute.</p>
         </div>
         <div class="card">
           <div class="row head"><h3><span data-i18n="stops.title">Stop measurements</span></h3><span class="grow"></span>
-            <a class="btn" href="/api/stops.csv" download><i class="ri-download-2-line"></i><span>CSV</span></a>
+            <a class="btn" href="/api/stops.csv" download><i class="ri-download-2-line"></i><span data-i18n="csv">CSV</span></a>
             <button id="stops-clear" class="btn" type="button" data-op><span data-i18n="stops.clear">Clear</span></button></div>
           <p class="small mute" data-i18n="stops.hint">Every stop while the robot moves, measured from its own data.</p>
           <div class="stopwrap"><table class="stops" id="stops"></table></div>
@@ -207,6 +224,7 @@
   </aside>
 </main>
 <script src="i18n.js"></script>
+<script src="shared.js"></script>
 <script src="feetech.js"></script>
 <script src="app.js"></script>
 </body>

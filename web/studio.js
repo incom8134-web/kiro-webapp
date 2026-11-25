@@ -2,7 +2,7 @@
 /*
  * HAEBOT Studio - browser side.
  *
- * Locked until this page is the operator AND unlocked the engineer PIN. Only then does the server
+ * Locked until this page is the operator. The same sign-in opens the engineer tools (no second PIN). Only then does the server
  * send Studio data ("studio" messages: datasets, recording, cameras, engineer values) and accept
  * Studio commands. Camera previews use a token the server gives to the engineer connection only.
  *
@@ -12,8 +12,7 @@
  * (guard distance, servo tester, check wizard) and the read-only engineer information.
  */
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const HOLD_MS = 2000;
+const esc = (s) => Kiro.esc(s);
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
 
 const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
@@ -31,57 +30,36 @@ function setBtn(el, text, icon) {
 }
 
 // ---------------------------------------------------------------- connection
-function deviceName() {
-  try {
-    let n = sessionStorage.getItem("kiro-name");
-    if (!n) {
-      const kind = /Mobi|Android|iPhone|iPad/.test(navigator.userAgent) ? "Phone" : "Laptop";
-      n = kind + "-" + Math.random().toString(36).slice(2, 5).toUpperCase();
-      sessionStorage.setItem("kiro-name", n);
-    }
-    return n;
-  } catch (e) {
-    return "Device";
-  }
-}
-
+let link = null;
+function send(obj) { if (link) link.send(obj); }
 function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?name=${encodeURIComponent(deviceName())}`);
-  st.ws = ws;
-  ws.onopen = () => { st.open = true; renderAll(); };
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.t === "state") {
-      const was = isEngineer();
-      st.server = m;
-      if (was && !isEngineer()) relock();
-      renderTop(); renderLock();
-    } else if (m.t === "robot") { st.robot = m; renderTop(); }
-    else if (m.t === "studio") {
-      if (!isEngineer()) return;
-      const first = !st.studio;
-      st.studio = m; st.at = performance.now();
-      if (m.token !== st.token) { st.token = m.token; resetPreviews(); }
-      if (first) firstData();
-      renderStudio();
-    } else if (m.t === "wizard_steps") { st.steps = m.steps; renderTools(); }
-    else if (m.t === "pong") { st.rtt = performance.now() - m.ts; renderLink(); }
-    else if (m.t === "note") onNote(m);
-  };
-  ws.onclose = () => {
-    st.open = false; st.server = null; st.rtt = null;
-    relock(); renderAll();
-    setTimeout(connect, 1000);
-  };
-  ws.onerror = () => ws.close();
+  link = Kiro.connect({
+    name: () => Kiro.deviceName(),
+    onOpen(ws) { st.ws = ws; st.open = true; renderAll(); },
+    onClose() {
+      st.open = false; st.server = null; st.rtt = null; st.ws = null;
+      relock(); renderAll();
+    },
+    onMessage(m) {
+      if (m.t === "state") {
+        const was = isEngineer();
+        st.server = m;
+        if (was && !isEngineer()) relock();
+        renderTop(); renderLock();
+      } else if (m.t === "robot") { st.robot = m; renderTop(); }
+      else if (m.t === "studio") {
+        if (!isEngineer()) return;
+        const first = !st.studio;
+        st.studio = m; st.at = performance.now();
+        if (m.token !== st.token) { st.token = m.token; resetPreviews(); }
+        if (first) firstData();
+        renderStudio();
+      } else if (m.t === "wizard_steps") { st.steps = m.steps; renderTools(); }
+      else if (m.t === "pong") { st.rtt = performance.now() - m.ts; renderLink(); }
+      else if (m.t === "note") onNote(m);
+    },
+  });
 }
-
-function send(obj) {
-  if (st.open && st.ws.readyState === WebSocket.OPEN) st.ws.send(JSON.stringify(obj));
-}
-// The ping keeps this page the operator (a silent operator loses control after 10 s)
-setInterval(() => send({ t: "ping", ts: performance.now() }), 1000);
 
 /* Locked again (Lock button, another operator, connection lost): forget every Studio value. */
 function relock() {
@@ -127,7 +105,7 @@ const camRepairText = () => {
   return r.code ? t("cam.rep." + r.code) + (r.code === "FAILED" && r.detail ? ` (${r.detail})` : "") : r.detail;
 };
 function onNote(m) {
-  const text = CODES[m.msg] ? t(CODES[m.msg]) : m.msg;
+  const text = CODES[m.msg] ? t(CODES[m.msg]) : Kiro.serverText(m.msg);
   if (m.about === "take" || m.about === "engineer") {
     if (!m.ok) { $("lock-hint").textContent = text; $("lock-hint").className = "small note err"; }
     else if (m.about === "engineer") toast(t("studio.unlockedmsg"));
@@ -168,7 +146,7 @@ function renderLink() {
 function renderTop() {
   const s = st.server, me = isOperator();
   applyStrings();
-  document.title = "HAEBOT · " + t("studio.name");
+  document.title = t("title.studio");
   for (const b of document.querySelectorAll(".lang button")) b.classList.toggle("on", b.dataset.lang === LANG);
   renderLink();
   $("backend").textContent = s ? t(s.backend === "ros" ? "be.ros" : "be.mock") : "...";
@@ -177,7 +155,9 @@ function renderTop() {
   op.className = me ? "accent" : "";
   const stopped = !!s && s.estop;
   $("estop").classList.toggle("on", stopped);
-  $("estop-label").textContent = stopped ? t(me ? "estop.release" : "estop.stopped") : t("estop");
+  $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");
+  $("estop").setAttribute("aria-pressed", stopped ? "true" : "false");
+  if ($("estop-release")) $("estop-release").hidden = !(stopped && me);
   const banner = $("banner");
   if (!st.open) { banner.hidden = false; banner.className = "banner"; banner.textContent = t("banner.offline"); }
   else if (stopped) {
@@ -188,14 +168,14 @@ function renderTop() {
   $("ver").textContent = s ? `HAEBOT Robot v${s.version} · ${t("studio.name")}` : "";
 }
 
-$("estop").addEventListener("click", () => send({ t: "estop", on: !(st.server && st.server.estop) }));
-window.addEventListener("keydown", (e) => { if (e.code === "Escape" || e.key === "Escape") send({ t: "estop", on: true }); });
+Kiro.bindEstop($("estop"), $("estop-release"), send, () => !!(st.server && st.server.estop), isOperator);
+window.addEventListener("keydown", (e) => {
+  if ((e.code === "Escape" || e.key === "Escape") && !Kiro.typing(e)) send({ t: "estop", on: true });
+});
 for (const b of document.querySelectorAll(".lang button")) b.addEventListener("click", () => { setLang(b.dataset.lang); renderAll(); });
 $("theme-btn").addEventListener("click", () => toggleTheme());
 window.addEventListener("kiro-theme", () => themeIcon($("theme-btn")));
 themeIcon($("theme-btn"));
-// A focused button would react to Space. Remove focus after every click (as on the control page).
-document.addEventListener("click", (e) => { const el = e.target.closest("button, summary"); if (el) el.blur(); });
 
 // ------------------------------------------------------------------ lock
 function renderLock() {
@@ -208,17 +188,11 @@ function renderLock() {
   $("tsect").hidden = !en && !st.seenEng;
   $("tsect").classList.toggle("away", !en);
   if (en) return;
-  $("op-pin-row").hidden = me;
   const other = s && s.operator && !me;
   $("lock-other").hidden = !other;
   if (other) $("lock-other").textContent = t("studio.other", { name: s.operator.name });
   $("lock-op").hidden = !me;
   $("unlock-btn").disabled = !s;
-  const hint = $("lock-hint");
-  if (!hint.classList.contains("err")) {
-    const mock = [s && s.default_pin && !me ? t("mockpin") : "", s && s.mock_engineer_pin ? t("eng.mockpin") : ""].filter(Boolean);
-    hint.textContent = mock.join(" ");
-  }
 }
 
 $("unlock").addEventListener("submit", (e) => {
@@ -232,11 +206,8 @@ $("unlock").addEventListener("submit", (e) => {
       force = confirm(t("takeover", { name: s.operator.name }));
       if (!force) return;
     }
-    send({ t: "take", pin: $("op-pin").value, force });
-  }
-  send({ t: "engineer", pin: $("eng-pin").value });   // handled after "take": the server reads messages in order
-  $("op-pin").value = ""; $("eng-pin").value = "";
-  document.activeElement && document.activeElement.blur();
+    send({ t: "take", force });
+  } else send({ t: "engineer" });   // already in control: open the tools again (same login, no second PIN)
 });
 $("release").addEventListener("click", () => send({ t: "release" }));
 $("lock-btn").addEventListener("click", () => send({ t: "engineer", lock: true }));
@@ -321,20 +292,7 @@ $("go-check").addEventListener("click", () => {
 });
 $("recheck").addEventListener("click", () => send({ t: "studio", cmd: "check", settings: settings() }));
 
-/* Hold a button for HOLD_MS to confirm (start recording, force stop, servo writes). */
-function holdButton(el, action) {
-  let timer = null, start = 0, raf = 0;
-  const fill = el.querySelector(".fill");
-  const reset = () => { clearTimeout(timer); cancelAnimationFrame(raf); timer = null; if (fill) fill.style.width = "0"; };
-  const step = () => { if (fill) fill.style.width = Math.min(100, (performance.now() - start) / HOLD_MS * 100) + "%"; raf = requestAnimationFrame(step); };
-  el.addEventListener("pointerdown", (e) => {
-    if (el.disabled) return;
-    el.setPointerCapture(e.pointerId); start = performance.now(); step();
-    timer = setTimeout(() => { reset(); if (el.isConnected) action(); }, HOLD_MS);   // re-rendered while held: not this button any more
-  });
-  for (const n of ["pointerup", "pointercancel", "lostpointercapture"]) el.addEventListener(n, reset);
-  el.addEventListener("contextmenu", (e) => e.preventDefault());
-}
+const holdButton = (el, action) => Kiro.holdButton(el, action);
 $("cam-repair").addEventListener("click", () => {
   if ($("cam-repair").disabled) return;
   st.camRepair = { busy: true, at: performance.now() };   // the server answers when the colour node is back (up to about 15 s)
@@ -688,7 +646,7 @@ function resetPreviews() {
 }
 function updatePreviews() {
   const s = st.studio;
-  const want = !!s && isEngineer() && !!st.token && !document.hidden && !running() && stepNow() <= 2;
+  const want = !!s && isEngineer() && !document.hidden && !running() && stepNow() <= 2;
   for (const x of (s && s.cams) || []) {
     const tile = document.querySelector(`.camtile[data-cam="${CSS.escape(x.key)}"]`);
     if (!tile) continue;
@@ -703,7 +661,7 @@ function updatePreviews() {
       img.dataset.on = "1";
       img.onload = () => { img.hidden = false; empty.hidden = true; };
       img.onerror = () => { delete img.dataset.on; img.hidden = true; empty.hidden = false; msg.textContent = t("cam.connecting"); setTimeout(updatePreviews, 2000); };
-      img.src = `/api/studio/camera/${encodeURIComponent(x.key)}.mjpg?token=${encodeURIComponent(st.token)}&t=${Date.now()}`;
+      img.src = `/api/studio/camera/${encodeURIComponent(x.key)}.mjpg?t=${Date.now()}`;
       msg.textContent = t("cam.connecting");
     }
   }
@@ -719,9 +677,8 @@ const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;   // same rule as the serv
 const UP_CODES = ["NAME", "EXISTS", "TOO_BIG", "BUSY", "DISK", "NOT_ZIP", "BAD_PATH", "ENCRYPTED", "TOO_MANY", "NO_MODEL", "MANY_MODELS",
   "EXTRA_FILES", "BAD_FILE", "BAD_CONFIG", "BAD_WEIGHTS", "MISSING", "LOCKED", "INCOMPLETE", "NETWORK", "ABORTED", "ZIP_METHOD", "WRITE"];
 const train = () => (st.studio && st.studio.train) || { models: [], packages: [] };
-const qtok = () => encodeURIComponent(st.token || "");
-const pkgUrl = (f) => `/api/studio/packages/${encodeURIComponent(f)}?token=${qtok()}`;
-const modelUrl = (n) => `/api/studio/models/${encodeURIComponent(n)}.zip?token=${qtok()}`;
+const pkgUrl = (f) => `/api/studio/packages/${encodeURIComponent(f)}`;
+const modelUrl = (n) => `/api/studio/models/${encodeURIComponent(n)}.zip`;
 const fmtMB = (mb) => (mb == null ? "-" : mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`);
 const fmtDate = (sec) => (sec ? new Date(sec * 1000).toLocaleString(LANG === "ko" ? "ko-KR" : "en-GB",
   { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-");
@@ -774,9 +731,11 @@ function renderTrain() {
     if (b) b.addEventListener("click", () => send({ t: "studio", cmd: "pack", repo: tr.ds }));
   }
   // 3. Colab
-  if (T.colab) $("t-colab").href = T.colab;
+  const colabHref = Kiro.httpsUrl(T.colab);
+  if (colabHref) $("t-colab").href = colabHref;
+  else $("t-colab").removeAttribute("href");
   $("t-nb-row").hidden = !T.notebook;
-  if (T.notebook) $("t-nb").href = `/api/studio/notebook.ipynb?token=${qtok()}`;
+  if (T.notebook) $("t-nb").href = "/api/studio/notebook.ipynb";
   renderUpload();
   renderColab();
   renderFiles();
@@ -874,7 +833,8 @@ function colabSend(action, extra) {
 }
 $("c-go").addEventListener("click", () => {
   const c = colab();
-  window.open(colabUrl(), "_blank", "noopener");     // at the click itself: no pop-up blocker
+  const openColab = Kiro.httpsUrl(colabUrl());
+  if (openColab) window.open(openColab, "_blank", "noopener");
   if (!(c && COLAB_ACTIVE.includes(c.state))) colabSend("start", { repo: tr.ds });
 });
 $("c-stop").addEventListener("click", () => colabSend("stop"));
@@ -914,7 +874,9 @@ function renderColab() {
   $("c-detail").textContent = detail;
   setBtn($("c-stop"), t(active ? "col.stop" : "col.clear"));
   $("c-colab").hidden = !active;
-  $("c-colab").href = colabUrl();
+  const liveColab = Kiro.httpsUrl(colabUrl());
+  if (liveColab) $("c-colab").href = liveColab;
+  else $("c-colab").removeAttribute("href");
   $("c-play").hidden = c.state !== "installed";
 }
 
@@ -1099,9 +1061,11 @@ const svPort = () => $("sv-port").value;
 $("sv-scan").addEventListener("click", () => send({ t: "servo", cmd: "scan", port: svPort(), lo: +$("sv-lo").value, hi: +$("sv-hi").value }));
 const svSend = (cmd, value) => send({ t: "servo", cmd, port: svPort(), id: eng.servo, value, arm_ok: $("sv-armok").checked });
 $("sv-ton").addEventListener("click", () => svSend("torque", 1));
-$("sv-toff").addEventListener("click", () => svSend("torque", 0));
+holdButton($("sv-toff"), () => Kiro.confirmSend(send, "servo:torque_off",
+  { t: "servo", cmd: "torque", port: svPort(), id: eng.servo, value: 0, arm_ok: $("sv-armok").checked }));
 holdButton($("sv-move"), () => svSend("move", +$("sv-pos").value));
-holdButton($("sv-setid"), () => svSend("setid", +$("sv-newid").value));
+holdButton($("sv-setid"), () => Kiro.confirmSend(send, "servo:setid",
+  { t: "servo", cmd: "setid", port: svPort(), id: eng.servo, value: +$("sv-newid").value, arm_ok: $("sv-armok").checked }));
 
 function renderTools() {
   const s = st.studio;
@@ -1123,7 +1087,7 @@ function renderTools() {
   if (!sc || sc.port !== svPort()) tb = `<tr><td class="mute">${t(ports.length ? "eng.noscan" : "studio.noports")}</td></tr>`;
   else if (!sc.servos.length) tb = `<tr><td class="mute">${t("eng.none")}</td></tr>`;
   else tb = `<tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` + sc.servos.map((v) =>
-    `<tr class="pick${v.id === eng.servo ? " sel" : ""}" data-id="${v.id}"><td>${v.id}</td><td>${v.model ?? "-"}</td><td>${v.volt ?? "-"}</td><td>${v.temp ?? "-"}</td><td>${v.pos ?? "-"}</td><td>${v.mode === 1 ? "vel" : v.mode === 0 ? "pos" : (v.mode ?? "-")}</td><td>${v.torque ? "on" : "off"}</td><td>${v.current != null ? Math.round(Math.abs(v.current) * 6.5) : "-"}</td><td>${v.error ? esc(v.error) : v.status ? "0x" + v.status.toString(16) : "ok"}</td></tr>`).join("");
+    `<tr class="pick${v.id === eng.servo ? " sel" : ""}" data-id="${esc(v.id)}"><td>${esc(v.id)}</td><td>${esc(v.model ?? "-")}</td><td>${esc(v.volt ?? "-")}</td><td>${esc(v.temp ?? "-")}</td><td>${esc(v.pos ?? "-")}</td><td>${esc(v.mode === 1 ? t("sv.vel") : v.mode === 0 ? t("sv.pos") : (v.mode ?? "-"))}</td><td>${esc(v.torque ? t("sv.on") : t("sv.off"))}</td><td>${esc(v.current != null ? Math.round(Math.abs(v.current) * 6.5) : "-")}</td><td>${v.error ? esc(v.error) : v.status ? esc("0x" + v.status.toString(16)) : esc(t("sv.ok"))}</td></tr>`).join("");
   const table = $("sv-table");
   if (table.dataset.html !== tb) {
     table.innerHTML = tb; table.dataset.html = tb;
@@ -1263,3 +1227,4 @@ fillInputs();
 applyStrings();
 renderAll();
 connect();
+Kiro.bindLogin({ onLogin() { if (link) link.reconnect(); } });

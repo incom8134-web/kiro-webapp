@@ -24,10 +24,25 @@
     <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
     <a class="toplink" href="studio.html" data-i18n-title="studio.open"><i class="ri-lock-2-line"></i><span data-i18n="studio.open">Studio</span></a>
   </nav>
-  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
-  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
-  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme" data-i18n-aria="aria.theme" aria-label="Switch theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en" data-i18n-aria="lang.en" aria-label="English">EN</button><button type="button" data-lang="ko" data-i18n-aria="lang.ko" aria-label="Korean">한</button></div>
+  <div class="estop-group">
+    <button id="estop" class="estop" type="button" data-i18n-aria="aria.estop" aria-label="Emergency stop"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+    <button id="estop-release" class="btn hold danger" type="button" hidden data-i18n-aria="aria.release" aria-label="Hold to release the emergency stop"><span class="fill"></span><span data-i18n="estop.releasehold">Hold to release</span></button>
+  </div>
 </header>
+
+<div id="login" class="login">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <label class="login-user">Username<input name="username" autocomplete="username" value="kiro"></label>
+    <h2 data-i18n="login.title">Sign in</h2>
+    <p class="small mute" data-i18n="login.hint">One PIN for this robot. It stays signed in on this browser.</p>
+    <label class="field"><span data-i18n="login.label">PIN</span>
+      <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="32" required data-i18n-aria="aria.pin" aria-label="PIN"></label>
+    <button class="btn primary big" type="submit"><span data-i18n="login.go">Sign in</span></button>
+    <p id="login-err" class="note err" role="alert" hidden></p>
+  </form>
+</div>
 
 <div id="banner" class="banner" hidden></div>
 
@@ -42,7 +57,7 @@
     </section>
     <section class="qbox">
       <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
-      <div class="qbody light"><canvas id="lidar"></canvas></div>
+      <div class="qbody light"><canvas id="lidar" data-i18n-aria="aria.lidar" aria-label="Lidar view"></canvas></div>
     </section>
     <section class="qbox" data-cam="left_wrist">
       <div class="qhead"><span><span data-i18n="cam.left_wrist">Left hand</span></span></div>
@@ -56,7 +71,7 @@
   <!-- the server log, live, in a terminal window -->
   <section class="term">
     <div class="term-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">haebot — <span data-i18n="d.term">server log</span></span><span id="term-live" class="term-live"></span></div>
-    <div class="term-wrap"><div id="term" class="term-body" role="log"><div class="tl prompt" id="term-prompt"><span class="ps">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
+    <div class="term-wrap"><div id="term" class="term-body" role="log"><div class="tl prompt" id="term-prompt"><span class="ps" data-i18n="term.prompt">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
   </section>
   </div>
   </details>
@@ -101,6 +116,7 @@
 <div class="foot" id="ver"></div>
 <script src="vendor/chartjs/chart.umd.min.js"></script>
 <script src="i18n.js"></script>
+<script src="shared.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

@@ -21,4 +21,4 @@ sudo nmcli con modify kiro-ap connection.autoconnect-priority 100
 sudo nmcli con up kiro-ap
 
 echo
-echo "Hotspot \"$SSID\" is on ($IFACE). Join it from the laptop, then open http://10.42.0.1:8080"
+echo "Hotspot \"$SSID\" is on ($IFACE). Join it from the laptop, then open https://10.42.0.1:8080 (the browser warns once about the certificate)"

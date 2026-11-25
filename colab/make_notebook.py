@@ -63,7 +63,7 @@ If Colab disconnects: **Run all** again and click **Connect to the robot** again
 code(r"""
 #@title 1. Settings + link to the robot / 설정 + 로봇 연결
 SOURCE = "robot"       #@param ["robot", "drive"]
-ROBOT = "http://10.42.0.1:8080"   #@param {type:"string"}
+ROBOT = "https://10.42.0.1:8080"   #@param {type:"string"}
 USE_DRIVE = True       #@param {type:"boolean"}
 DRIVE_DIR = "/content/drive/MyDrive/SO101/데이터셋_업로드"  #@param {type:"string"}
 TAR_NAME = ""          #@param {type:"string"}
@@ -592,7 +592,7 @@ md(r"""
 ## If something goes wrong / 문제 해결
 
 - **The robot shows "lost"**: Colab disconnected or the tab was closed. Run all again and click **Connect to the robot** again.
-- **Connect does nothing**: the robot page must be reachable from this computer (its Wi-Fi) at the address in cell 1 (`ROBOT`, normally http://10.42.0.1:8080), and the robot needs internet (LAN cable).
+- **Connect does nothing**: the robot page must be reachable from this computer (its Wi-Fi) at the address in cell 1 (`ROBOT`, normally https://10.42.0.1:8080), and the robot needs internet (LAN cable).
 - **No GPU**: Runtime > Change runtime type > T4 GPU. Free accounts sometimes get no GPU; try again later. / GPU 없음: 런타임 유형을 T4 GPU 로. 무료 계정은 GPU 가 없을 때가 있으니 나중에 다시.
 - **Disconnected**: open the notebook again and Run all. Cell 4 takes the last checkpoint from Drive and continues (with the robot: click Connect again). To start from zero, delete `SO101/outputs/<name>_<date>_act/` in Drive. / 연결 끊김: 다시 모두 실행. 처음부터 하려면 Drive 의 `SO101/outputs/<이름>_<날짜>_act/` 삭제.
 - **`cannot import name 'FqnToConfig'`** in cell 4: cell 2 removes torchao by itself; with an old copy of this notebook, run `pip uninstall -y torchao` in a new cell, then cell 4 again.

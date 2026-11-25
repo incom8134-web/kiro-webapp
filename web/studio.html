@@ -22,10 +22,25 @@
     <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
     <a class="toplink" href="dashboard.html" data-i18n-title="dash.open"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
   </nav>
-  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme"><i class="ri-sun-line"></i></button>
-  <div class="lang"><button type="button" data-lang="en">EN</button><button type="button" data-lang="ko">한</button></div>
-  <button id="estop" class="estop" type="button"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme" data-i18n-aria="aria.theme" aria-label="Switch theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en" data-i18n-aria="lang.en" aria-label="English">EN</button><button type="button" data-lang="ko" data-i18n-aria="lang.ko" aria-label="Korean">한</button></div>
+  <div class="estop-group">
+    <button id="estop" class="estop" type="button" data-i18n-aria="aria.estop" aria-label="Emergency stop"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+    <button id="estop-release" class="btn hold danger" type="button" hidden data-i18n-aria="aria.release" aria-label="Hold to release the emergency stop"><span class="fill"></span><span data-i18n="estop.releasehold">Hold to release</span></button>
+  </div>
 </header>
+
+<div id="login" class="login">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <label class="login-user">Username<input name="username" autocomplete="username" value="kiro"></label>
+    <h2 data-i18n="login.title">Sign in</h2>
+    <p class="small mute" data-i18n="login.hint">One PIN for this robot. It stays signed in on this browser.</p>
+    <label class="field"><span data-i18n="login.label">PIN</span>
+      <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="32" required data-i18n-aria="aria.pin" aria-label="PIN"></label>
+    <button class="btn primary big" type="submit"><span data-i18n="login.go">Sign in</span></button>
+    <p id="login-err" class="note err" role="alert" hidden></p>
+  </form>
+</div>
 
 <div id="banner" class="banner" hidden></div>
 
@@ -43,12 +58,8 @@
   <section id="lock" class="lockcard" hidden>
     <span class="lockicon" aria-hidden="true"><i class="ri-lock-2-line"></i></span>
     <h1 data-i18n="studio.locked">Studio is locked</h1>
-    <p class="mute" data-i18n="studio.lockwhat">Record demonstrations to train AI skills, and use the engineer tools. For engineers: you need control of the robot and the engineer PIN.</p>
+    <p class="mute" data-i18n="studio.lockwhat">Record demonstrations to train AI skills, and use the engineer tools. Sign in, then take control. The same PIN opens the engineer tools.</p>
     <form id="unlock" autocomplete="off">
-      <label class="field" id="op-pin-row"><span data-i18n="pin">Operator PIN</span>
-        <input id="op-pin" type="password" inputmode="numeric" autocomplete="off"></label>
-      <label class="field"><span data-i18n="eng.pin">Engineer PIN</span>
-        <input id="eng-pin" type="password" inputmode="numeric" autocomplete="off"></label>
       <p id="lock-other" class="small note err" hidden></p>
       <button id="unlock-btn" class="btn primary big wide" type="submit"><i class="ri-lock-unlock-line"></i><span data-i18n="studio.unlock">Unlock Studio</span></button>
     </form>
@@ -282,7 +293,7 @@
       <p class="small mute" data-i18n="ls.what">Put the lidar where it will stay. Two snapshots find the robot's front and the robot's own parts the lidar can see. Then the obstacle stop switches on. Nothing moves.</p>
       <div class="lsgrid">
         <table class="kv" id="ls-now"></table>
-        <svg id="ls-map" class="lsmap" viewBox="-60 -60 120 120" role="img" aria-label="lidar view"></svg>
+        <svg id="ls-map" class="lsmap" viewBox="-60 -60 120 120" role="img" data-i18n-aria="aria.lidar" aria-label="Lidar view"></svg>
       </div>
       <ol class="tsteps" id="ls-steps">
         <li data-s="clear"><b class="num">1</b><div class="tbody">
@@ -321,9 +332,9 @@
 
       <h4 class="sub" data-i18n="eng.servo">Servo tester</h4>
       <div class="row">
-        <select id="sv-port" class="grow" aria-label="port"></select>
-        <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" aria-label="from ID">
-        <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" aria-label="to ID">
+        <select id="sv-port" class="grow" data-i18n-aria="aria.port" aria-label="Port"></select>
+        <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" data-i18n-aria="aria.from" aria-label="From ID">
+        <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" data-i18n-aria="aria.to" aria-label="To ID">
         <button id="sv-scan" class="btn" type="button"><i class="ri-search-line"></i><span data-i18n="eng.scan">Scan</span></button>
       </div>
       <label class="switch"><input type="checkbox" id="sv-armok"><span class="track"></span><span data-i18n="eng.armok">Allow control on arm ports</span></label>
@@ -332,8 +343,9 @@
         <p class="small"><b id="sv-sel"></b></p>
         <div class="row seg">
           <button id="sv-ton" class="btn" type="button" data-i18n="eng.torqueon">Torque on</button>
-          <button id="sv-toff" class="btn" type="button" data-i18n="eng.torqueoff">Torque off</button>
+          <button id="sv-toff" class="btn hold danger" type="button"><span class="fill"></span><span data-i18n="eng.torqueoff">Torque off</span></button>
         </div>
+        <p class="warnline" data-i18n="eng.torquewarn">Torque off lets the arm fall. Hold the button.</p>
         <div class="row">
           <label class="small mute" for="sv-pos" data-i18n="eng.pos">Position</label>
           <input id="sv-pos" class="num" type="number" min="0" max="4095" value="2048">
@@ -365,6 +377,7 @@
 </main>
 <div class="foot" id="ver"></div>
 <script src="i18n.js"></script>
+<script src="shared.js"></script>
 <script src="studio.js"></script>
 </body>
 </html>
