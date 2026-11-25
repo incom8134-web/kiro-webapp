@@ -59,7 +59,7 @@
   <section id="lock" class="lockcard" hidden>
     <span class="lockicon" aria-hidden="true"><i class="ri-lock-2-line"></i></span>
     <h1 data-i18n="studio.locked">Studio is locked</h1>
-    <p class="mute" data-i18n="studio.lockwhat">Record demonstrations to train AI skills, and use the engineer tools. Sign in, then take control. The same PIN opens the engineer tools.</p>
+    <p class="mute" data-i18n="studio.lockwhat">Sign in, then take control. The same PIN opens Studio.</p>
     <form id="unlock" autocomplete="off">
       <p id="lock-other" class="small note err" hidden></p>
       <button id="unlock-btn" class="btn primary big wide" type="submit"><i class="ri-lock-unlock-line"></i><span data-i18n="studio.unlock">Unlock Studio</span></button>
@@ -73,7 +73,7 @@
   <div id="studio" hidden>
     <div class="shead">
       <div class="grow"><h1><span data-i18n="studio.name">Studio</span></h1>
-        <p class="mute small" data-i18n="studio.sub">Record demonstrations for training AI skills. Engineer tools and technical values are at the bottom.</p></div>
+        <p class="mute small" data-i18n="studio.sub">Record a demonstration, then train a skill.</p></div>
       <span class="chip pass"><i class="ri-lock-unlock-line"></i> <span data-i18n="studio.unlocked">Unlocked</span></span>
       <button id="lock-btn" class="btn" type="button"><i class="ri-lock-line"></i><span data-i18n="eng.lock">Lock</span></button>
     </div>
@@ -212,7 +212,7 @@
 
   </div>
 
-  <!-- TRAINING: dataset package -> Google Colab -> trained model -> Autonomous skills. Outside the locked block:
+  <!-- TRAINING: dataset package -> Google Colab -> trained model -> Run a skill. Outside the locked block:
        step 2 takes this computer off the robot's Wi-Fi, and the guide must stay readable then ("away": the
        parts that need the robot are hidden). -->
   <div id="tsect" hidden>
@@ -220,7 +220,7 @@
       <p class="small mute" data-i18n="tr.sub">The robot cannot train. Google Colab trains on a free Google graphics card, then the model comes back here.</p></div>
     <section class="card" id="train">
       <div class="cauto">
-        <p class="small mute" data-i18n="col.what">The robot sends the dataset to Google Colab, which trains it on a free GPU, and brings the trained model back by itself. The robot needs internet (its LAN cable).</p>
+        <p class="small mute" data-i18n="col.what">Colab trains the dataset on a free GPU and sends the model back. The robot needs internet.</p>
         <label class="field needs-robot"><span data-i18n="tr.ds">Dataset</span><select id="t-ds"></select></label>
         <div class="stepfoot needs-robot"><button id="c-go" class="btn primary" type="button"><i class="ri-rocket-2-line"></i><span>Train in Colab</span></button>
           <span class="small mute" data-i18n="col.time">About 3 to 4 hours. Keep the Colab tab open.</span></div>
@@ -233,7 +233,7 @@
             <a id="c-colab" class="btn" target="_blank" rel="noopener noreferrer"><i class="ri-external-link-line"></i><span data-i18n="col.again">Open Colab again</span></a>
             <a id="c-play" class="btn" href="./" hidden><i class="ri-play-line"></i><span data-i18n="tr.s7.go">Open the control page</span></a></div>
         </div>
-        <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
+        <p class="small away-note" data-i18n="tr.away">Connect to the robot's Wi-Fi and unlock Studio.</p>
       </div>
       <details class="adv tmanual" id="t-manual">
       <summary data-i18n="col.manual">Manual way (when the robot has no internet)</summary>
@@ -243,7 +243,7 @@
           <div id="t-pkg" class="tpkg needs-robot"></div>
           <p class="small needs-robot" id="t-nb-row"><span data-i18n="tr.nbwhy">Take the notebook file too, in case the Colab link does not open:</span>
             <a id="t-nb" class="linkbtn" download data-i18n="tr.nb">Notebook file</a></p>
-          <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
+          <p class="small away-note" data-i18n="tr.away">Connect to the robot's Wi-Fi and unlock Studio.</p>
         </div></li>
         <li><b class="num">2</b><div class="tbody">
           <h3 data-i18n="tr.s2">Go online and put the files in Google Drive</h3>
@@ -273,11 +273,11 @@
             <div class="pbar" id="t-up-bar" hidden><i></i></div>
             <p id="t-up-msg" class="small" hidden></p>
           </div>
-          <p class="small away-note" data-i18n="tr.away">This step needs the robot: connect this computer to the robot's Wi-Fi and unlock the Studio with both PINs.</p>
+          <p class="small away-note" data-i18n="tr.away">Connect to the robot's Wi-Fi and unlock Studio.</p>
         </div></li>
         <li><b class="num">7</b><div class="tbody">
           <h3 data-i18n="tr.s7">Play it</h3>
-          <p><span data-i18n="tr.s7.t">The skill is now under Autonomous skills on the control page's Arms tab. Clear the table, keep a hand near E-STOP, and press Play.</span> <a href="./" class="linkbtn" data-i18n="tr.s7.go">Open the control page</a></p>
+          <p><span data-i18n="tr.s7.t">The skill is on the control page, Arms tab. Choose it, use Loop to repeat, keep a hand near E-STOP, and press Run.</span> <a href="./" class="linkbtn" data-i18n="tr.s7.go">Open the control page</a></p>
         </div></li>
       </ol>
       </details>
@@ -292,14 +292,18 @@
       <h4 class="sub" data-i18n="fm.pkg">Packages for Colab</h4>
       <div class="flist" id="fm-pkg"></div>
       <h4 class="sub" data-i18n="fm.models">Trained models</h4>
-      <p class="small mute" data-i18n="fm.loop">Download policy saves a zip of the trained model. The file is named &lt;name&gt;_pretrained_model.zip and holds one folder, pretrained_model/. Unzip it to ~/policies/&lt;name&gt;/ so that folder is ~/policies/&lt;name&gt;/pretrained_model/. To run it on a loop, open the control page, Arms tab, choose that model, set Runs and press Play. On the robot: for i in 1 2 3 4 5; do ~/so101/run_policy.sh run ~/policies/&lt;name&gt;/pretrained_model 30; sleep 5; done</p>
+      <p class="small mute" data-i18n="fm.loop.short">Download policy is a zip of that model. Run it from the Arms tab.</p>
+      <details class="adv" id="fm-how">
+        <summary data-i18n="fm.loopsum">Where the file goes, and a repeat loop</summary>
+        <p class="small mute" data-i18n="fm.loop">Unzip so ~/policies/&lt;name&gt;/pretrained_model/ holds the files. On Arms, choose the model, pick Loop, and press Run. On the robot: for i in 1 2 3 4 5; do ~/so101/run_policy.sh run ~/policies/&lt;name&gt;/pretrained_model 30; sleep 5; done</p>
+      </details>
       <div class="flist" id="fm-models"></div>
     </section>
 
     <!-- LIDAR SETUP: front direction and the robot's own parts, then the obstacle stop on (robot_server/lidar_setup.py) -->
     <section class="card" id="lidar">
       <div class="row head"><h3><i class="ri-radar-line"></i><span data-i18n="ls.title">Lidar setup</span></h3><span id="ls-st" class="chk-sum"></span></div>
-      <p class="small mute" data-i18n="ls.what">Put the lidar where it will stay. Two snapshots find the robot's front and the robot's own parts the lidar can see. Then the obstacle stop switches on. Nothing moves.</p>
+      <p class="small mute" data-i18n="ls.what">Two snapshots set the front and the robot's shape, then obstacle stop turns on. Nothing moves.</p>
       <div class="lsgrid">
         <table class="kv" id="ls-now"></table>
         <svg id="ls-map" class="lsmap" viewBox="-60 -60 120 120" role="img" data-i18n-aria="aria.lidar" aria-label="Lidar view"></svg>
@@ -307,12 +311,12 @@
       <ol class="tsteps" id="ls-steps">
         <li data-s="clear"><b class="num">1</b><div class="tbody">
           <h3 data-i18n="ls.s1">Clear the space around the robot</h3>
-          <p data-i18n="ls.s1.t">Nothing within 1 m of the robot, and step back yourself. The arms in their usual place. Everything the lidar sees close by now counts as part of the robot.</p>
+          <p data-i18n="ls.s1.t">Clear 1 m around the robot, including yourself. Leave the arms where they usually sit.</p>
           <div class="stepfoot"><button id="ls-clear" class="btn" type="button"><i class="ri-checkbox-circle-line"></i><span data-i18n="ls.clear">The space is clear</span></button></div>
         </div></li>
         <li data-s="box"><b class="num">2</b><div class="tbody">
           <h3 data-i18n="ls.s2">Put a box in front</h3>
-          <p data-i18n="ls.s2.t">A box at least 10 cm wide, 30 to 60 cm in front of the middle of the robot, standing on the floor at the lidar's height. Step back again.</p>
+          <p data-i18n="ls.s2.t">Stand a box 30–60 cm in front, at least 10 cm wide, at lidar height, then step back.</p>
           <div class="stepfoot"><button id="ls-box" class="btn" type="button"><i class="ri-checkbox-circle-line"></i><span data-i18n="ls.box">The box is in place</span></button></div>
         </div></li>
         <li data-s="result"><b class="num">3</b><div class="tbody">
@@ -328,59 +332,6 @@
         <span class="grow"></span><span id="ls-busy" class="small mute" hidden data-i18n="ls.busy">Measuring...</span></div>
     </section>
 
-    <!-- ENGINEER TOOLS (moved here from the control page) -->
-    <details class="card fold" id="sec-tools">
-      <summary class="row head"><h3><i class="ri-tools-line"></i><span data-i18n="studio.tools">Engineer tools</span></h3><span class="st small mute" data-i18n="studio.toolswhat">guard distance, servo tester, check wizard</span></summary>
-      <h4 class="sub" data-i18n="base.profile">Guard distance</h4>
-      <div class="row"><select id="guard-profile" class="grow">
-        <option value="close" data-i18n="base.close">Close</option>
-        <option value="safe" data-i18n="base.safe">Safe</option>
-      </select></div>
-      <p class="small mute" data-i18n="studio.guardwhat">Used by the base program's lidar guard the next time the base starts (Drive tab).</p>
-      <p id="guard-off" class="small note err" data-i18n="base.guardoff" hidden></p>
-
-      <h4 class="sub" data-i18n="eng.servo">Servo tester</h4>
-      <div class="row">
-        <select id="sv-port" class="grow" data-i18n-aria="aria.port" aria-label="Port"></select>
-        <input id="sv-lo" class="num" type="number" min="0" max="253" value="1" data-i18n-aria="aria.from" aria-label="From ID">
-        <input id="sv-hi" class="num" type="number" min="0" max="253" value="12" data-i18n-aria="aria.to" aria-label="To ID">
-        <button id="sv-scan" class="btn" type="button"><i class="ri-search-line"></i><span data-i18n="eng.scan">Scan</span></button>
-      </div>
-      <label class="switch"><input type="checkbox" id="sv-armok"><span class="track"></span><span data-i18n="eng.armok">Allow control on arm ports</span></label>
-      <div class="scroll-x"><table class="kv svt" id="sv-table"></table></div>
-      <div id="sv-one" hidden>
-        <p class="small"><b id="sv-sel"></b></p>
-        <div class="row seg">
-          <button id="sv-ton" class="btn" type="button" data-i18n="eng.torqueon">Torque on</button>
-          <button id="sv-toff" class="btn hold danger" type="button"><span class="fill"></span><span data-i18n="eng.torqueoff">Torque off</span></button>
-        </div>
-        <p class="warnline" data-i18n="eng.torquewarn">Torque off lets the arm fall. Hold the button.</p>
-        <div class="row">
-          <label class="small mute" for="sv-pos" data-i18n="eng.pos">Position</label>
-          <input id="sv-pos" class="num" type="number" min="0" max="4095" value="2048">
-          <button id="sv-move" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.move">Move (hold)</span></button>
-        </div>
-        <div class="row">
-          <label class="small mute" for="sv-newid" data-i18n="eng.newid">New ID</label>
-          <input id="sv-newid" class="num" type="number" min="1" max="253" value="1">
-          <button id="sv-setid" class="btn hold" type="button"><span class="fill"></span><span data-i18n="eng.setid">Change ID (hold)</span></button>
-        </div>
-        <p class="small mute" data-i18n="eng.setidhint"></p>
-      </div>
-
-      <h4 class="sub" data-i18n="eng.wizard">Check wizard</h4>
-      <ol id="wz-steps" class="steps"></ol>
-      <p id="wz-none" class="small mute" data-i18n="studio.wznone" hidden>The check wizard steps could not be read from the old code.</p>
-      <div id="wz-detail"></div>
-      <pre id="wz-tail" class="tail" hidden></pre>
-      <div class="row"><button id="wz-report" class="btn" type="button"><i class="ri-download-2-line"></i><span data-i18n="eng.report">Download report</span></button></div>
-    </details>
-
-    <!-- ENGINEER INFORMATION: read only -->
-    <details class="card fold" id="sec-info">
-      <summary class="row head"><h3><i class="ri-information-line"></i><span data-i18n="studio.info">Engineer information</span></h3><span class="st small mute" data-i18n="studio.readonly">read only</span></summary>
-      <div class="infogrid" id="info"></div>
-    </details>
   </div>
   <p id="toast" class="toast" role="status" hidden></p>
 </main>

@@ -7,7 +7,6 @@
  * 3. While this device is the operator, sends the drive command 20 times per
  *    second. That message is also the heartbeat: if it stops, the robot stops.
  * 4. Cameras, arms (with the leader arm on this laptop), voice, skills, health.
- * The engineer tools (servo tester, check wizard, guard distance) are on the Studio page.
  */
 
 const $ = (id) => document.getElementById(id);

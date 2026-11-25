@@ -95,5 +95,12 @@ def test_english_and_korean_have_the_same_strings():
     en, ko = _keys("en"), _keys("ko")
     assert en == ko
     for key in ("skill.once", "skill.loop", "skill.times", "skill.empty", "skill.how",
-                "skill.demoopt", "both.each", "both.one", "arm.recal", "leader.sum"):
+                "skill.demoopt", "both.each", "both.one", "arm.recal", "leader.sum", "leader.two.tip"):
         assert key in en
+    # The old repeat button and the old "Demo pick motion" button are gone, strings included.
+    i18n = (ROOT / "web/i18n.js").read_text()
+    css = (ROOT / "web/style.css").read_text()
+    for key in ("skill.demo", "skill.play", "skill.runs", "skill.pause", "skill.hint",
+                "demo.start", "demo.stop", "demo.hint"):
+        assert f'"{key}":' not in i18n
+    assert ".skill-rep" not in css and "#skill-prog" not in css and ".skill {" not in css

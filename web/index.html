@@ -149,9 +149,8 @@
           </div>
           <details id="skill-adv" class="adv">
             <summary data-i18n="skill.advanced">Advanced</summary>
-            <label class="field" for="skill-secs"><span data-i18n="skill.secs">Seconds per run</span>
+            <label class="field" for="skill-secs"><span data-i18n="skill.secs" data-i18n-title="skill.secs.why" title="How long one run may last. The built-in demo uses its own length.">Seconds per run</span>
               <input id="skill-secs" class="num" type="number" min="5" max="120" value="30" inputmode="numeric"></label>
-            <p class="small mute" data-i18n="skill.secs.why">How long one run may last. The built-in demo uses its own length.</p>
           </details>
           <button id="skill-play" class="btn big primary wide" type="button"><i class="ri-play-fill"></i><span></span></button>
           <p id="skill-status" class="small mute"></p>
@@ -171,10 +170,10 @@
           <p id="both-st" class="small mute"></p>
           <details class="leaderline" id="leader-box">
             <summary><span data-i18n="leader.title">Leader arm</span><span id="leader-sum" class="small mute"></span></summary>
-            <div class="row seg" id="leader-sides"><button class="btn" type="button" data-lside="right" data-i18n="arm.right">Right</button><button class="btn" type="button" data-lside="left" data-i18n="arm.left">Left</button><button class="btn" type="button" data-lside="both" data-i18n="leader.two">Both (2 leaders)</button></div>
+            <div class="row seg" id="leader-sides"><button class="btn" type="button" data-lside="right" data-i18n="arm.right">Right</button><button class="btn" type="button" data-lside="left" data-i18n="arm.left">Left</button><button class="btn" type="button" data-lside="both" data-i18n="leader.two" data-i18n-title="leader.two.tip" title="Two leader arms, one for each side">Both</button></div>
             <button id="leader-btn" class="btn wide" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
             <p id="leader-st" class="small mute"></p>
-            <button id="wave-btn" class="btn" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
+            <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
           </details>
           <p id="arms-err" class="err small" hidden></p>
         </div>

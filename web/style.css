@@ -302,16 +302,18 @@ kbd.w { min-width: 46px; }
 .armgrid { display: flex; flex-direction: column; }
 .armrow { padding: 10px 0; border-top: 1px solid var(--line); }
 .armrow:first-child { border-top: 0; padding-top: 0; }
-.armname { justify-content: space-between; flex-wrap: nowrap; }
+.armname { justify-content: flex-start; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.armname b { margin-right: auto; }
 .armname .badge { font-size: 12px; font-weight: 500; color: var(--mute); }
 .armname .badge.lock { color: var(--warn); font-weight: 600; }
-a.recal { margin-left: 8px; font-size: 12px; font-weight: 600; }
+a.recal { font-size: 12px; font-weight: 600; white-space: nowrap; }
 .armacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.armacts .btn { flex: 1 1 0; padding: 0 8px; }
+.armacts .btn { flex: 1 1 0; min-width: 0; padding: 0 8px; }
 .armacts .btn.quiet { flex: 1 1 100%; background: transparent; color: var(--mute); font-weight: 500; }
 .armacts .btn.quiet:hover { color: var(--warn); background: var(--raise-2); }
-.bothrow { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; }
-.bothrow .btn { flex: none; }
+.bothrow { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; flex-wrap: nowrap; }
+.bothrow .field { flex: 1; min-width: 0; }
+.bothrow .btn { flex: none; min-width: 96px; }
 #both-st:empty { display: none; }
 details.leaderline { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
 details.leaderline > summary { display: flex; align-items: center; gap: 8px; min-height: 40px; list-style: none; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ink); }
@@ -319,28 +321,25 @@ details.leaderline > summary::-webkit-details-marker { display: none; }
 details.leaderline > summary .mute { font-weight: 500; margin-left: auto; }
 details.leaderline > summary::after { content: "\ea4e"; font-family: remixicon; color: var(--mute); font-weight: 400; }
 details.leaderline[open] > summary::after { transform: rotate(180deg); }
-details.leaderline .seg { margin-top: 8px; }
+details.leaderline .seg { margin-top: 8px; width: 100%; flex-wrap: nowrap; }
+details.leaderline .seg .btn { flex: 1 1 0; min-width: 0; padding: 0 8px; }
 details.leaderline #leader-btn { margin-top: 8px; }
 details.leaderline #wave-btn { margin-top: 8px; }
-#skill-mode { margin: 10px 0; }
-#skill-mode .btn { flex: 1; }
+#skill-mode { display: flex; width: 100%; flex-wrap: nowrap; margin: 10px 0; }
+#skill-mode .btn { flex: 1 1 0; min-width: 0; }
 .loopfields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.loopfields .field { min-width: 0; }
 .loopfields input { width: 100%; }
 #skill-adv { margin-top: 8px; }
 #skill-how { margin: 0 0 10px; }
 #skill-empty { margin: 0 0 8px; }
 #skill-play { margin-top: 12px; height: 52px; font-size: 16px; }
-#skill-status { margin: 8px 0 0; }
+#skill-status { margin: 8px 0 0; overflow-wrap: anywhere; }
 #skill-status:empty { display: none; }
 
 .voice-lang { margin: 4px 0 10px; }
 .voice-lang .seg .btn { height: var(--btn-h); min-height: 44px; padding: 0 12px; }
 
-/* autonomous skills: one row per trained model, a big Play button */
-.skill { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
-.skill:first-child { border-top: 0; padding-top: 0; }
-.skill-t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.skill .btn.big { min-width: 104px; }
 .card h3 > i { font-size: 16px; color: var(--accent); }
 
 /* voice */
@@ -371,27 +370,14 @@ table.kv tr:first-child th, table.kv tr:first-child td { border-top: 0; }
 table.kv th { color: var(--mute); font-size: 12px; width: 38%; }
 table.kv td b { font-weight: 600; }
 .tail { font: 11px/1.45 var(--mono); background: var(--raise-2); color: var(--ink-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px 10px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 10px 0 0; }
-.scroll-x { overflow-x: auto; margin-top: 8px; }
-table.svt { font-size: 12px; }
-table.svt th { width: auto; }
-table.svt tr.pick { cursor: pointer; }
-table.svt tr.pick:hover td, table.svt tr.sel td { background: var(--accent-soft); }
 .seg { gap: 0; }
 .seg .btn { border-radius: 0; }
 .seg .btn:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
 .seg .btn:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; margin-left: -1px; }
-ol.steps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-ol.steps li { display: flex; justify-content: space-between; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer; }
-ol.steps li:hover, ol.steps li.sel { background: var(--raise-2); }
 .chip { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--raise-2); white-space: nowrap; color: var(--mute); }
 .chip.pass { background: var(--ok-soft); color: var(--ok); }
 .chip.fail { background: var(--warn-soft); color: var(--warn); }
 .chip.confirm, .chip.running { background: var(--accent-soft); color: var(--accent); }
-.wz { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 12px; margin-top: 8px; font-size: 13px; background: var(--raise-2); }
-.wz h4 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
-.wz ul, .wz ol { margin: 4px 0 8px; padding-left: 18px; }
-.wz label { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
-.wz .req { font-size: 10px; border: 1px solid var(--warn); color: var(--warn); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
 details summary { cursor: pointer; color: var(--mute); }
 
 /* ---------------------------------------------------------------- phone */
@@ -554,7 +540,7 @@ body.dash .foot { border-top: 0; padding: 0 16px 16px; max-width: 1680px; margin
 @media (max-width: 560px) { .livegrid { padding: 0 10px 10px; } .quad { gap: 8px; } .term { height: 320px; } .tl time { display: none; } .qhead { padding: 6px 8px; font-size: 11px; } .qhead .mute { display: none; } }
 
 /* ---------------------------------------------------------------- studio */
-/* Recording training data and the engineer tools. Same tokens and controls as the other pages. */
+/* Recording training data and training a skill. Same tokens and controls as the other pages. */
 .toplinks { display: flex; align-items: center; gap: 2px; min-width: 0; }
 body.studio { overflow: auto; height: auto; min-height: 100%; display: block; }
 body.studio .bar { height: var(--bar-h); position: sticky; top: 0; z-index: 5; }
@@ -739,10 +725,6 @@ input[type=file]:disabled { opacity: .5; }
 
 details.fold > summary h3 i { font-size: 15px; color: var(--mute); }
 details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: ellipsis; }
-.infogrid { display: grid; gap: 2px; min-width: 0; }
-.infogrid section:first-child h4.sub { margin-top: 0; }
-.infogrid table.kv th { width: 36%; }
-.infogrid table.kv tr:first-child th { width: auto; }
 
 .toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20; max-width: min(92vw, 520px); margin: 0; padding: 10px 16px;
   border-radius: var(--r-sm); background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
@@ -793,8 +775,5 @@ details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: 
 .miclevel > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .1s linear; }
 #voice-rx.ok { color: var(--ok); }
 #studio-mode { margin: 0 0 14px; }
-.skill-rep { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.skill-rep .num { width: 72px; }
-#skill-prog { color: var(--accent); }
 .skill-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .demo-row { gap: 12px; margin-bottom: 10px; align-items: center; }
