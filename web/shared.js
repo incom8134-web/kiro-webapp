@@ -1,6 +1,6 @@
 "use strict";
 /*
- * Shared by the control page, the dashboard and Studio. One copy of the connection,
+ * Shared by the control page, the dashboard, Studio and the battery page. One copy of the connection,
  * the emergency stop, escaping, and hold-to-confirm, so the three pages cannot drift.
  * Classic script: sets window.Kiro. No build, no network.
  */
@@ -249,7 +249,7 @@
         : n <= 45 ? "ri-battery-2-line" : "ri-battery-fill";
     }
     if (pct) pct.textContent = known ? n + "%" : t("bat.unknown");
-    el.title = b && b.source === "mock" ? t("bat.note.mock") : known ? "" : t("bat.note.none");
+    el.title = t("bat.manage");
   }
 
   window.Kiro = { esc, deviceName, typing, interactive, httpsUrl, serverText, holdButton, confirmSend, connect, bindEstop, bindKeys, bindLogin, renderBattery };

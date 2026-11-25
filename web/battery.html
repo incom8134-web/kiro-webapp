@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b">
+<title>HAEBOT Robot · Battery</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%A4%96%3C/text%3E%3C/svg%3E">
+<script src="theme.js"></script>
+<link rel="stylesheet" href="vendor/remixicon/remixicon.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="batt">
+<header class="bar">
+  <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
+  <div class="cells">
+    <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
+    <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
+    <a class="cell bat" id="battery" href="battery.html" aria-current="page" data-i18n-title="bat.manage" title="Battery Management"><span class="k" data-i18n="bat.k">Battery</span><b><i id="bat-icon" class="ri-battery-line" aria-hidden="true"></i><span id="bat-pct">—</span></b></a>
+  </div>
+  <nav class="toplinks">
+    <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
+    <a class="toplink" href="dashboard.html" data-i18n-title="dash.open"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
+    <a class="toplink" href="studio.html" data-i18n-title="studio.open"><i class="ri-lock-2-line"></i><span data-i18n="studio.open">Studio</span></a>
+  </nav>
+  <button id="theme-btn" class="iconbtn" type="button" data-i18n-title="theme" data-i18n-aria="aria.theme" aria-label="Switch theme"><i class="ri-sun-line"></i></button>
+  <div class="lang"><button type="button" data-lang="en" data-i18n-aria="lang.en" aria-label="English">EN</button><button type="button" data-lang="ko" data-i18n-aria="lang.ko" aria-label="Korean">한</button></div>
+  <div class="estop-group">
+    <button id="estop" class="estop" type="button" data-i18n-aria="aria.estop" aria-label="Emergency stop"><i class="ri-alarm-warning-fill"></i><span id="estop-label" data-i18n="estop">E-STOP</span></button>
+    <button id="estop-release" class="btn hold danger" type="button" hidden data-i18n-aria="aria.release" aria-label="Hold to release the emergency stop"><span class="fill"></span><span data-i18n="estop.releasehold">Hold to release</span></button>
+  </div>
+</header>
+
+<div id="login" class="login">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <label class="login-user">Username<input name="username" autocomplete="username" value="kiro"></label>
+    <h2 data-i18n="login.title">Sign in</h2>
+    <p class="small mute" data-i18n="login.hint">One PIN for this robot. It stays signed in on this browser.</p>
+    <label class="field"><span data-i18n="login.label">PIN</span>
+      <input id="login-pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="32" required data-i18n-aria="aria.pin" aria-label="PIN"></label>
+    <button class="btn primary big" type="submit"><span data-i18n="login.go">Sign in</span></button>
+    <p id="login-err" class="note err" role="alert" hidden></p>
+  </form>
+</div>
+
+<div id="banner" class="banner" hidden></div>
+
+<main class="bwrap">
+  <section class="bhero">
+    <div class="gauge" id="gauge" data-st="none" role="img" aria-label="Battery">
+      <div class="gauge-hole">
+        <b id="g-pct">—</b>
+        <span id="g-state"></span>
+      </div>
+    </div>
+    <div class="bmeta">
+      <h1 data-i18n="bat.manage">Battery Management</h1>
+      <p class="small mute" id="bat-sub"></p>
+      <span class="chip" id="bat-source"></span>
+    </div>
+  </section>
+
+  <div class="tiles bat-tiles" id="bat-tiles"></div>
+
+  <section class="chart-card">
+    <div class="dhead"><span data-i18n="bat.chart">Voltage and current</span><span class="mute" data-i18n="bat.chart.window">Last 5 minutes</span></div>
+    <div class="chart-box tall"><canvas id="ch-batt"></canvas></div>
+  </section>
+
+  <section class="dsec">
+    <h2 data-i18n="bat.alerts">Alerts</h2>
+    <ul class="alerts" id="bat-alerts"></ul>
+  </section>
+
+  <details class="dsec fold-setup" id="bat-setup">
+    <summary><span data-i18n="bat.setup">Setup</span></summary>
+    <p data-i18n="bat.setup.lead">The Matek board is a TI INA228. It measures voltage, current, power, energy, charge and the chip temperature. It does not measure percent, health or cycles. This page estimates those three.</p>
+    <p data-i18n="bat.setup.wire">Wire the board to the Jetson 40-pin header.</p>
+    <table class="kv dtable">
+      <tr><th data-i18n="bat.pin.5v">5 V</th><td data-i18n="bat.pin.5v.where">Jetson pin 2 or pin 4. The board needs 4-9 V.</td></tr>
+      <tr><th data-i18n="bat.pin.gnd">Ground</th><td data-i18n="bat.pin.gnd.where">Jetson pin 6.</td></tr>
+      <tr><th data-i18n="bat.pin.scl">SCL</th><td data-i18n="bat.pin.scl.where">Jetson pin 5 (I2C clock).</td></tr>
+      <tr><th data-i18n="bat.pin.sda">SDA</th><td data-i18n="bat.pin.sda.where">Jetson pin 3 (I2C data).</td></tr>
+    </table>
+    <p data-i18n="bat.setup.addr">The address jumpers select 69 (the default), 68 or 65. Pins 3 and 5 are usually bus /dev/i2c-7. If the board is on another bus, set KIRO_BATT_I2C_BUS.</p>
+    <p data-i18n="bat.setup.env">Set these before starting the server. Chemistry is lipo, li-ion or lifepo4. The pack numbers are an example, not a measurement of this robot. KIRO_BATT_CYCLE_LIFE is the maker's cycle life: it is saved with the battery notes and is not a measurement.</p>
+    <pre class="env">KIRO_BATT_I2C_BUS=7
+KIRO_BATT_I2C_ADDR=69
+KIRO_BATT_CHEMISTRY=lipo
+KIRO_BATT_CELLS=4
+KIRO_BATT_CAPACITY_AH=10
+KIRO_BATT_CYCLE_LIFE=500</pre>
+    <p id="bat-using"></p>
+    <p class="small mute" data-i18n="bat.setup.sign">Wire IN+ toward the battery and IN- toward the robot, so a positive current means the pack is discharging. Percent starts from the voltage while the current is near zero, then follows the charge the chip has counted. Energy and charge on the chip start again at zero if the board loses power. Cycles and health stay in a file on the Jetson. On the robot, install smbus2 (pip install smbus2) and let this user read I2C.</p>
+  </details>
+</main>
+<div class="foot" id="ver"></div>
+<script src="vendor/chartjs/chart.umd.min.js"></script>
+<script src="i18n.js"></script>
+<script src="shared.js"></script>
+<script src="battery.js"></script>
+</body>
+</html>

@@ -564,6 +564,12 @@ def create_app(cfg: Config | None = None, base=None, robot: Robot | None = None)
         require_login(request)
         return {"ok": True, "version": __version__, "backend": state["base"].name, "clients": len(sockets)}
 
+    @app.get("/api/battery")
+    def battery(request: Request) -> dict:
+        """INA228 readings plus the estimated percent, time remaining, health and cycles."""
+        require_login(request)
+        return state["robot"].battery_detail()
+
     @app.get("/camera/{key}.mjpg")
     def camera(key: str, request: Request):
         require_login(request)
