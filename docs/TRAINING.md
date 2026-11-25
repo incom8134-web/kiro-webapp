@@ -172,3 +172,64 @@ Settings: `KIRO_POLICIES_DIR` (mock mode uses `~/.cache/kiro-webapp/mock_policie
 | Upload the real 191 MB zip over the hotspot | Tested with small zips in the browser and in tests |
 | Play the uploaded skill on the robot | Never done from an uploaded model. Clear the table, hand near E-STOP |
 | The Colab link | Points at `main`: works once this branch is merged and pushed |
+
+## 4. From a recording to Play (the handoff)
+
+This is the path a skill takes, and where the Autonomous tab used to fail it.
+
+```
+Studio Record  ->  dataset on disk  ->  pack_dataset.sh (.tar.gz + .sha256)
+      ->  Colab notebook (colab/so101_train_colab.ipynb, LeRobot 0.6.1, ACT)
+      ->  <name>_act_pretrained_model.zip
+      ->  Studio upload  ->  ~/policies/<name>/pretrained_model/
+      ->  Arms tab: choose the model, Play
+      ->  run_policy.sh run <pretrained_model path> <seconds>
+      ->  rollout_runner.py  ->  lerobot-rollout
+```
+
+| Step | Where | What is handed on |
+|---|---|---|
+| 1 Record | Studio, `robot_server/record_runner.py` | `lerobot-record` writes a v3.0 dataset. Camera names are the robot's keys: `top`, `right_wrist`, `left_wrist` (`cams_config.lerobot_arg`). One arm is `robot_type` `so_follower` (6 numbers). Both arms is `bi_so_follower` (12). |
+| 2 Package | Studio, `pack_dataset.sh` | `<name>_<YYYYMMDD_HHMM>.tar.gz` plus `.sha256`. One dataset folder inside. |
+| 3 Train | `colab/so101_train_colab.ipynb` cell 4 | LeRobot **0.6.1**, `--policy.type=act`. The dataset's camera names become the policy's `observation.images.<name>` keys. |
+| 4 Zip | notebook cell 5 | `<name>_act_pretrained_model.zip`. Inside, one folder `pretrained_model/` with every file of the checkpoint (config, weights, both processor files and the state files they name) plus `kiro_training.json`. Nothing else. |
+| 5 Install | Studio upload, `robot_server/training.py` | Checked, then moved to `~/policies/<name>/pretrained_model/`. Mock mode uses `~/.cache/kiro-webapp/mock_policies` instead, so a mock run never touches a real skill. |
+| 6 Choose | Control page, Arms tab | The list is the folders that are really installed (`*/pretrained_model/config.json` and `model.safetensors`). Play runs the one that is selected, `repeat` times, with the pause between them. |
+| 7 Run | `robot_server/robot.py` `skill()` | `bash ~/so101/run_policy.sh run <path of pretrained_model> <seconds>`. Env `ROLLOUT_PY` is `robot_server/rollout_runner.py`, `KIRO_POLICY_CAMS` is the camera keys. The preview of those cameras is closed first. |
+| 8 Rollout | `rollout_runner.py` | `lerobot_patch.apply()` (degrees, same as recording), then `apply_rollout()` (skip ACT's action queue so the Jetson stays near 30 Hz), then `lerobot.scripts.lerobot_rollout`. |
+
+### What used to break Play
+
+The model could be trained and tried from a terminal (`run_policy.sh` with `ROLLOUT_PY` unset, stock lerobot-rollout) and still fail from the Arms tab. Three handoffs were wrong:
+
+1. **The queue shortcut aborted the run.** `rollout_runner.py` called `apply_rollout()` before `lerobot-rollout`. That import (`lerobot.rollout.inference.sync.SyncInferenceEngine`) throws on a LeRobot build that has moved the class, and the process died before Play started. A thrown step inside the shortcut did the same. The motor patch still has to apply (without it the arm moves in the wrong units). The shortcut does not: if it cannot load, or a step throws, playback continues with stock lerobot-rollout. Slower on the Jetson, same actions.
+2. **Camera names that are not the robot's.** Play treated every `observation.images.*` name as a robot camera. A policy trained on `laptop` or `phone` was started anyway, then lerobot-rollout failed looking for those cameras, or the preview kept the real device open. Play now refuses with the names, and only `top`, `right_wrist` and `left_wrist` are accepted. The device list passed to the job is those keys, so the preview lets go of the cameras the script opens.
+3. **A folder with weights but no processor files.** Listing a model only required `config.json` and `model.safetensors`. LeRobot 0.6.1's lerobot-rollout also loads `policy_preprocessor.json`, `policy_postprocessor.json` and every state file they name. A hand-unzipped checkpoint missing those died as soon as it started. Play now refuses and names the missing files. The Studio upload already required them.
+
+The preview is also closed and waited on before the process starts. If a camera thread is still holding the device, Play says so instead of launching a run that fails with "device busy".
+
+### Run a downloaded policy on a loop
+
+**Download policy** in Studio (Training files, trained models) streams `<name>_pretrained_model.zip` from `GET /api/studio/models/<name>.zip`. The zip holds one folder, `pretrained_model/`. Unzip it to `~/policies/<name>/`.
+
+On the Arms tab, choose that model, set **Runs** and the pause, and press Play. That is the loop: the server starts run 1, waits for it to finish, waits the pause, then starts the next, until Runs is done or Stop or E-STOP.
+
+From a terminal on the robot, the same folder:
+
+```
+for i in 1 2 3 4 5; do ~/so101/run_policy.sh run ~/policies/<name>/pretrained_model 30; sleep 5; done
+```
+
+That terminal loop does not set `ROLLOUT_PY`, so it uses stock lerobot-rollout. The Arms tab sets `ROLLOUT_PY` and falls back to stock if the shortcut cannot load.
+
+### Still check on the real robot
+
+| Check | Why it cannot be proven here |
+|---|---|
+| Play the uploaded skill and read `web_skill_*.log` | No arm, no cameras, no `~/so101/run_policy.sh` on this machine. Mock mode runs a stand-in. |
+| The log line `@REC queue skip not applied` | If it appears, this LeRobot build has no queue shortcut and Play is using the slow path. The arm should still move. |
+| Camera names in the policy `config.json` | Must be `top` and `right_wrist` for a right-arm skill. Anything else is refused before the arm moves. |
+| `policy_preprocessor.json` and `policy_postprocessor.json` next to `model.safetensors` | A zip from the current notebook has them. An older zip may not, and Play then names the missing file. |
+| The right follower port is free | Teleop, the demo motion and a skill all use it. Stop the other one first. |
+| Light and the object back at the start | The first skill did nothing in daylight, and nothing when the object was not put back (section 1). |
+| Adding episodes to an old one-arm dataset | Still refused: the add check and LeRobot 0.6.1 disagree on `so101_follower` versus `so_follower` (section 1). New recordings from this Studio write `so_follower`. |

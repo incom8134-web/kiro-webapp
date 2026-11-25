@@ -82,16 +82,26 @@ def apply_rollout() -> None:
     orig = SyncInferenceEngine.get_action
 
     def get_action(self, obs_frame):
-        queue = getattr(self._policy, "_action_queue", None)
-        ensemble = getattr(getattr(self._policy, "config", None), "temporal_ensemble_coeff", None)
+        policy = getattr(self, "_policy", None)
+        queue = getattr(policy, "_action_queue", None)
+        ensemble = getattr(getattr(policy, "config", None), "temporal_ensemble_coeff", None)
         if obs_frame is None or not queue or ensemble is not None:
             return orig(self, obs_frame)  # empty queue: the model plans the next chunk as usual
-        amp = self._device.type == "cuda" and self._policy.config.use_amp
-        with torch.inference_mode(), (torch.autocast(device_type=self._device.type) if amp else nullcontext()):
-            action = self._postprocessor(queue.popleft().unsqueeze(0) if queue[0].dim() == 1 else queue.popleft())
-        from lerobot.rollout.inference.sync import make_robot_action
-        action_dict = make_robot_action(action.squeeze(0).cpu(), self._dataset_features)
-        return torch.tensor([action_dict[k] for k in self._ordered_action_keys])
+        try:
+            amp = self._device.type == "cuda" and self._policy.config.use_amp
+            with torch.inference_mode(), (torch.autocast(device_type=self._device.type) if amp else nullcontext()):
+                item = queue[0]
+                action = self._postprocessor(item.unsqueeze(0) if item.dim() == 1 else item)
+            from lerobot.rollout.inference.sync import make_robot_action
+            action_dict = make_robot_action(action.squeeze(0).cpu(), self._dataset_features)
+            out = torch.tensor([action_dict[k] for k in self._ordered_action_keys])
+            queue.popleft()  # only after the action was built: a failure leaves the queue for the normal step
+            return out
+        except Exception as e:  # noqa: BLE001 - a LeRobot build we do not recognise must still play
+            if not getattr(self, "_kiro_skip_warned", False):
+                print(f"@REC queue skip failed, normal step: {e}", flush=True)
+                self._kiro_skip_warned = True
+            return orig(self, obs_frame)
 
     SyncInferenceEngine.get_action = get_action
     SyncInferenceEngine._kiro_queue_skip = True

@@ -338,6 +338,27 @@ $("demo-btn").addEventListener("click", () => {
   if (on && !confirm(t("demo.confirm"))) return;
   send({ t: "demo", on, repeat: 5, pause: 3 });
 });
+let skillPick = "";
+function skillNums() {
+  return {
+    repeat: Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1)),
+    pause: Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0)),
+    seconds: Math.max(5, Math.min(120, parseFloat($("skill-secs").value) || 30)),
+  };
+}
+$("skill-pick").addEventListener("change", () => { skillPick = $("skill-pick").value; render(); });
+$("skill-play").addEventListener("click", () => {
+  const r2 = state.robot || {};
+  const on = !(jobRunning("skill") || r2.skill_series);
+  const name = $("skill-pick").value;
+  if (on && (!name || !confirm(t("skill.confirm")))) return;
+  send({ t: "skill", name: on ? name : (r2.skill_series && r2.skill_series.name) || name, on, ...skillNums() });
+});
+$("skill-demo").addEventListener("click", () => {
+  const name = $("skill-pick").value;
+  if (!name || !confirm(t("skill.confirm30", { n: DEMO_RUNS.runs }))) return;
+  send({ t: "skill", name, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds });
+});
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
   return !!l && l.state !== "missing";
@@ -451,6 +472,7 @@ function render() {
   renderLink();
 
   $("backend").textContent = s ? t(s.backend === "ros" ? "be.ros" : "be.mock") : "...";
+  Kiro.renderBattery(state.robot && state.robot.battery);
   const op = $("opstat");
   op.textContent = !s || !s.operator ? t("op.none") : me ? t("op.you") : t("op.other", { name: s.operator.name });
   op.className = me ? "accent" : "";
@@ -553,6 +575,7 @@ function failTail(el, job) {
 }
 
 function renderRobot() {
+  Kiro.renderBattery(state.robot && state.robot.battery);
   const r = state.robot;
   if (!r) return;
   const me = isOperator();
@@ -695,44 +718,43 @@ function renderRobot() {
   $("voice-note").textContent = noEn ? t("voice.koonly") : "";
   renderQuick();
 
-  // Skills
+  // Skills: one list of the models actually installed, and Play runs the one that is chosen
   const sk = J.skill;
   const series = r.skill_series;            // repeat: runs left, and the pause in between (no program runs then)
   const skillOn = jobRunning("skill") || !!series;
   const models = r.models || [];
   const camOk = (k) => ((r.cams || []).find((c) => c.key === k) || {}).present;
-  const sh = models.length ? models.map((m) => {
-    const need = m.cams.length ? m.cams : ["top", "right_wrist"];
-    const lacking = need.filter((k) => !camOk(k));
-    const noplay = m.playable === false;   // trained on both arms or the left arm: the skill runner drives the black arm only
-    const blocked = !me || (!skillOn && (noplay || lacking.length > 0 || estop));
-    const armK = { both: "rec.arm.both", left: "rec.arm.left" }[m.arms];
-    return `<div class="skill"><div class="skill-t"><b>${esc(m.name)}</b><span class="small mute">${esc(String(m.type).toUpperCase())} · ${esc(armK ? t(armK) : t("skill.arm"))} · ${esc(need.map((k) => t("cam." + k)).join(" + "))}</span>`
-      + (noplay ? `<span class="small note err">${esc(t("fm.noplay." + m.arms))}</span>`
-        : lacking.length ? `<span class="small note err">${esc(t("skill.nocam", { cams: lacking.map((k) => t("cam." + k)).join(", ") }))}</span>` : "")
-      + `</div><div class="skill-btns"><button class="btn big${skillOn ? " on" : " primary"}" data-skill="${esc(m.name)}" ${blocked ? "disabled" : ""}>`
-      + `<i class="${skillOn ? "ri-stop-fill" : "ri-play-fill"}"></i><span>${t(skillOn ? "skill.stop" : "skill.play")}</span></button>`
-      + (skillOn ? "" : `<button class="btn" data-skill30="${esc(m.name)}" ${blocked ? "disabled" : ""}><i class="ri-repeat-line"></i><span>${t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause, d: DEMO_RUNS.seconds })}</span></button>`)
-      + `</div></div>`;
-  }).join("") : `<p class="mute small">${esc(t("skill.none", { dir: "~/policies" }))}</p>`;
-  const skills = $("skills");
-  if (skills.dataset.html !== sh) {
-    skills.innerHTML = sh; skills.dataset.html = sh;
-    // One click: the demo series (30 runs, 5 s apart). Stop / E-STOP ends it.
-    for (const el of skills.querySelectorAll("[data-skill30]")) el.addEventListener("click", () => {
-      if (!confirm(t("skill.confirm30", { n: DEMO_RUNS.runs }))) return;
-      send({ t: "skill", name: el.dataset.skill30, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds });
-    });
-    for (const el of skills.querySelectorAll("[data-skill]")) el.addEventListener("click", () => {
-      const r2 = state.robot || {};
-      const on = !(jobRunning("skill") || r2.skill_series);
-      if (on && !confirm(t("skill.confirm"))) return;
-      const repeat = Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1));
-      const pause = Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0));
-      const seconds = Math.max(5, Math.min(120, parseFloat($("skill-secs").value) || 30));
-      send({ t: "skill", name: el.dataset.skill, on, repeat, pause, seconds });
-    });
-  }
+  const camLabel = (k) => (STRINGS.en["cam." + k] ? t("cam." + k) : k);
+  if (series && series.name) skillPick = series.name;
+  if (!models.some((m) => m.name === skillPick)) skillPick = (models.find((m) => m.playable !== false) || models[0] || {}).name || "";
+  const pick = $("skill-pick");
+  const opts = models.map((m) => `<option value="${esc(m.name)}">${esc(m.name)} · ${esc(String(m.type).toUpperCase())}</option>`).join("")
+    || `<option value="">${esc(t("skill.noneopt"))}</option>`;
+  if (pick.dataset.html !== opts) { pick.innerHTML = opts; pick.dataset.html = opts; }
+  if (skillPick) pick.value = skillPick;
+  pick.disabled = skillOn || !models.length;
+  const m = models.find((x) => x.name === pick.value);
+  const need = m ? (m.cams.length ? m.cams : ["top", "right_wrist"]) : [];
+  const lacking = need.filter((k) => !camOk(k));
+  const noplay = !!(m && m.playable === false);
+  const blocked = !me || !m || noplay || lacking.length > 0 || estop;
+  const play = $("skill-play");
+  play.disabled = skillOn ? !me : blocked;
+  play.classList.toggle("on", skillOn);
+  play.classList.toggle("primary", !skillOn && !play.disabled);
+  setBtn(play, t(skillOn ? "skill.stop" : "skill.play"), skillOn ? "ri-stop-fill" : "ri-play-fill");
+  const demo = $("skill-demo");
+  demo.hidden = skillOn;
+  demo.disabled = blocked;
+  setBtn(demo, t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause, d: DEMO_RUNS.seconds }));
+  const armK = m && { both: "rec.arm.both", left: "rec.arm.left", right: "rec.arm.right" }[m.arms];
+  $("skills").textContent = !m ? t("skill.none", { dir: "~/policies" })
+    : `${t(armK || "skill.arm")} · ${need.map(camLabel).join(" + ")}`;
+  const why = !m ? "" : m.block === "cams" ? t("skill.badcam", { cams: m.cams.join(", ") })
+    : noplay ? t("fm.noplay." + m.arms)
+    : lacking.length ? t("skill.nocam", { cams: lacking.map(camLabel).join(", ") }) : "";
+  $("skill-why").hidden = !why;
+  $("skill-why").textContent = why;
   // The first ~40 s of a run: countdown, then the model loads on the Jetson. The arm does not move yet: say so,
   // or people press Stop before it starts (24 Nov 2026)
   const skJob = J.skill, now = (r.health && r.health.t) || Date.now() / 1000;

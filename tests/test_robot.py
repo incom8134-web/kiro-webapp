@@ -23,6 +23,8 @@ def cfg(tmp_path):
     model.mkdir(parents=True)
     (model / "config.json").write_text(json.dumps({"type": "act", "input_features": {"observation.images.top": {}}}))
     (model / "model.safetensors").write_text("")
+    (model / "policy_preprocessor.json").write_text('{"steps": []}')
+    (model / "policy_postprocessor.json").write_text('{"steps": []}')
     return Config(pin="4321", so101_dir=str(tmp_path / "so101"), policies_dir=str(tmp_path / "policies"),
                   health_period=60, skill_seconds=30)
 
@@ -664,6 +666,42 @@ def test_leader_tune_file_is_read_and_bad_files_are_ignored(tmp_path):
     assert load_tune(f) == {"/dev/so101_left_leader": {"shoulder_lift": (1.2, -14.5)}}
     f.write_text("not json")
     assert load_tune(f) == {} and load_tune(tmp_path / "missing.json") == {}
+
+
+def test_a_missing_queue_shortcut_does_not_stop_playback(monkeypatch):
+    """The Play button sets ROLLOUT_PY. If that shortcut cannot load, stock lerobot-rollout still starts.
+    The motor patch is not optional: wrong units would move the arm the wrong way."""
+    from robot_server import rollout_runner
+
+    class Optional:
+        def apply(self):
+            return None
+
+        def apply_rollout(self):
+            raise ImportError("no SyncInferenceEngine")
+
+        def apply_timing(self):
+            raise RuntimeError("no timing")
+
+    class Motors:
+        def apply(self):
+            raise RuntimeError("no motors")
+
+    monkeypatch.setattr(rollout_runner, "_patch", lambda: Optional())
+    rollout_runner.prepare()
+    monkeypatch.setattr(rollout_runner, "_patch", lambda: Motors())
+    with pytest.raises(RuntimeError, match="no motors"):
+        rollout_runner.prepare()
+
+
+def test_battery_is_a_sample_in_mock_and_unknown_until_wired(cfg):
+    r = Robot(cfg, MockBase())
+    try:
+        assert r.snapshot()["battery"] == {"percent": 76, "charging": False, "health": "good", "source": "mock"}
+        r.mock = False
+        assert r.battery() == {"percent": None, "charging": None, "health": "unknown", "source": "none"}
+    finally:
+        r.close()
 
 
 def test_skill_repeats_with_a_pause_and_stop_or_estop_ends_the_series(cfg):

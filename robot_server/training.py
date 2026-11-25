@@ -68,6 +68,11 @@ def _dim(feats: dict, key: str) -> int | None:
     return int(shape[0]) if isinstance(shape, list) and len(shape) == 1 and isinstance(shape[0], int) else None
 
 
+# Camera names the robot and run_policy.sh actually open. A policy trained under any other name
+# (laptop, phone, wrist, ...) cannot be played: lerobot-rollout looks up those names and fails.
+ROBOT_CAMS = frozenset({"top", "right_wrist", "left_wrist"})
+
+
 def arms_of(config: dict) -> str:
     """Which arm(s) a model was trained on, from its config.json: "right", "left", "both", "other" or "?".
 
@@ -100,6 +105,13 @@ def model_info(d: Path) -> dict:
     ins = c.get("input_features") if isinstance(c.get("input_features"), dict) else {}
     cams = sorted(k.split(".")[-1] for k in ins if k.startswith("observation.images."))
     arms = arms_of(c)
+    unknown = [c for c in cams if c not in ROBOT_CAMS]
+    if arms in ("both", "left", "other"):
+        block = arms
+    elif unknown:
+        block = "cams"
+    else:
+        block = ""
     size, files = 0, 0
     try:
         for f in d.iterdir():
@@ -113,7 +125,7 @@ def model_info(d: Path) -> dict:
     steps = tc.get("steps") if isinstance(tc.get("steps"), int) else None
     done = _json(d / "kiro_training.json").get("step")       # written by the Studio's Colab notebook
     return {"name": d.parent.name, "path": str(d), "type": str(c.get("type") or "?"), "cams": cams, "arms": arms,
-            "playable": arms in ("right", "?"), "steps": done if isinstance(done, int) else steps,
+            "block": block, "playable": not block, "steps": done if isinstance(done, int) else steps,
             "dataset": str(ds.get("repo_id") or ""), "batch": tc.get("batch_size") if isinstance(tc.get("batch_size"), int) else None,
             "mb": round(size / 1e6, 1), "files": files, "mtime": mtime}
 

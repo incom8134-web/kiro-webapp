@@ -94,6 +94,21 @@ def test_arms_from_the_model_config():
     assert arms_of(mixed) == "other"
 
 
+def test_a_model_with_unknown_cameras_or_missing_processors_is_not_played(robot, cfg):
+    """Play used to start these and let lerobot-rollout die. The Arms tab now refuses them first."""
+    root = Path(cfg.policies_dir)
+    put_model(root, "old_act", cams=("laptop", "phone"))
+    m = {x["name"]: x for x in robot.models()}["old_act"]
+    assert m["playable"] is False and m["block"] == "cams" and m["cams"] == ["laptop", "phone"]
+    assert robot.skill("old_act", True, "t") == (False, "CAM_NAMES:laptop, phone")
+    bare = root / "bare_act" / "pretrained_model"
+    bare.mkdir(parents=True)
+    (bare / "config.json").write_bytes(model_files()["config.json"])
+    (bare / "model.safetensors").write_bytes(weights())
+    assert robot.skill("bare_act", True, "t")[1].startswith("MISSING:policy_preprocessor.json")
+    assert not robot.jobs.running("skill")
+
+
 def test_two_arm_and_left_arm_models_cannot_be_played_yet(robot, cfg):
     root = Path(cfg.policies_dir)
     put_model(root, "right_act")

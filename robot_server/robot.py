@@ -576,7 +576,7 @@ class Robot:
     # --------------------------------------------------------------- skills
     def models(self) -> list[dict]:
         """Trained models for the Autonomous skills card. arms: "right", "left", "both" or "?" (training.py)."""
-        return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable")} for m in self.train.models()]
+        return [{k: m[k] for k in ("name", "path", "type", "cams", "arms", "playable", "block")} for m in self.train.models()]
 
     def skill(self, name: str, on: bool, who: str, repeat: int = 1, pause: float = 10.0,
               seconds: float | None = None) -> tuple[bool, str]:
@@ -625,20 +625,53 @@ class Robot:
         m = next((m for m in self.models() if m["name"] == name), None)
         if m is None:
             return False, "Model not found."
-        if not m["playable"]:  # run_policy.sh drives the right arm only: a two-arm or left-arm model would go wrong
+        if not m["playable"]:  # run_policy.sh drives the right arm only, and only cameras it knows by name
+            if m.get("block") == "cams":
+                return False, "CAM_NAMES:" + ", ".join(m["cams"])
             return False, {"both": "TWO_ARM", "left": "LEFT_ARM"}.get(m["arms"], "NO_FIT")
+        lacking = Training._missing(Path(m["path"]))
+        if lacking:  # lerobot-rollout exits at once without the processor files; say so before the arm moves
+            return False, "MISSING:" + ", ".join(lacking)
         missing = self._missing(["right_follower"])
         if missing:
             return False, "Not connected: right follower"
         cams = m["cams"] or ["top", "right_wrist"]
+        stuck = self._cams_let_go(cams)
+        if stuck:  # the preview still holds the device: the rollout would fail with "device busy"
+            self._cams_resume(cams)
+            return False, f"CAM_BUSY:{stuck}"
         uses = frozenset({PORT["right_follower"], *(f"cam:{c}" for c in cams)})
         secs = str(getattr(self, "_skill_secs", int(self.cfg.skill_seconds)))
         cmd = (self._mock_cmd(f"skill {name}", seconds=int(secs)) if self.mock
                else ["bash", str(self.so101 / "run_policy.sh"), "run", m["path"], secs])
-        # ROLLOUT_PY: the rollout with the ACT queue shortcut (30 Hz instead of ~10 on the Jetson)
-        env = {**self._venv_env(), "ROLLOUT_PY": str(HERE / "rollout_runner.py")}
-        return self._start("skill", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
-                                            env=env, label=f"skill {name}", stop_wait=8.0), who)
+        # ROLLOUT_PY: the rollout with the ACT queue shortcut (30 Hz instead of ~10 on the Jetson).
+        # If that shortcut cannot load, rollout_runner falls back to stock lerobot-rollout.
+        env = {**self._venv_env(), "ROLLOUT_PY": str(HERE / "rollout_runner.py"),
+               "KIRO_POLICY_CAMS": ",".join(cams)}
+        ok, msg = self._start("skill", JobSpec(cmd, uses, cwd=str(self.so101) if not self.mock else None,
+                                               env=env, label=f"skill {name}", stop_wait=8.0), who)
+        if not ok:
+            self._cams_resume(cams)
+        return ok, msg
+
+    def _cams_let_go(self, keys: list[str]) -> str | None:
+        """Close the preview for these cameras so a skill can open them. A key whose device is still open."""
+        stuck = None
+        for k in keys:
+            cam = self.cams.get(k)
+            if cam is None:
+                continue
+            cam.pause("skill")
+            t = cam._thread
+            if t is not None and t.is_alive():
+                stuck = k
+        return stuck
+
+    def _cams_resume(self, keys: list[str]) -> None:
+        for k in keys:
+            cam = self.cams.get(k)
+            if cam is not None:
+                cam.resume()
 
     # ---------------------------------------------------------- demo motion
     # Replays one recorded picking demonstration on the black arm, smoothly, several times (24 Nov 2026: to
@@ -1406,6 +1439,15 @@ class Robot:
             jobs[name] = info
         return jobs
 
+    def battery(self) -> dict:
+        """The battery icon. Not wired to hardware yet.
+
+        percent is 0-100 or None, charging is True/False or None, health is good, fair, poor or unknown.
+        source is "mock" (a sample, so the icon can be checked) or "none" (no reading)."""
+        if self.mock:
+            return {"percent": 76, "charging": False, "health": "good", "source": "mock"}
+        return {"percent": None, "charging": None, "health": "unknown", "source": "none"}
+
     def snapshot(self) -> dict:
         """Sent to every page, viewers too. Engineer-only values (serial ports, servo scan, check wizard,
         device paths, recording and packaging output) are in studio_snapshot() instead."""
@@ -1426,6 +1468,7 @@ class Robot:
             "left_arm_ok": self.cfg.left_arm_ok, "lidar": os.path.exists("/dev/rplidar"),
             "estop_fold": self.estop_fold_state(), "skill_s": getattr(self, "_skill_secs", self.cfg.skill_seconds), "skill_series": self.skill_series,
             "gamepad": os.path.exists("/dev/input/js0"), "mic": self.usb_mic(),
+            "battery": self.battery(),
             "events": list(self.events)[-20:],
             "obstacle_stop": self.obstacle_stop_on(), "lidar_measured": bool(parse_mask(env_get(self._lidar_env_text(), "LIDAR_MASK"))), "wheels": self.base_wheels(), "base_guard": self.base_guard(),
             "stops": self.stops(),

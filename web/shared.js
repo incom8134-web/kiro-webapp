@@ -68,6 +68,12 @@
       [/^E-STOP released/, "err.estopoff"],
       [/^Engineer tools are off/, "err.engoff"],
     ];
+    const names = /^CAM_NAMES:(.*)$/.exec(s);
+    if (names) return t("skill.badcam", { cams: names[1] });
+    const miss = /^MISSING:(.*)$/.exec(s);
+    if (miss) return t("skill.missing", { files: miss[1] });
+    const busy = /^CAM_BUSY:(.*)$/.exec(s);
+    if (busy) return t("skill.cambusy", { cam: busy[1] });
     for (const [re, key] of rules) if (re.test(s)) return t(key);
     const who = /^(.*) is in control\.$/.exec(s);
     if (who) return t("err.busy", { name: who[1] });
@@ -228,5 +234,23 @@
     refresh();
   }
 
-  window.Kiro = { esc, deviceName, typing, interactive, httpsUrl, serverText, holdButton, confirmSend, connect, bindEstop, bindKeys, bindLogin };
+  function renderBattery(b) {
+    const el = document.getElementById("battery");
+    if (!el) return;
+    const pct = document.getElementById("bat-pct");
+    const icon = document.getElementById("bat-icon");
+    const known = !!(b && typeof b.percent === "number");
+    const n = known ? Math.round(b.percent) : null;
+    el.classList.toggle("low", known && n <= 20);
+    if (icon) {
+      icon.className = !known ? "ri-battery-line"
+        : b.charging ? "ri-battery-charge-line"
+        : n <= 15 ? "ri-battery-low-line"
+        : n <= 45 ? "ri-battery-2-line" : "ri-battery-fill";
+    }
+    if (pct) pct.textContent = known ? n + "%" : t("bat.unknown");
+    el.title = b && b.source === "mock" ? t("bat.note.mock") : known ? "" : t("bat.note.none");
+  }
+
+  window.Kiro = { esc, deviceName, typing, interactive, httpsUrl, serverText, holdButton, confirmSend, connect, bindEstop, bindKeys, bindLogin, renderBattery };
 })();

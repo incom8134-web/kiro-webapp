@@ -73,9 +73,24 @@ function onState() {
   render();
 }
 
+function renderBatteryCard() {
+  const b = (st.robot && st.robot.battery) || null;
+  Kiro.renderBattery(b);
+  const table = $("battery-detail");
+  if (!table) return;
+  const known = !!(b && typeof b.percent === "number");
+  const health = t("bat.health." + ((b && b.health) || "unknown"));
+  const charging = !b || b.charging == null ? t("bat.unknown") : b.charging ? t("bat.charging") : t("bat.notcharging");
+  const rows = [[t("bat.pct"), known ? Math.round(b.percent) + "%" : t("bat.unknown")],
+    [t("bat.kchg"), charging], [t("bat.health"), health]];
+  table.innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
+  $("battery-note").textContent = b && b.source === "mock" ? t("bat.note.mock") : t("bat.note.none");
+}
+
 function onRobot() {
   const r = st.robot;
   if (!r) return;
+  renderBatteryCard();
   const j = (r.health || {}).jetson || {};
   record("cpu", j.cpu);
   record("gpu", j.gpu);
@@ -310,6 +325,7 @@ function render() {
   $("opstat").textContent = !s || !s.operator ? t("op.none") : s.operator.name;
   $("uptime").textContent = s ? fmtUp(s.up_s) : "-";
   $("devices").textContent = s ? s.clients : "-";
+  renderBatteryCard();
   const stopped = !!s && s.estop;
   $("estop").classList.toggle("on", stopped);
   $("estop-label").textContent = stopped ? t("estop.stopped") : t("estop");

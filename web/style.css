@@ -123,6 +123,8 @@ main { grid-row: 3; }
 .cell { display: flex; flex-direction: column; justify-content: center; padding: 0 18px; border-right: 1px solid var(--bar-line); min-width: 0; white-space: nowrap; }
 .cell .k { font-size: 11px; color: var(--bar-mute); }
 .cell b { font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.cell.bat b { display: flex; align-items: center; gap: 4px; }
+.cell.bat.low b { color: var(--warn); }
 .cell b.accent { color: var(--ok); }
 .iconbtn, .toplink, .dash-link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--btn-h); min-width: 44px; min-height: 44px; padding: 0 12px; border-radius: var(--r-sm); border: 0;
   background: transparent; color: var(--bar-mute); text-decoration: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
@@ -752,6 +754,7 @@ details.fold > summary .st { margin-left: 8px; overflow: hidden; text-overflow: 
 .miclevel { height: 4px; border-radius: 2px; background: var(--raise-2); overflow: hidden; margin: 6px 0 2px; }
 .miclevel > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .1s linear; }
 #voice-rx.ok { color: var(--ok); }
+#studio-mode { margin: 0 0 14px; }
 .skill-rep { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .skill-rep .num { width: 72px; }
 #skill-prog { color: var(--accent); }

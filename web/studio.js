@@ -150,6 +150,7 @@ function renderTop() {
   for (const b of document.querySelectorAll(".lang button")) b.classList.toggle("on", b.dataset.lang === LANG);
   renderLink();
   $("backend").textContent = s ? t(s.backend === "ros" ? "be.ros" : "be.mock") : "...";
+  Kiro.renderBattery(st.robot && st.robot.battery);
   const op = $("opstat");
   op.textContent = !s || !s.operator ? t("op.none") : me ? t("op.youstudio") : t("op.other", { name: s.operator.name });
   op.className = me ? "accent" : "";
@@ -184,9 +185,19 @@ function renderLock() {
   $("lock").hidden = en || !st.open;
   $("studio").hidden = !en;
   $("studio-more").hidden = !en;
-  // The training guide stays once it was seen: following it means leaving the robot's Wi-Fi (step 2)
-  $("tsect").hidden = !en && !st.seenEng;
+  // Record and Train are separate. The training guide stays once it was seen: following it means
+  // leaving the robot's Wi-Fi (step 2), and that page is the Train side.
+  if (running()) st.mode = "record";
+  const train = en ? st.mode === "train" : !!st.seenEng;
+  $("tsect").hidden = !train;
   $("tsect").classList.toggle("away", !en);
+  $("files").hidden = !(train && en);
+  const record = en && !train;
+  for (const id of ["stepper", "s1", "s2", "s3", "s4"]) $(id).hidden = !record;
+  for (const b of $("studio-mode").querySelectorAll("button")) {
+    b.classList.toggle("on", b.dataset.mode === (train && en ? "train" : "record"));
+    b.disabled = running() && b.dataset.mode === "train";
+  }
   if (en) return;
   const other = s && s.operator && !me;
   $("lock-other").hidden = !other;
@@ -195,6 +206,13 @@ function renderLock() {
   $("unlock-btn").disabled = !s;
 }
 
+st.mode = "record";
+$("studio-mode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (!b || b.disabled || running()) return;
+  st.mode = b.dataset.mode;
+  renderAll();
+});
 $("unlock").addEventListener("submit", (e) => {
   e.preventDefault();
   const s = st.server;
@@ -502,6 +520,7 @@ function renderChecks(step) {
     tile.classList.toggle("off", !sel.includes(x.key));
   }
   const rep = st.camRepair, repBusy = !!rep && rep.busy && performance.now() - rep.at < 60000;
+  $("cam-repair-row").hidden = !cams.length;   // nothing to repair until a camera is configured
   $("cam-repair").disabled = run || repBusy;
   setBtn($("cam-repair"), t(repBusy ? "cam.rep.busy" : "cam.rep"));
   const repMsg = $("cam-repair-msg"), repText = repBusy ? t("cam.rep.busy.t") : camRepairText();
@@ -526,6 +545,7 @@ function renderChecks(step) {
   $("start").classList.toggle("primary", canStart);
   $("recheck").classList.toggle("primary", !!c && fresh && !c.ok && step <= 2);
   $("recheck").disabled = run;
+  setBtn($("recheck"), t(c ? "rec.recheck" : "rec.runchecks"));   // "Run checks" until the first one, then "again"
   setBtn($("start"), t(st.pendingStart || s.starting ? "rec.starting" : "rec.start"));
   $("s2-sum").textContent = c && fresh ? (c.ok ? t("rec.ck.ok") : t("rec.ck.bad", { n: nbad })) : "";
   $("s2-st").textContent = step > 2 ? "✓" : "";
@@ -739,6 +759,7 @@ function renderTrain() {
   renderUpload();
   renderColab();
   renderFiles();
+  if (!ds.length) $("t-manual").open = false;   // the 7-step guide stays folded until there is a dataset
 }
 
 // 6. upload the model zip
@@ -848,8 +869,10 @@ function colabWhy(c) {
 
 function renderColab() {
   const c = colab(), active = !!c && COLAB_ACTIVE.includes(c.state);
-  $("c-go").disabled = active || !tr.ds;
-  $("c-go").classList.toggle("primary", !active);
+  const haveDs = datasets().length > 0;
+  $("c-go").disabled = active || !tr.ds || !haveDs;
+  $("c-go").classList.toggle("primary", haveDs && !active && !!tr.ds);
+  setBtn($("c-go"), t(haveDs ? "col.go" : "col.needds"));
   $("c-run").hidden = !c;
   if (!c) return;
   const mb = (b) => fmtMB((b || 0) / 1e6);
@@ -955,7 +978,7 @@ function renderFiles() {
   const mH = T.models.map((m) => fitem("model", m.name, `<b>${esc(m.name)}</b>`,
     [String(m.type).toUpperCase(), armText(m.arms), m.steps ? t("fm.steps", { n: m.steps.toLocaleString() }) : "", m.dataset,
       (m.cams || []).map(camName).join(" + "), fmtMB(m.mb), fmtDate(m.mtime)],
-    `<a class="btn" href="${modelUrl(m.name)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dl"))}</span></a>`,
+    `<a class="btn" href="${modelUrl(m.name)}" download><i class="ri-download-2-line"></i><span>${esc(t("fm.dlmodel"))}</span></a>`,
     m.playable ? "" : t("fm.noplay." + m.arms), !skillOn)).join("") || none("fm.none.models");
   for (const [id, html] of [["fm-ds", dsH], ["fm-pkg", pkH], ["fm-models", mH]]) {
     const el = $(id);
@@ -1219,6 +1242,7 @@ $("sec-info").addEventListener("toggle", renderInfo);
 
 // Folded sections remember whether they were open
 for (const d of document.querySelectorAll("details.fold, details.adv")) {
+  if (d.id === "t-manual") continue;   // the 7-step guide starts collapsed
   try { d.open = localStorage.getItem("kiro-open-" + d.id) === "1"; } catch (e) { /* ignore */ }
   d.addEventListener("toggle", () => { try { localStorage.setItem("kiro-open-" + d.id, d.open ? "1" : "0"); } catch (e) { /* ignore */ } });
 }
