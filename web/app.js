@@ -331,7 +331,6 @@ $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 $("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
-const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };
 // Demo pick motion: one recorded pick replayed smoothly on the black arm, 5 times per click (no model, no object)
 $("demo-btn").addEventListener("click", () => {
   const on = !jobRunning("demo");
@@ -356,8 +355,14 @@ $("skill-play").addEventListener("click", () => {
 });
 $("skill-demo").addEventListener("click", () => {
   const name = $("skill-pick").value;
-  if (!name || !confirm(t("skill.confirm30", { n: DEMO_RUNS.runs }))) return;
-  send({ t: "skill", name, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds });
+  const nums = skillNums();
+  if (!name || !confirm(t("skill.confirm30", { n: nums.repeat }))) return;
+  send({ t: "skill", name, on: true, ...nums });
+});
+// The label has to follow the fields as they are typed. It used to stay on a fixed 30 runs.
+for (const id of ["skill-repeat", "skill-pause", "skill-secs"]) $(id).addEventListener("input", () => {
+  const nums = skillNums();
+  setBtn($("skill-demo"), t("skill.demo", { n: nums.repeat, s: nums.pause, d: nums.seconds }));
 });
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
@@ -743,10 +748,11 @@ function renderRobot() {
   play.classList.toggle("on", skillOn);
   play.classList.toggle("primary", !skillOn && !play.disabled);
   setBtn(play, t(skillOn ? "skill.stop" : "skill.play"), skillOn ? "ri-stop-fill" : "ri-play-fill");
+  const nums = skillNums();
   const demo = $("skill-demo");
   demo.hidden = skillOn;
   demo.disabled = blocked;
-  setBtn(demo, t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause, d: DEMO_RUNS.seconds }));
+  setBtn(demo, t("skill.demo", { n: nums.repeat, s: nums.pause, d: nums.seconds }));
   const armK = m && { both: "rec.arm.both", left: "rec.arm.left", right: "rec.arm.right" }[m.arms];
   $("skills").textContent = !m ? t("skill.none", { dir: "~/policies" })
     : `${t(armK || "skill.arm")} · ${need.map(camLabel).join(" + ")}`;
