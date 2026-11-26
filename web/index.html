@@ -13,11 +13,11 @@
 <body class="console">
 <header class="bar">
   <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
+  <a class="cell bat" id="battery" href="battery.html" data-i18n-aria="bat.k" data-i18n-title="bat.manage" aria-label="Battery" title="Battery Management"><span class="k" data-i18n="bat.k">Battery</span><b><i id="bat-icon" class="ri-battery-line" aria-hidden="true"></i><span id="bat-pct">—</span></b></a>
   <div class="cells">
     <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
     <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
-    <a class="cell bat" id="battery" href="battery.html" data-i18n-title="bat.manage" title="Battery Management"><span class="k" data-i18n="bat.k">Battery</span><b><i id="bat-icon" class="ri-battery-line" aria-hidden="true"></i><span id="bat-pct">—</span></b></a>
   </div>
   <nav class="toplinks">
     <a class="toplink" href="dashboard.html"><i class="ri-dashboard-3-line"></i><span data-i18n="dash.open">Dashboard</span></a>
@@ -129,48 +129,53 @@
       <!-- ARMS -->
       <section class="panel" id="panel-arms" role="tabpanel" aria-labelledby="tab-arms" data-panel="arms">
         <div class="card skills-card">
-          <div class="row head"><h3><i class="ri-robot-2-line"></i><span data-i18n="skills.title">Autonomous skills</span></h3><span id="skill-st" class="st"></span></div>
-          <div class="row demo-row">
-            <button id="demo-btn" class="btn big primary" type="button" data-op><i class="ri-hand"></i><span></span></button>
-            <span id="demo-st" class="small mute grow"></span>
-          </div>
-          <label class="field" for="skill-pick"><span data-i18n="skill.pick">Trained model</span>
+          <div class="row head"><h3><i class="ri-robot-2-line"></i><span data-i18n="skills.title">Run a skill</span></h3><span id="skill-st" class="st"></span></div>
+          <p id="skill-empty" class="small mute" data-i18n="skill.empty" hidden>No trained model installed.</p>
+          <details id="skill-how" class="adv" hidden>
+            <summary data-i18n="skill.how">How to add a model</summary>
+            <p class="small mute" data-i18n="skill.add">To add a skill, train one in Studio &gt; Train a skill, or copy a trained model to ~/policies/&lt;name&gt;/pretrained_model on the Jetson.</p>
+          </details>
+          <label class="field" for="skill-pick"><span data-i18n="skill.pick">Model</span>
             <select id="skill-pick"></select></label>
-          <div class="row skill-rep">
-            <label class="small mute" for="skill-repeat" data-i18n="skill.runs">Runs</label>
-            <input id="skill-repeat" class="num" type="number" min="1" max="50" value="1">
-            <label class="small mute" for="skill-pause" data-i18n="skill.pause">Pause between runs (s)</label>
-            <input id="skill-pause" class="num" type="number" min="0" max="120" value="5">
-            <label class="small mute" for="skill-secs" data-i18n="skill.secs">Seconds per run</label>
-            <input id="skill-secs" class="num" type="number" min="5" max="120" value="30">
+          <div class="row seg" id="skill-mode" role="group">
+            <button type="button" class="btn on" data-runmode="once" data-i18n="skill.once">Once</button>
+            <button type="button" class="btn" data-runmode="loop" data-i18n="skill.loop">Loop</button>
           </div>
-          <div class="row">
-            <button id="skill-play" class="btn big primary" type="button" data-op><i class="ri-play-fill"></i><span></span></button>
-            <button id="skill-demo" class="btn" type="button" data-op><i class="ri-repeat-line"></i><span></span></button>
+          <div class="loopfields" id="skill-loopfields" hidden>
+            <label class="field" for="skill-repeat"><span data-i18n="skill.times">Times</span>
+              <input id="skill-repeat" class="num" type="number" min="1" max="50" value="5" inputmode="numeric"></label>
+            <label class="field" for="skill-pause"><span data-i18n="skill.pause.s">Pause (s)</span>
+              <input id="skill-pause" class="num" type="number" min="0" max="120" value="5" inputmode="decimal"></label>
           </div>
-          <p class="small note err" id="skill-why" hidden></p>
-          <p class="small mute" id="skills"></p>
-          <p class="small" id="skill-prog" hidden></p>
-          <p class="small mute" id="skill-hint"></p>
+          <details id="skill-adv" class="adv">
+            <summary data-i18n="skill.advanced">Advanced</summary>
+            <label class="field" for="skill-secs"><span data-i18n="skill.secs" data-i18n-title="skill.secs.why" title="How long one run may last. The built-in demo uses its own length.">Seconds per run</span>
+              <input id="skill-secs" class="num" type="number" min="5" max="120" value="30" inputmode="numeric"></label>
+          </details>
+          <button id="skill-play" class="btn big primary wide" type="button"><i class="ri-play-fill"></i><span></span></button>
+          <p id="skill-status" class="small mute"></p>
           <pre id="skill-tail" class="tail" hidden></pre>
         </div>
         <div class="card">
-          <div class="row head"><h3><span class="emo">🦾</span><span data-i18n="sec.arms">Arms</span></h3><span id="arms-st" class="st"></span></div>
+          <div class="row head"><h3><span data-i18n="sec.manual">Manual control</span></h3><span id="arms-st" class="st"></span></div>
           <div class="armgrid" id="arms"></div>
-          <p class="warnline" data-i18n="arm.fall">Releasing torque lets the arm fall. Hold the button, and hold the arm.</p>
-          <button id="tele-both" class="btn wide" type="button" data-op><i class="ri-git-merge-line"></i><span></span></button>
-          <button id="follow-btn" class="btn wide" type="button" data-op><i class="ri-git-fork-line"></i><span></span></button>
-          <p id="follow-st" class="small mute"></p>
-          <p class="small mute" data-i18n="arm.teleop.hint">Teleop: the right leader moves the right arm, the left leader moves the left arm. Each arm on its own, or both at once.</p>
+          <div class="bothrow">
+            <label class="field grow" for="both-mode"><span data-i18n="both.title">Both arms</span>
+              <select id="both-mode">
+                <option value="each" data-i18n="both.each">Each its own leader</option>
+                <option value="one" data-i18n="both.one">Copy one leader</option>
+              </select></label>
+            <button id="both-go" class="btn" type="button"><i class="ri-play-fill"></i><span></span></button>
+          </div>
+          <p id="both-st" class="small mute"></p>
+          <details class="leaderline" id="leader-box">
+            <summary><span data-i18n="leader.title">Leader arm</span><span id="leader-sum" class="small mute"></span></summary>
+            <div class="row seg" id="leader-sides"><button class="btn" type="button" data-lside="right" data-i18n="arm.right">Right</button><button class="btn" type="button" data-lside="left" data-i18n="arm.left">Left</button><button class="btn" type="button" data-lside="both" data-i18n="leader.two" data-i18n-title="leader.two.tip" title="Two leader arms, one for each side">Both</button></div>
+            <button id="leader-btn" class="btn wide" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
+            <p id="leader-st" class="small mute"></p>
+            <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
+          </details>
           <p id="arms-err" class="err small" hidden></p>
-        </div>
-        <div class="card">
-          <div class="row head"><h3><span data-i18n="leader.title">Leader arm</span></h3></div>
-          <div class="row voice-lang"><span class="small mute" data-i18n="leader.moves">Leader on this laptop moves</span><span class="grow"></span>
-            <div class="row seg" id="leader-sides"><button class="btn" type="button" data-lside="right" data-i18n="arm.right">Right</button><button class="btn" type="button" data-lside="left" data-i18n="arm.left">Left</button><button class="btn" type="button" data-lside="both" data-i18n="leader.two">Both (2 leaders)</button></div></div>
-          <button id="leader-btn" class="btn wide big" type="button" data-op><i class="ri-usb-line"></i><span></span></button>
-          <p id="leader-st" class="small mute"></p>
-          <button id="wave-btn" class="btn wide" type="button" data-op><i class="ri-hand"></i><span data-i18n="wave">Wave</span></button>
         </div>
       </section>
 

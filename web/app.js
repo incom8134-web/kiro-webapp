@@ -7,7 +7,6 @@
  * 3. While this device is the operator, sends the drive command 20 times per
  *    second. That message is also the heartbeat: if it stops, the robot stops.
  * 4. Cameras, arms (with the leader arm on this laptop), voice, skills, health.
- * The engineer tools (servo tester, check wizard, guard distance) are on the Studio page.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -328,36 +327,60 @@ $("voice-base").addEventListener("click", () => send({ t: "base", on: true })); 
 $("wave-btn").addEventListener("click", () => send({ t: "wave", side: "right" }));
 $("stops-clear").addEventListener("click", () => send({ t: "stops_clear" }));
 // Copy mode: ONE leader (the grey one, on the robot) moves both arms the same way
-$("follow-btn").addEventListener("click", () => send({ t: "follow", on: !following() }));
 const following = () => jobRunning("relay") && ((state.robot && state.robot.bridge) || {}).mode === "follow";
 // Teleop uses the leader wherever it is plugged in: on the robot (teleop program) or on this laptop (Web Serial)
-const DEMO_RUNS = { runs: 30, pause: 5, seconds: 30 };
-// Demo pick motion: one recorded pick replayed smoothly on the black arm, 5 times per click (no model, no object)
-$("demo-btn").addEventListener("click", () => {
-  const on = !jobRunning("demo");
-  if (on && !confirm(t("demo.confirm"))) return;
-  send({ t: "demo", on, repeat: 5, pause: 3 });
-});
+const DEMO = "__demo__";   // picker value for the built-in demo. A real model name cannot start with "_".
 let skillPick = "";
-function skillNums() {
+function clampInt(v, lo, hi, fallback) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, n));
+}
+function clampNum(v, lo, hi, fallback) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, n));
+}
+/* Once is always a single run. Loop reads Times and Pause. Seconds per run always come from Advanced.
+ * The old repeat button ignored these fields and always said "30 runs × 30 s (5 s apart)". */
+function skillPlan(mode, runs, pause, seconds) {
+  const loop = mode === "loop";
   return {
-    repeat: Math.max(1, Math.min(50, parseInt($("skill-repeat").value, 10) || 1)),
-    pause: Math.max(0, Math.min(120, parseFloat($("skill-pause").value) || 0)),
-    seconds: Math.max(5, Math.min(120, parseFloat($("skill-secs").value) || 30)),
+    repeat: loop ? clampInt(runs, 1, 50, 1) : 1,
+    pause: loop ? clampNum(pause, 0, 120, 0) : 0,
+    seconds: Math.round(clampNum(seconds, 5, 120, 30)),
   };
 }
+function skillNums() {
+  const on = document.querySelector("#skill-mode .on");
+  return skillPlan(on && on.dataset.runmode, $("skill-repeat").value, $("skill-pause").value, $("skill-secs").value);
+}
 $("skill-pick").addEventListener("change", () => { skillPick = $("skill-pick").value; render(); });
+$("skill-mode").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-runmode]");
+  if (!b || b.disabled) return;
+  for (const x of $("skill-mode").querySelectorAll("[data-runmode]")) x.classList.toggle("on", x === b);
+  render();
+});
+for (const id of ["skill-repeat", "skill-pause", "skill-secs"]) $(id).addEventListener("input", () => render());
 $("skill-play").addEventListener("click", () => {
   const r2 = state.robot || {};
-  const on = !(jobRunning("skill") || r2.skill_series);
+  const skillOn = !!(jobRunning("skill") || r2.skill_series);
+  const demoOn = jobRunning("demo");
+  if (skillOn) {
+    send({ t: "skill", name: (r2.skill_series && r2.skill_series.name) || $("skill-pick").value, on: false, ...skillNums() });
+    return;
+  }
+  if (demoOn) { send({ t: "demo", on: false }); return; }
   const name = $("skill-pick").value;
-  if (on && (!name || !confirm(t("skill.confirm")))) return;
-  send({ t: "skill", name: on ? name : (r2.skill_series && r2.skill_series.name) || name, on, ...skillNums() });
-});
-$("skill-demo").addEventListener("click", () => {
-  const name = $("skill-pick").value;
-  if (!name || !confirm(t("skill.confirm30", { n: DEMO_RUNS.runs }))) return;
-  send({ t: "skill", name, on: true, repeat: DEMO_RUNS.runs, pause: DEMO_RUNS.pause, seconds: DEMO_RUNS.seconds });
+  const nums = skillNums();
+  if (name === DEMO) {
+    if (!confirm(nums.repeat > 1 ? t("skill.confirm30", { n: nums.repeat }) : t("demo.confirm"))) return;
+    send({ t: "demo", on: true, repeat: nums.repeat, pause: nums.pause });
+    return;
+  }
+  if (!name || !confirm(nums.repeat > 1 ? t("skill.confirm30", { n: nums.repeat }) : t("skill.confirm"))) return;
+  send({ t: "skill", name, on: true, ...nums });
 });
 const robotLeader = (side) => {
   const l = ((state.robot && state.robot.health && state.robot.health.boards) || {})[side + "_leader"];
@@ -373,18 +396,31 @@ function teleClick(side) {
   try { localStorage.setItem("kiro-leader-side", side); } catch (e) { /* private window */ }
   leaderStart();
 }
-// Both arms at once, each with the leader of its own side (two teleop programs, or two leaders on this laptop)
-$("tele-both").addEventListener("click", () => {
+// Both arms: one choice. "each" is a leader per arm. "one" is the grey leader copied onto both.
+const eachLeadersOn = () => (jobRunning("teleop_right") && jobRunning("teleop_left")) || (laptopTele("right") && laptopTele("left"));
+function stopEach() {
   if (laptopTele("right") && laptopTele("left")) { leaderStop(""); return; }
-  const on = !(jobRunning("teleop_right") && jobRunning("teleop_left"));
-  if (on && !(robotLeader("right") && robotLeader("left"))) {
+  for (const side of ["right", "left"]) if (jobRunning("teleop_" + side)) send({ t: "teleop", side, on: false });
+}
+function startEach() {
+  if (!(robotLeader("right") && robotLeader("left"))) {
     if (leader.on) { showNote(t("leader.busy"), true); return; }
     leader.side = "both";
     try { localStorage.setItem("kiro-leader-side", "both"); } catch (e) { /* private window */ }
     leaderStart();
     return;
   }
-  for (const side of ["right", "left"]) if (jobRunning("teleop_" + side) !== on) send({ t: "teleop", side, on });
+  for (const side of ["right", "left"]) if (!jobRunning("teleop_" + side)) send({ t: "teleop", side, on: true });
+}
+$("both-go").addEventListener("click", () => {
+  const each = eachLeadersOn(), one = following();
+  if (each || one) {
+    if (one) send({ t: "follow", on: false });
+    if (each) stopEach();
+    return;
+  }
+  if ($("both-mode").value === "one") send({ t: "follow", on: true });
+  else startEach();
 });
 $("leader-btn").addEventListener("click", () => (leader.on ? leaderStop() : leaderStart()));
 
@@ -598,25 +634,25 @@ function renderRobot() {
     : t("base.rates", { odom: Math.round(rates.odom_hz), scan: Math.round(rates.scan_hz) });
   $("base-st").className = "st" + (baseOn && r.wheels === "ok" ? " live" : "");
 
-  // Arms: right and left, each with teleop and the three poses
+  // Arms: one row each. Release torque stays a hold-to-confirm, quieter than the other buttons.
   const b = (r.health && r.health.boards) || {};
   const armCol = (side) => {
     const blocked = side === "left" && !r.left_arm_ok;
     const tele = jobRunning("teleop_" + side) || laptopTele(side);
     const f = b[side + "_follower"];
     const off = !me || blocked ? "disabled" : "";
-    const status = blocked ? t("arm.locked") : f && f.state === "missing" ? t("arm.missing")
+    const status = f && f.state === "missing" ? t("arm.missing")
       : f && f.state === "ok" ? `${f.vmin ?? "-"} V` : f && f.state === "silent" ? t("arm.nopower") : "";
-    const ld = b[side + "_leader"];        // this arm's own leader on the Jetson (named by its serial: any USB port)
-    const lead = !ld ? "" : ld.state === "missing" ? t("arm.leader.missing") : t("arm.leader.ok");
-    return `<div class="armcol">
-      <div class="row"><b class="grow">${t("arm." + side)}</b><span class="small mute">${esc(status)}</span></div>
-      <button class="btn wide${tele ? " on" : ""}" data-tele="${side}" ${off}>${t(tele ? "arm.teleop.off" : "arm.teleop.on")}</button>
-      <span class="small ${ld && ld.state === "missing" ? "err" : "mute"}">${esc(lead)}</span>
-      <div class="trio">
-        <button class="btn" data-arm="${side}" data-act="fold" ${off}>${t("arm.fold")}</button>
-        <button class="btn" data-arm="${side}" data-act="hold" ${off}>${t("arm.hold")}</button>
-        <button class="btn hold danger" data-arm="${side}" data-act="release" ${me ? "" : "disabled"}><span class="fill"></span>${esc(t("arm.release"))}</button>
+    const badge = blocked
+      ? `<span class="badge lock">${esc(t("arm.locked.badge"))}</span><a class="recal" href="/studio.html" title="${esc(t("fix.leftlock"))}">${esc(t("arm.recal"))}</a>`
+      : `<span class="badge">${esc(status)}</span>`;
+    return `<div class="armrow">
+      <div class="row armname"><b>${esc(t("arm." + side))}</b>${badge}</div>
+      <div class="armacts">
+        <button class="btn${tele ? " on" : ""}" type="button" data-tele="${side}" title="${esc(t("arm.teleop.hint"))}" ${off}>${esc(t(tele ? "arm.teleop.off" : "arm.teleop.on"))}</button>
+        <button class="btn" type="button" data-arm="${side}" data-act="fold" ${off}>${esc(t("arm.fold"))}</button>
+        <button class="btn" type="button" data-arm="${side}" data-act="hold" ${off}>${esc(t("arm.hold"))}</button>
+        <button class="btn quiet hold" type="button" data-arm="${side}" data-act="release" title="${esc(t("arm.fall"))}" ${me ? "" : "disabled"}><span class="fill"></span>${esc(t("arm.release"))}</button>
       </div></div>`;
   };
   const arms = $("arms");
@@ -650,22 +686,29 @@ function renderRobot() {
     b.classList.toggle("on", b.dataset.lside === leader.side);
     b.disabled = !me || leader.on || ((b.dataset.lside !== "right") && !r.left_arm_ok);
   }
+  $("leader-sum").textContent = leader.on ? t("st.on") : t("leader.sum");
+  if (leader.on) $("leader-box").open = true;
   $("leader-st").textContent = leader.on && leader.paused ? t("leader.paused") : leader.on ? t("leader.live", { arm: t(leader.side === "both" ? "leader.two" : "arm." + leader.side), n: leader.ok, state: br.state || "..." })
     : !LeaderArm.supported() ? t(location.protocol === "https:" ? "leader.browser" : "leader.https", { url: `https://${location.host}` })
-    : t("leader.hint");
+    : "";
   const waving = !!(br.running && br.mode === "wave");
   const follows = following();
+  const eachOn = eachLeadersOn();
   $("wave-btn").disabled = !me || leader.on || waving || follows || estop;
-  setBtn($("follow-btn"), t(follows ? "follow.stop" : "follow.start"), follows ? "ri-stop-fill" : "ri-git-fork-line");
-  $("follow-btn").classList.toggle("on", follows);
-  $("follow-btn").disabled = !me || leader.on || (estop && !follows) || (!follows && !r.left_arm_ok);
-  $("follow-st").textContent = follows ? t("follow.live") : !r.left_arm_ok ? t("follow.locked") : t("follow.hint");
-  $("follow-st").className = "small " + (follows ? "accent" : !r.left_arm_ok ? "note err" : "mute");
-  const both = (jobRunning("teleop_right") && jobRunning("teleop_left")) || (laptopTele("right") && laptopTele("left"));
-  setBtn($("tele-both"), t(both ? "arm.teleop.bothoff" : "arm.teleop.both"), both ? "ri-stop-fill" : "ri-git-merge-line");
-  $("tele-both").classList.toggle("on", both);
-  $("tele-both").disabled = !me || !r.left_arm_ok || (estop && !both);
   $("wave-btn").classList.toggle("on", waving);
+  if (follows) $("both-mode").value = "one";
+  else if (eachOn) $("both-mode").value = "each";
+  const bothOn = follows || eachOn;
+  $("both-mode").disabled = !me || bothOn;
+  const go = $("both-go");
+  const mode = $("both-mode").value;
+  go.disabled = !me || (!bothOn && (!r.left_arm_ok || estop || (mode === "one" && leader.on)));
+  go.classList.toggle("on", bothOn);
+  setBtn(go, t(bothOn ? "both.stop" : "both.start"), bothOn ? "ri-stop-fill" : "ri-play-fill");
+  go.title = !r.left_arm_ok ? t("both.locked.tip") : t(mode === "one" ? "both.one.tip" : "both.each.tip");
+  $("both-mode").title = go.title;
+  $("both-st").textContent = follows ? t("follow.live") : eachOn ? t("both.each.live") : "";
+  $("both-st").className = "small " + (bothOn ? "accent" : "mute");
 
   // Voice
   const vOn = jobRunning("voice");
@@ -718,62 +761,69 @@ function renderRobot() {
   $("voice-note").textContent = noEn ? t("voice.koonly") : "";
   renderQuick();
 
-  // Skills: one list of the models actually installed, and Play runs the one that is chosen
+  // One picker: installed models, plus the built-in demo. Run uses Once or Loop.
   const sk = J.skill;
   const series = r.skill_series;            // repeat: runs left, and the pause in between (no program runs then)
   const skillOn = jobRunning("skill") || !!series;
+  const demoOn = jobRunning("demo");
+  const running = skillOn || demoOn;
   const models = r.models || [];
   const camOk = (k) => ((r.cams || []).find((c) => c.key === k) || {}).present;
   const camLabel = (k) => (STRINGS.en["cam." + k] ? t("cam." + k) : k);
   if (series && series.name) skillPick = series.name;
-  if (!models.some((m) => m.name === skillPick)) skillPick = (models.find((m) => m.playable !== false) || models[0] || {}).name || "";
+  else if (demoOn) skillPick = DEMO;
+  if (skillPick !== DEMO && !models.some((m) => m.name === skillPick)) skillPick = (models.find((m) => m.playable !== false) || models[0] || {}).name || DEMO;
   const pick = $("skill-pick");
-  const opts = models.map((m) => `<option value="${esc(m.name)}">${esc(m.name)} · ${esc(String(m.type).toUpperCase())}</option>`).join("")
-    || `<option value="">${esc(t("skill.noneopt"))}</option>`;
+  const opts = `<option value="${DEMO}">${esc(t("skill.demoopt"))}</option>`
+    + models.map((m) => `<option value="${esc(m.name)}">${esc(m.name)} · ${esc(String(m.type).toUpperCase())}</option>`).join("");
   if (pick.dataset.html !== opts) { pick.innerHTML = opts; pick.dataset.html = opts; }
   if (skillPick) pick.value = skillPick;
-  pick.disabled = skillOn || !models.length;
-  const m = models.find((x) => x.name === pick.value);
+  pick.disabled = running;
+  const demoPick = pick.value === DEMO;
+  const m = demoPick ? null : models.find((x) => x.name === pick.value);
   const need = m ? (m.cams.length ? m.cams : ["top", "right_wrist"]) : [];
   const lacking = need.filter((k) => !camOk(k));
   const noplay = !!(m && m.playable === false);
-  const blocked = !me || !m || noplay || lacking.length > 0 || estop;
+  const blocked = !me || estop || (!demoPick && (!m || noplay || lacking.length > 0));
   const play = $("skill-play");
-  play.disabled = skillOn ? !me : blocked;
-  play.classList.toggle("on", skillOn);
-  play.classList.toggle("primary", !skillOn && !play.disabled);
-  setBtn(play, t(skillOn ? "skill.stop" : "skill.play"), skillOn ? "ri-stop-fill" : "ri-play-fill");
-  const demo = $("skill-demo");
-  demo.hidden = skillOn;
-  demo.disabled = blocked;
-  setBtn(demo, t("skill.demo", { n: DEMO_RUNS.runs, s: DEMO_RUNS.pause, d: DEMO_RUNS.seconds }));
+  play.disabled = running ? !me : blocked;
+  play.classList.toggle("on", running);
+  play.classList.toggle("primary", !running && !play.disabled);
+  setBtn(play, t(running ? "skill.stop" : "skill.run"), running ? "ri-stop-fill" : "ri-play-fill");
+  for (const btn of $("skill-mode").querySelectorAll("[data-runmode]")) btn.disabled = running;
+  const modeOn = document.querySelector("#skill-mode .on") || $("skill-mode").querySelector("[data-runmode=once]");
+  if (modeOn && !modeOn.classList.contains("on")) modeOn.classList.add("on");
+  const looping = modeOn && modeOn.dataset.runmode === "loop";
+  $("skill-loopfields").hidden = !looping;
+  $("skill-adv").hidden = demoPick;
+  $("skill-repeat").disabled = $("skill-pause").disabled = $("skill-secs").disabled = running;
+  $("skill-empty").hidden = models.length > 0;
+  $("skill-how").hidden = models.length > 0;
   const armK = m && { both: "rec.arm.both", left: "rec.arm.left", right: "rec.arm.right" }[m.arms];
-  $("skills").textContent = !m ? t("skill.none", { dir: "~/policies" })
-    : `${t(armK || "skill.arm")} · ${need.map(camLabel).join(" + ")}`;
   const why = !m ? "" : m.block === "cams" ? t("skill.badcam", { cams: m.cams.join(", ") })
     : noplay ? t("fm.noplay." + m.arms)
     : lacking.length ? t("skill.nocam", { cams: lacking.map(camLabel).join(", ") }) : "";
-  $("skill-why").hidden = !why;
-  $("skill-why").textContent = why;
-  // The first ~40 s of a run: countdown, then the model loads on the Jetson. The arm does not move yet: say so,
-  // or people press Stop before it starts (24 Nov 2026)
+  // The first ~40 s of a run: countdown, then the model loads. Say so, or people press Stop before the arm moves.
   const skJob = J.skill, now = (r.health && r.health.t) || Date.now() / 1000;
   const loading = !!(skJob && skJob.running && now - skJob.started < 45);
   const prog = [series ? t(series.waiting ? "skill.waiting" : "skill.runof", { n: series.run, of: series.of, s: Math.round(series.pause) }) : "",
-    loading && !(series && series.waiting) ? t("skill.loading") : ""].filter(Boolean).join(" · ");
-  $("skill-prog").hidden = !prog;
-  $("skill-prog").textContent = prog;
-  $("skill-repeat").disabled = $("skill-pause").disabled = $("skill-secs").disabled = skillOn;
-  const demoOn = jobRunning("demo"), demoJob = J.demo;
-  setBtn($("demo-btn"), t(demoOn ? "demo.stop" : "demo.start"), demoOn ? "ri-stop-fill" : "ri-hand");
-  $("demo-btn").classList.toggle("on", demoOn);
-  $("demo-btn").classList.toggle("primary", !demoOn);
-  $("demo-btn").disabled = !me || (!demoOn && (estop || skillOn));
+    loading && !(series && series.waiting) ? t("skill.loading.short") : ""].filter(Boolean).join(" · ");
+  const demoJob = J.demo;
   const demoLine = demoOn && demoJob ? (demoJob.tail || []).slice().reverse().find((l) => /^run \d+ of \d+/.test(l)) : "";
-  $("demo-st").textContent = demoOn ? (demoLine ? t("demo.run", { run: demoLine.replace(/^run (\d+) of (\d+).*/, "$1/$2") }) : t("demo.starting")) : t("demo.hint");
-  $("skill-hint").textContent = models.length ? t("skill.hint", { s: Math.round(parseFloat($("skill-secs").value) || 30) }) : t("skill.add");
-  $("skill-st").textContent = skillOn ? t("st.on") : "";
-  $("skill-st").className = "st" + (skillOn ? " live" : "");
+  const plan = skillNums();
+  const when = plan.repeat > 1 ? t("skill.status.loop", { n: plan.repeat, s: plan.pause }) : t("skill.status.once");
+  let line = "", kind = "mute";
+  if (skillOn && prog) { line = prog; kind = "accent"; }
+  else if (skillOn) { line = t("skill.running"); kind = "accent"; }
+  else if (demoOn) { line = demoLine ? t("demo.run", { run: demoLine.replace(/^run (\d+) of (\d+).*/, "$1/$2") }) : t("demo.starting"); kind = "accent"; }
+  else if (why) { line = why; kind = "note err"; }
+  else if (demoPick) line = `${t("skill.demo.line")} · ${when}`;
+  else if (m) line = `${t(armK || "skill.arm")} · ${need.map(camLabel).join(" + ")} · ${when}`;
+  const status = $("skill-status");
+  status.textContent = line;
+  status.className = "small " + kind;
+  $("skill-st").textContent = running ? t("st.on") : "";
+  $("skill-st").className = "st" + (running ? " live" : "");
   failTail($("skill-tail"), sk);
 
   // System
@@ -794,10 +844,10 @@ function renderRobot() {
   $("health").innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("");
 
   renderCams();
-  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn", "tele-both", "follow-btn", "demo-btn"].includes(el.id)) el.disabled = !me;
+  for (const el of document.querySelectorAll("[data-op]")) if (!["talk", "wave-btn"].includes(el.id)) el.disabled = !me;
 
   tabDot("drive", baseOn, !$("base-err").hidden);
-  tabDot("arms", anyArm || skillOn || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
+  tabDot("arms", anyArm || running || leader.on, !$("arms-err").hidden || !$("skill-tail").hidden);
   tabDot("voice", vOn, false);
   tabDot("system", jobRunning("wizard"), Object.values(b).some((x) => x && x.alarm));
 }

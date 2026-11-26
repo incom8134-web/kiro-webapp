@@ -2,20 +2,19 @@
 /*
  * HAEBOT Studio - browser side.
  *
- * Locked until this page is the operator. The same sign-in opens the engineer tools (no second PIN). Only then does the server
- * send Studio data ("studio" messages: datasets, recording, cameras, engineer values) and accept
- * Studio commands. Camera previews use a token the server gives to the engineer connection only.
+ * Locked until this page is the operator. The same sign-in opens Studio (no second PIN). Only then does the server
+ * send Studio data ("studio" messages: datasets, recording, cameras) and accept
+ * Studio commands. Camera previews use a token the server gives to that connection only.
  *
  * Recording a dataset, top to bottom: 1 dataset, 2 cameras and checks, 3 record, 4 review.
  * Then training a skill: package and download a dataset, Google Colab, upload the trained model, and
- * the training files (datasets, packages, models: download, delete). Below that: the engineer tools
- * (guard distance, servo tester, check wizard) and the read-only engineer information.
+ * the training files (datasets, packages, models: download, delete). Below that: lidar setup.
  */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => Kiro.esc(s);
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;   // same rule as the server
 
-const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null, steps: null,
+const st = { ws: null, open: false, server: null, robot: null, studio: null, at: 0, rtt: null,
   pendingStart: false, token: null, dismissed: null, offer: null, colabAct: null, pendingAck: null, camRepair: null };
 const isOperator = () => !!st.server && st.server.you.role === "operator";
 const isEngineer = () => !!st.server && !!st.server.you.engineer;
@@ -54,8 +53,7 @@ function connect() {
         if (m.token !== st.token) { st.token = m.token; resetPreviews(); }
         if (first) firstData();
         renderStudio();
-      } else if (m.t === "wizard_steps") { st.steps = m.steps; renderTools(); }
-      else if (m.t === "pong") { st.rtt = performance.now() - m.ts; renderLink(); }
+      } else if (m.t === "pong") { st.rtt = performance.now() - m.ts; renderLink(); }
       else if (m.t === "note") onNote(m);
     },
   });
@@ -63,16 +61,16 @@ function connect() {
 
 /* Locked again (Lock button, another operator, connection lost): forget every Studio value. */
 function relock() {
-  st.studio = null; st.token = null; st.steps = null; st.pendingStart = false; st.camRepair = null;
+  st.studio = null; st.token = null; st.pendingStart = false; st.camRepair = null;
   resetPreviews();
   if (tr.xhr) tr.xhr.abort();   // the server stops taking it anyway
   tr.confirm = null;
-  for (const id of ["camgrid", "cklist", "info", "v-table", "ds-info", "repo-pick", "sv-table", "wz-steps", "wz-detail",
+  for (const id of ["camgrid", "cklist", "v-table", "ds-info", "repo-pick",
     "t-ds", "t-pkg", "fm-ds", "fm-pkg", "fm-models"]) {
     const el = $(id);
     el.innerHTML = ""; delete el.dataset.html; delete el.dataset.keys;
   }
-  for (const id of ["r-log", "wz-tail", "v-err", "v-verify-why"]) $(id).textContent = "";
+  for (const id of ["r-log", "v-err", "v-verify-why"]) $(id).textContent = "";
 }
 
 // ---------------------------------------------------------------- notes
@@ -389,8 +387,6 @@ function renderStudio() {
   renderReview(step);
   renderTrain();
   renderLidar();
-  renderTools();
-  renderInfo();
   updatePreviews();
 }
 
@@ -689,7 +685,7 @@ function updatePreviews() {
 document.addEventListener("visibilitychange", updatePreviews);
 
 // -------------------------------------------------------- train a skill
-/* Dataset package -> Google Colab -> model zip -> Autonomous skills. Downloads carry this connection's
+/* Dataset package -> Google Colab -> model zip -> Run a skill. Downloads carry this connection's
    token in the address (it stops working when the Studio locks); the upload sends it in a header. */
 const tr = { ds: "", file: null, name: "", nameTouched: false, xhr: null, pct: 0, checking: false, msg: null, confirm: null };
 try { tr.ds = localStorage.getItem("kiro-studio-train-ds") || ""; } catch (e) { /* ignore */ }
@@ -1075,170 +1071,6 @@ function renderLidar() {
     $("ls-err").hidden = false;
   }
 }
-
-// ----------------------------------------------------------- engineer tools
-const eng ={ sel: 0, servo: null, prep: {}, secs: 20 };
-const MOTION_STEPS = new Set(["teleop_left", "teleop_right", "teleop_both", "wheels", "mecanum_floor", "ros_base"]);
-$("guard-profile").addEventListener("change", () => send({ t: "guard_profile", profile: $("guard-profile").value }));
-const svPort = () => $("sv-port").value;
-$("sv-scan").addEventListener("click", () => send({ t: "servo", cmd: "scan", port: svPort(), lo: +$("sv-lo").value, hi: +$("sv-hi").value }));
-const svSend = (cmd, value) => send({ t: "servo", cmd, port: svPort(), id: eng.servo, value, arm_ok: $("sv-armok").checked });
-$("sv-ton").addEventListener("click", () => svSend("torque", 1));
-holdButton($("sv-toff"), () => Kiro.confirmSend(send, "servo:torque_off",
-  { t: "servo", cmd: "torque", port: svPort(), id: eng.servo, value: 0, arm_ok: $("sv-armok").checked }));
-holdButton($("sv-move"), () => svSend("move", +$("sv-pos").value));
-holdButton($("sv-setid"), () => Kiro.confirmSend(send, "servo:setid",
-  { t: "servo", cmd: "setid", port: svPort(), id: eng.servo, value: +$("sv-newid").value, arm_ok: $("sv-armok").checked }));
-
-function renderTools() {
-  const s = st.studio;
-  if (!s) return;
-  if (document.activeElement !== $("guard-profile")) $("guard-profile").value = s.guard_profile || "close";
-  $("guard-off").hidden = !(st.robot && st.robot.obstacle_stop === false);
-  const jobs = (s.info && s.info.jobs) || {};
-  $("guard-profile").disabled = !!(jobs.base && jobs.base.running);
-
-  const ports = s.ports || [];
-  const sel = $("sv-port"), cur = sel.value;
-  const opts = ports.map((p) => `<option value="${esc(p.dev)}">${esc(p.dev)}${p.dev !== p.real ? " (" + esc(p.real.replace("/dev/", "")) + ")" : ""}</option>`).join("");
-  if (sel.dataset.html !== opts + LANG) { sel.innerHTML = opts || `<option value="">${esc(t("studio.noports"))}</option>`; sel.dataset.html = opts + LANG; if (cur) sel.value = cur; }
-  $("sv-scan").disabled = !ports.length;
-
-  const sc = s.servo_scan;
-  const cols = t("eng.cols").split("|");
-  let tb;
-  if (!sc || sc.port !== svPort()) tb = `<tr><td class="mute">${t(ports.length ? "eng.noscan" : "studio.noports")}</td></tr>`;
-  else if (!sc.servos.length) tb = `<tr><td class="mute">${t("eng.none")}</td></tr>`;
-  else tb = `<tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>` + sc.servos.map((v) =>
-    `<tr class="pick${v.id === eng.servo ? " sel" : ""}" data-id="${esc(v.id)}"><td>${esc(v.id)}</td><td>${esc(v.model ?? "-")}</td><td>${esc(v.volt ?? "-")}</td><td>${esc(v.temp ?? "-")}</td><td>${esc(v.pos ?? "-")}</td><td>${esc(v.mode === 1 ? t("sv.vel") : v.mode === 0 ? t("sv.pos") : (v.mode ?? "-"))}</td><td>${esc(v.torque ? t("sv.on") : t("sv.off"))}</td><td>${esc(v.current != null ? Math.round(Math.abs(v.current) * 6.5) : "-")}</td><td>${v.error ? esc(v.error) : v.status ? esc("0x" + v.status.toString(16)) : esc(t("sv.ok"))}</td></tr>`).join("");
-  const table = $("sv-table");
-  if (table.dataset.html !== tb) {
-    table.innerHTML = tb; table.dataset.html = tb;
-    for (const row of table.querySelectorAll("tr.pick")) row.addEventListener("click", () => {
-      eng.servo = +row.dataset.id;
-      const v = sc.servos.find((x) => x.id === eng.servo);
-      if (v && v.pos != null) $("sv-pos").value = v.pos;
-      $("sv-newid").value = eng.servo;
-      table.dataset.html = ""; renderTools();
-    });
-  }
-  const has = !!(sc && sc.port === svPort() && sc.servos.some((v) => v.id === eng.servo));
-  $("sv-one").hidden = !has;
-  if (has) $("sv-sel").textContent = `${svPort()} · ID ${eng.servo}`;
-  renderWizard();
-}
-
-function renderWizard() {
-  const s = st.studio, steps = st.steps || [];
-  const res = (s && s.wizard) || {};
-  const wj = ((s && s.info && s.info.jobs) || {}).wizard;
-  $("wz-none").hidden = !(st.steps && !steps.length);
-  const status = (k) => (res[k] && res[k].status) || "pending";
-  const list = steps.map((x, i) => `<li data-i="${i}" class="${i === eng.sel ? "sel" : ""}"><span>${esc(x.title)}${x.optional ? ` <span class="mute small">(${t("wz.optional")})</span>` : ""}</span><span class="chip ${status(x.key)}">${t("wz." + status(x.key))}</span></li>`).join("");
-  const ol = $("wz-steps");
-  if (ol.dataset.html !== list) {
-    ol.innerHTML = list; ol.dataset.html = list;
-    for (const li of ol.querySelectorAll("li")) li.addEventListener("click", () => { eng.sel = +li.dataset.i; ol.dataset.html = ""; $("wz-detail").dataset.html = ""; renderWizard(); });
-  }
-  const x = steps[eng.sel];
-  if (!x) { $("wz-detail").innerHTML = ""; $("wz-tail").hidden = true; return; }
-  const runningW = !!(wj && wj.running);
-  const prep = eng.prep[x.key] || (eng.prep[x.key] = x.prep.map(() => false));
-  const li = (a) => a.map((v) => `<li>${esc(v)}</li>`).join("");
-  const motion = MOTION_STEPS.has(x.key);
-  const html = `<div class="wz">
-    <h4>${esc(x.title)}</h4><p>${esc(x.desc)}</p>${LANG === "en" ? `<p class="small mute">${t("eng.kotext")}</p>` : ""}
-    ${x.prep.length ? `<b class="small">${t("eng.prep")}</b>${x.prep.map(([txt, req], i) => `<label><input type="checkbox" data-prep="${i}" ${prep[i] ? "checked" : ""}><span>${esc(txt)}${req ? `<span class="req">${t("eng.required")}</span>` : ""}</span></label>`).join("")}` : ""}
-    ${x.do.length ? `<b class="small">${t("eng.do")}</b><ol>${li(x.do)}</ol>` : ""}
-    ${x.expect.length ? `<b class="small">${t("eng.expect")}</b><ul>${li(x.expect)}</ul>` : ""}
-    ${x.fail.length ? `<details><summary>${t("eng.iffail")}</summary><ul>${li(x.fail)}</ul></details>` : ""}
-    ${x.key.startsWith("teleop") ? `<div class="row"><label class="small mute" for="wz-sec">${t("eng.seconds")}</label><input id="wz-sec" class="num" type="number" min="5" max="120" value="${eng.secs || 20}"></div>` : ""}
-    <div class="row" style="margin-top:10px">
-      ${runningW ? `<button class="btn" id="wz-stop" type="button">${t("eng.stop")}</button>`
-        : `<button class="btn${motion ? " hold" : ""}" id="wz-run" type="button">${motion ? `<span class="fill"></span>${t("eng.runhold")}` : t("eng.run")}</button>`}
-      <span class="grow"></span>
-      <button class="btn" id="wz-pass" type="button" ${runningW ? "disabled" : ""}>${t("eng.pass")}</button>
-      <button class="btn" id="wz-fail" type="button" ${runningW ? "disabled" : ""}>${t("eng.fail")}</button>
-      ${x.optional ? `<button class="btn" id="wz-skip" type="button" ${runningW ? "disabled" : ""}>${t("eng.skip")}</button>` : ""}
-    </div></div>`;
-  const det = $("wz-detail");
-  if (det.dataset.html !== html) {
-    det.innerHTML = html; det.dataset.html = html;
-    for (const cb of det.querySelectorAll("[data-prep]")) cb.addEventListener("change", () => { prep[+cb.dataset.prep] = cb.checked; det.dataset.html = ""; });
-    const sec = $("wz-sec");
-    if (sec) sec.addEventListener("change", () => { eng.secs = +sec.value; });
-    const run = () => {
-      if (x.prep.some(([, req], i) => req && !prep[i])) { toast(t("eng.prepmissing"), true); return; }
-      send({ t: "wizard", step: x.key, on: true, seconds: eng.secs || 20 });
-    };
-    const rb = $("wz-run");
-    if (rb) { if (motion) holdButton(rb, run); else rb.addEventListener("click", run); }
-    const sb = $("wz-stop");
-    if (sb) sb.addEventListener("click", () => send({ t: "wizard", step: x.key, on: false }));
-    for (const [id, v] of [["wz-pass", "pass"], ["wz-fail", "fail"], ["wz-skip", "skip"]]) {
-      const b = $(id);
-      if (b) b.addEventListener("click", () => send({ t: "wizard_decide", step: x.key, status: v }));
-    }
-  }
-  const lines = runningW && wj ? wj.tail : (res[x.key] && res[x.key].lines) || [];
-  const tl = $("wz-tail");
-  tl.hidden = !lines.length;
-  if (lines.length) { tl.textContent = lines.join("\n"); tl.scrollTop = tl.scrollHeight; }
-}
-
-$("wz-report").addEventListener("click", () => {
-  const steps = st.steps || [], res = (st.studio && st.studio.wizard) || {};
-  const now = new Date();
-  const md = [`# HAEBOT Robot hardware check`, ``, `Date: ${now.toLocaleString()}`, `Robot: ${st.server ? st.server.backend : "?"}`, ``,
-    `| Step | Result | Auto |`, `|---|---|---|`,
-    ...steps.map((x) => `| ${x.title} | ${(res[x.key] && res[x.key].status) || "not run"} | ${res[x.key] && res[x.key].auto != null ? res[x.key].auto : "-"} |`), ``,
-    ...steps.filter((x) => res[x.key] && res[x.key].lines).flatMap((x) => [`## ${x.title}`, ``, "```", ...res[x.key].lines, "```", ``])].join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
-  a.download = `kiro_check_${now.toISOString().slice(0, 10)}.md`;
-  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-});
-
-// ---------------------------------------------------- engineer information
-/* Read only: the technical values that used to sit on the main pages, with plain labels. */
-function renderInfo() {
-  const s = st.studio;
-  if (!s || !$("sec-info").open) return;
-  const i = s.info || {}, yes = (v) => t(v ? "inf.yes" : "inf.no");
-  const table = (head, rows) => `<div class="scroll-x"><table class="kv dtable">${head ? `<tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>` : ""}`
-    + (rows.length ? rows.map((r) => `<tr>${r.map((c, n) => (n === 0 && !head ? `<th>${c}</th>` : `<td>${c}</td>`)).join("")}</tr>`).join("")
-      : `<tr><td class="mute" colspan="${head ? head.length : 2}">${esc(t("inf.none"))}</td></tr>`) + `</table></div>`;
-  const code = (v) => `<code>${esc(v)}</code>`;
-  const srv = st.server || {};
-  const parts = [];
-  parts.push([t("inf.server"), table(null, [
-    [esc(t("inf.backend")), esc(srv.backend === "ros" ? t("be.ros") : t("be.mock")) + ` · v${esc(srv.version)}`],
-    [esc(t("inf.leftok")), esc(yes(i.left_arm_ok))],
-    [esc(t("inf.obstacle")), esc(yes(i.obstacle_stop_env))],
-    [esc(t("base.profile")), esc(t(s.guard_profile === "safe" ? "base.safe" : "base.close"))],
-    [esc(t("inf.devices")), esc(srv.clients ?? "-")],
-  ])]);
-  const P = i.paths || {};
-  parts.push([t("inf.paths"), table(null, [["so101", P.so101], ["venv", P.venv], ["datasets", P.datasets], ["backups", P.backups],
-    ["calibration", P.calibration], ["policies", P.policies], ["packages", P.packages]].map(([k, v]) => [esc(t("inf.p." + k)), code(v || "-")]))]);
-  const B = i.boards || {};
-  parts.push([t("inf.boards"), table(t("inf.boards.cols").split("|"), Object.entries(B).filter(([k]) => !k.startsWith("_")).map(([k, b]) => [
-    esc((PARTS[k] || [k === "base" ? "sec.base" : k]).map((x) => t(x)).join(" ")), esc(b.state === "busy" ? `${b.state} (${b.by})` : b.state || "-"),
-    esc(b.n != null ? `${b.n}/${b.of}` : "-"), esc(b.vmin ?? "-"), esc(b.tmax ?? "-"), esc(b.alarm ? "ALARM" : b.msg || "-")]))]);
-  parts.push([t("inf.ports"), table(t("inf.ports.cols").split("|"), (s.ports || []).map((p) => [code(p.dev), code(p.real), esc(yes(p.arm))]))]);
-  parts.push([t("inf.cams"), table(t("inf.cams.cols").split("|"), (s.cams || []).map((c) => [esc(camName(c.key)), code(c.device || "-"),
-    esc(yes(c.present)), esc(c.auto || "-"), esc(c.live ? t("inf.yes") + fpsText(c) : "-"), esc(c.paused_by || "-"), esc(c.error || c.reason || "-")]))]);
-  const now = serverNow();
-  parts.push([t("inf.jobs"), table(t("inf.jobs.cols").split("|"), Object.values(i.jobs || {}).map((j) => [esc(j.label),
-    esc(j.running ? t("d.running") + " · " + fmtDur(now - j.started) : t("d.stopped") + (j.code != null ? ` (${j.code})` : "")),
-    (j.uses || []).map(code).join(" ") || "-"]))]);
-  const se = sess();
-  parts.push([t("inf.cmd"), se && se.cmd ? `<pre class="tail">${esc(se.cmd)}</pre>` : `<p class="small mute">${esc(t("inf.nocmd"))}</p>`]);
-  const html = parts.map(([h, body]) => `<section><h4 class="sub">${esc(h)}</h4>${body}</section>`).join("");
-  const box = $("info");
-  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
-}
-$("sec-info").addEventListener("toggle", renderInfo);
 
 // Folded sections remember whether they were open
 for (const d of document.querySelectorAll("details.fold, details.adv")) {
