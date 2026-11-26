@@ -22,3 +22,9 @@ def browser_sends_origin(monkeypatch):
         return orig(self, url, subprotocols, **kwargs)
 
     monkeypatch.setattr(tc.TestClient, "websocket_connect", wrapped)
+
+
+@pytest.fixture(autouse=True)
+def battery_state_is_temp(tmp_path, monkeypatch):
+    """Cycle count is persisted. Keep that file out of the home directory during tests."""
+    monkeypatch.setenv("KIRO_BATT_STATE", str(tmp_path / "battery_state.json"))

@@ -84,7 +84,8 @@ function renderBatteryCard() {
   const rows = [[t("bat.pct"), known ? Math.round(b.percent) + "%" : t("bat.unknown")],
     [t("bat.kchg"), charging], [t("bat.health"), health]];
   table.innerHTML = rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
-  $("battery-note").textContent = b && b.source === "mock" ? t("bat.note.mock") : t("bat.note.none");
+  const src = (b && b.source) || "none";
+  $("battery-note").textContent = t(src === "mock" ? "bat.note.mock" : src === "ina228" ? "bat.note.live" : "bat.note.none");
 }
 
 function onRobot() {

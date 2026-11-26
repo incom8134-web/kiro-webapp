@@ -74,7 +74,9 @@ def main() -> None:
         print("  Mock mode is using the built-in PIN. Set KIRO_OPERATOR_PIN before using the real robot.")
     # Closing the terminal sends SIGHUP, which would end Python at once and leave the base or an
     # arm program running without the server. Treat it like a normal stop (uvicorn handles SIGTERM).
-    signal.signal(signal.SIGHUP, lambda *_: os.kill(os.getpid(), signal.SIGTERM))
+    # Windows has no SIGHUP, so registering it there raises AttributeError at startup.
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: os.kill(os.getpid(), signal.SIGTERM))
     with contextlib.suppress(KeyboardInterrupt):  # uvicorn re-raises Ctrl+C after its clean shutdown
         asyncio.run(serve(cfg))
 

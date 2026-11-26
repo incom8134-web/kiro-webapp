@@ -699,7 +699,7 @@ def test_battery_is_a_sample_in_mock_and_unknown_until_wired(cfg):
     try:
         assert r.snapshot()["battery"] == {"percent": 76, "charging": False, "health": "good", "source": "mock"}
         r.mock = False
-        assert r.battery() == {"percent": None, "charging": None, "health": "unknown", "source": "none"}
+        assert r.battery() == {"percent": None, "charging": None, "health": "unknown", "source": "unavailable"}
     finally:
         r.close()
 

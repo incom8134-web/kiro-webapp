@@ -32,6 +32,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+from .battery import BatteryMonitor
 from .camera import Camera, find_cameras, repair_top
 from .config import Config
 from .leadermath import JOINTS, leader_to_target
@@ -204,6 +205,7 @@ class Robot:
         self.rec = Recorder(self)
         self.train = Training(self)
         self.colab = ColabLink(self)
+        self.battery_mon = BatteryMonitor(self.mock)
         threading.Thread(target=self._health_loop, name="health", daemon=True).start()
 
     # ------------------------------------------------------------- events
@@ -1383,11 +1385,15 @@ class Robot:
             cpu = [v for k, v in temps if "cpu" in k.lower()]
             out["temp"] = round(max(cpu) if cpu else max(v for _, v in temps), 1)
             out["temps"] = {k.replace("-thermal", ""): round(v, 1) for k, v in temps}
-        try:
-            out["load"] = round(os.getloadavg()[0], 2)
-            out["cores"] = os.cpu_count()
-        except OSError:
-            pass
+        # Windows has no os.getloadavg. Looking it up raises AttributeError, and the health
+        # loop would log that warning every few seconds. Leave load out; the page already hides it.
+        loadavg = getattr(os, "getloadavg", None)
+        if loadavg is not None:
+            try:
+                out["load"] = round(loadavg()[0], 2)
+            except (OSError, AttributeError):
+                pass
+        out["cores"] = os.cpu_count()
         try:
             mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
             total = int(mem["MemTotal"].split()[0]); avail = int(mem["MemAvailable"].split()[0])
@@ -1440,13 +1446,18 @@ class Robot:
         return jobs
 
     def battery(self) -> dict:
-        """The battery icon. Not wired to hardware yet.
+        """The battery icon. percent is 0-100 or None, charging is True/False or None.
 
-        percent is 0-100 or None, charging is True/False or None, health is good, fair, poor or unknown.
-        source is "mock" (a sample, so the icon can be checked) or "none" (no reading)."""
-        if self.mock:
-            return {"percent": 76, "charging": False, "health": "good", "source": "mock"}
-        return {"percent": None, "charging": None, "health": "unknown", "source": "none"}
+        health is good, fair, poor or unknown (an estimate, see battery_detail).
+        source is "ina228" (the power monitor), "mock" (a sample) or "unavailable".
+        """
+        self.battery_mon.set_mock(self.mock)
+        return self.battery_mon.summary()
+
+    def battery_detail(self) -> dict:
+        """Full reading for /api/battery, including the estimated percent, health and cycles."""
+        self.battery_mon.set_mock(self.mock)
+        return self.battery_mon.detail()
 
     def snapshot(self) -> dict:
         """Sent to every page, viewers too. Engineer-only values (serial ports, servo scan, check wizard,
@@ -1509,6 +1520,10 @@ class Robot:
     def close(self) -> None:
         self._stop.set()
         self._wave_stop.set()
+        try:
+            self.battery_mon.close()
+        except Exception:  # noqa: BLE001 - saving the cycle count must not block shutdown
+            log.warning("battery monitor did not close", exc_info=True)
         self.colab.close()
         stopped = self.jobs.stop_all()
         log.info("server stopping; stopped: %s", ", ".join(stopped) or "nothing running")
