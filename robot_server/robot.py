@@ -1385,11 +1385,15 @@ class Robot:
             cpu = [v for k, v in temps if "cpu" in k.lower()]
             out["temp"] = round(max(cpu) if cpu else max(v for _, v in temps), 1)
             out["temps"] = {k.replace("-thermal", ""): round(v, 1) for k, v in temps}
-        try:
-            out["load"] = round(os.getloadavg()[0], 2)
-            out["cores"] = os.cpu_count()
-        except OSError:
-            pass
+        # Windows has no os.getloadavg. Looking it up raises AttributeError, and the health
+        # loop would log that warning every few seconds. Leave load out; the page already hides it.
+        loadavg = getattr(os, "getloadavg", None)
+        if loadavg is not None:
+            try:
+                out["load"] = round(loadavg()[0], 2)
+            except (OSError, AttributeError):
+                pass
+        out["cores"] = os.cpu_count()
         try:
             mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
             total = int(mem["MemTotal"].split()[0]); avail = int(mem["MemAvailable"].split()[0])
