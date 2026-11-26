@@ -15,11 +15,9 @@
   <div class="brand"><span class="logo" aria-hidden="true"><i class="ri-robot-2-fill"></i></span><span class="name">HAEBOT<small>ROBOT</small></span></div>
   <a class="cell bat" id="battery" href="battery.html" data-i18n-aria="bat.k" data-i18n-title="bat.manage" aria-label="Battery" title="Battery Management"><span class="k" data-i18n="bat.k">Battery</span><b><i id="bat-icon" class="ri-battery-line" aria-hidden="true"></i><span id="bat-pct">—</span></b></a>
   <div class="cells">
-    <div class="cell"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
-    <div class="cell"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
-    <div class="cell"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
-    <div class="cell"><span class="k" data-i18n="d.uptime">Uptime</span><b id="uptime">...</b></div>
-    <div class="cell"><span class="k" data-i18n="d.devices">Devices</span><b id="devices">...</b></div>
+    <div class="cell who"><span class="k" data-i18n="top.robot">Robot</span><b id="backend">...</b></div>
+    <div class="cell" id="cell-link"><span class="k" data-i18n="top.link">Link</span><b id="link">...</b></div>
+    <div class="cell who"><span class="k" data-i18n="top.operator">Operator</span><b id="opstat">...</b></div>
   </div>
   <nav class="toplinks">
     <a class="toplink" href="./"><i class="ri-steering-2-line"></i><span data-i18n="dash.control">Control</span></a>
@@ -48,79 +46,77 @@
 <div id="banner" class="banner" hidden></div>
 
 <div class="dwrap">
-  <details class="liveview" id="d-live">
-  <summary><span><span data-i18n="d.live">Live view: cameras, lidar and server log</span></span><span class="mute small" id="live-hint"></span></summary>
-  <div class="livegrid">
-  <div class="quad">
-    <section class="qbox" data-cam="top">
+  <section class="dsec ready" aria-labelledby="ready-line">
+    <h2 id="ready-line" data-i18n="dash.ready">Ready</h2>
+    <p class="ready-who" id="ready-who"></p>
+    <div class="ready-flags" id="ready-flags"></div>
+    <div class="chk-grid" id="ready-problems"></div>
+  </section>
+
+  <div class="pictures">
+    <section class="qbox maincam" data-cam="top">
       <div class="qhead"><span><span data-i18n="cam.top">Main camera</span></span><button id="cam-pause" class="qbtn" type="button" aria-pressed="false"><i class="ri-pause-fill"></i><span data-i18n="cam.pause">Pause cameras</span></button></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-camera-off-line"></i><span class="msg"></span></div></div>
     </section>
-    <section class="qbox">
+    <section class="qbox lidarbox">
       <div class="qhead"><span><span data-i18n="d.lidarview">Lidar</span></span><span id="scan-src" class="mute"></span></div>
       <div class="qbody light"><canvas id="lidar" data-i18n-aria="aria.lidar" aria-label="Lidar view"></canvas></div>
+      <p class="sides" id="lidar-sides"></p>
     </section>
-    <section class="qbox" data-cam="left_wrist">
+    <section class="qbox hand" data-cam="left_wrist">
       <div class="qhead"><span><span data-i18n="cam.left_wrist">Left hand</span></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
-    <section class="qbox" data-cam="right_wrist">
+    <section class="qbox hand" data-cam="right_wrist">
       <div class="qhead"><span><span data-i18n="cam.right_wrist">Right hand</span></span></div>
       <div class="qbody"><img class="cam" alt="" hidden><div class="empty"><i class="ri-webcam-line"></i><span class="msg"></span></div></div>
     </section>
   </div>
-  <!-- the server log, live, in a terminal window -->
-  <section class="term">
-    <div class="term-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="term-title">haebot — <span data-i18n="d.term">server log</span></span><span id="term-live" class="term-live"></span></div>
-    <div class="term-wrap"><div id="term" class="term-body" role="log"><div class="tl prompt" id="term-prompt"><span class="ps" data-i18n="term.prompt">haebot@jetson</span> <span class="cwd">~</span> % <span class="cursor"></span></div></div></div>
+
+  <section class="dsec now">
+    <div class="now-row">
+      <div><span class="k" data-i18n="dash.speed">Speed</span><b id="now-speed">—</b></div>
+      <div><span class="k" data-i18n="dash.near">Nearest object</span><b id="now-near">—</b></div>
+      <p class="small mute" id="now-rates" hidden></p>
+    </div>
+    <div class="now-row">
+      <span class="k" data-i18n="dash.doing">Now</span>
+      <b id="now-doing" data-i18n="dash.idle">Idle</b>
+    </div>
+    <div class="now-row">
+      <span class="k" data-i18n="dash.lasterr">Last error</span>
+      <p id="now-err" data-i18n="dash.none">None</p>
+    </div>
   </section>
-  </div>
-  </details>
 
-  <!-- system check: every part of the robot, connected or not, healthy or not, and what to do -->
-  <section class="dsec check" aria-labelledby="chk-title">
-    <div class="check-head"><h2 id="chk-title" data-i18n="chk.title">System check</h2><span id="chk-sum" class="chk-sum"></span></div>
-    <div class="chk-grid" id="chk-grid"></div>
-  </section>
+  <details class="dsec details" id="d-details">
+    <summary><span data-i18n="dash.details">Details</span></summary>
+    <div class="detail-body">
+      <h2 data-i18n="chk.title">System check</h2>
+      <div class="chk-grid" id="chk-grid"></div>
 
-  <div class="tiles" id="tiles"></div>
-
-  <div class="charts">
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cores">CPU per core</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cores"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.speed">Robot speed</span></span><span class="mute">m/s</span></div><div class="chart-box"><canvas id="ch-speed"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.net">Wi-Fi traffic</span></span><span class="mute">KB/s</span></div><div class="chart-box"><canvas id="ch-net"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.sides">Nearest object by side</span></span><span class="mute">m</span></div><div class="chart-box"><canvas id="ch-sides"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.svolt">Servo voltage per board</span></span><span class="mute">V</span></div><div class="chart-box"><canvas id="ch-svolt"></canvas><div class="empty" hidden></div></div></section>
-    <section class="chart-card"><div class="dhead"><span><span data-i18n="c.stemp">Servo temperature per joint</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-stemp"></canvas><div class="empty" hidden></div></div></section>
-  </div>
-
-  <div class="lower">
-    <section class="dsec" id="battery-card">
-      <h2><span data-i18n="bat.title">Battery</span></h2>
-      <table class="kv dtable" id="battery-detail"></table>
-      <p class="small mute" id="battery-note"></p>
-      <p class="small"><a class="linkbtn" href="battery.html" data-i18n="bat.manage">Battery Management</a></p>
-    </section>
-    <section class="dsec">
-      <h2><span data-i18n="d.servos">Servo boards</span></h2>
+      <h2 data-i18n="d.servos">Servo boards</h2>
       <table class="kv dtable" id="servos"></table>
-    </section>
-    <section class="dsec">
-      <h2><span data-i18n="d.programs">Programs</span></h2>
-      <table class="kv dtable" id="programs"></table>
-      <h2 style="margin-top:18px"><span data-i18n="sec.voice">Voice</span></h2>
-      <p class="big-quote" id="voice">-</p>
-    </section>
-    <section class="dsec">
-      <h2><span data-i18n="sec.log">Activity</span></h2>
+
+      <h2 data-i18n="h.jetson">Jetson</h2>
+      <p class="small" id="jetson-line"></p>
+      <div class="charts">
+        <section class="chart-card"><div class="dhead"><span><span data-i18n="c.cpugpu">CPU and GPU</span></span><span class="mute">%</span></div><div class="chart-box"><canvas id="ch-cpugpu"></canvas><div class="empty" hidden></div></div></section>
+        <section class="chart-card"><div class="dhead"><span><span data-i18n="c.temps">Temperatures</span></span><span class="mute">°C</span></div><div class="chart-box"><canvas id="ch-temps"></canvas><div class="empty" hidden></div></div></section>
+        <section class="chart-card"><div class="dhead"><span><span data-i18n="c.power">Power</span></span><span class="mute">W</span></div><div class="chart-box"><canvas id="ch-power"></canvas><div class="empty" hidden></div></div></section>
+      </div>
+
+      <h2 data-i18n="d.term">server log</h2>
+      <section class="term">
+        <div class="term-bar"><span class="term-title">haebot — <span data-i18n="d.term">server log</span></span><span id="term-live" class="term-live"></span></div>
+        <div class="term-wrap"><div id="term" class="term-body" role="log"></div></div>
+      </section>
+
+      <h2 data-i18n="sec.log">Activity</h2>
       <ul id="log" class="log"></ul>
-    </section>
-  </div>
+    </div>
+  </details>
 </div>
-<div class="foot" id="ver"></div>
 <script src="vendor/chartjs/chart.umd.min.js"></script>
 <script src="i18n.js"></script>
 <script src="shared.js"></script>

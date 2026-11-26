@@ -1,6 +1,6 @@
 # Dashboard audit
 
-25 November 2026. Proposal only. Nothing on the page was changed.
+25 November 2026. The tighter layout below was built on 26 November 2026. The lists here are what the page now does.
 
 The dashboard (`web/dashboard.html`) is the second screen: a signed-in person watches the robot, and can press E-STOP. The sticks, arms, skills, and voice stay on the control page. Studio keeps recording and the engineer tools.
 
@@ -199,4 +199,4 @@ Left off both layouts, on purpose: uptime, device count, distance since launch, 
 
 ## What was not decided
 
-This file is the audit. The page is unchanged. Building the tighter layout waits for a yes.
+The tighter layout in this file is now the dashboard. The battery number lives on the Battery page. The header still links there, and a mock sample is not shown as a percent.
